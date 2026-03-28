@@ -28,6 +28,12 @@ export default function App() {
   const [notifStatus, setNotifStatus] = useState(null);
   const { theme, dyslexicFont, settings, initializeApp } = useHealthStore();
 
+  // Sync body background with theme
+  useEffect(() => {
+    document.body.style.background = theme === 'light' ? '#f8fafc' : '#050810';
+    document.body.style.color = theme === 'light' ? '#0f172a' : '#e2e8f0';
+  }, [theme]);
+
   // Init app on mount
   useEffect(() => {
     initializeApp();
@@ -122,6 +128,11 @@ export default function App() {
           />
         </ErrorBoundary>
       </main>
+
+      {/* Footer credit */}
+      <footer className="app-footer">
+        Made by Ken Wolf with 💚 &nbsp;|&nbsp; <a href="https://su94r.com">Med Inc</a>
+      </footer>
 
       {/* Bottom nav */}
       <nav className="bottom-nav">
