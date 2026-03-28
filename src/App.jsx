@@ -8,7 +8,7 @@ import Settings from './pages/Settings';
 import Auth from './components/Auth';
 import { requestNotificationPermission, getNotificationSupport, registerPeriodicSync } from './lib/notifications';
 import { useHealthStore } from './store/healthStore';
-import { useTranslation } from './lib/i18n';
+import { useTranslation } from './lib/i18n.jsx';
 import { supabase } from './lib/supabase';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
