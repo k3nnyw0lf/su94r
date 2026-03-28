@@ -8,7 +8,9 @@ export const useHealthStore = create(
     (set, get) => ({
       // ── Theme ─────────────────────────────────────────────────────────────
       theme: 'dark',
+      dyslexicFont: false,
       toggleTheme: () => set(s => ({ theme: s.theme === 'dark' ? 'light' : 'dark' })),
+      toggleDyslexic: () => set(s => ({ dyslexicFont: !s.dyslexicFont })),
 
       // ── Settings / API Keys ───────────────────────────────────────────────
       settings: {
@@ -144,6 +146,7 @@ export const useHealthStore = create(
       // Don't persist passwords in plain text in a real app — use secure storage
       partialize: (state) => ({
         theme: state.theme,
+        dyslexicFont: state.dyslexicFont,
         settings: state.settings,
         metrics: state.metrics,
         agentConversations: state.agentConversations,

@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useHealthStore } from '../store/healthStore';
+import { LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceArea, ResponsiveContainer, Tooltip } from 'recharts';
 
 const TREND = {
   1: { sym: '⬇', label: 'Dropping Fast', rot: 90 },
@@ -10,61 +11,161 @@ const TREND = {
 };
 
 function gColor(v) {
-  if (!v) return { c: 'var(--muted)', lbl: '—', e: '·' };
-  if (v < 55)  return { c: 'var(--red)',   lbl: 'CRITICAL LOW',  e: '🚨' };
-  if (v < 70)  return { c: 'var(--amber)', lbl: 'LOW',           e: '⚠️' };
-  if (v > 250) return { c: 'var(--red)',   lbl: 'CRITICAL HIGH', e: '🚨' };
-  if (v > 180) return { c: 'var(--amber)', lbl: 'HIGH',          e: '📈' };
-  return { c: 'var(--green)', lbl: 'IN RANGE', e: '✓' };
+  if (!v) return { c: 'var(--muted)', lbl: '—', e: '·', cls: '' };
+  if (v < 55)  return { c: 'var(--red)',   lbl: 'CRITICAL LOW',  e: '🚨', cls: 'critical' };
+  if (v < 70)  return { c: 'var(--amber)', lbl: 'LOW',           e: '⚠️', cls: 'low' };
+  if (v > 250) return { c: 'var(--red)',   lbl: 'CRITICAL HIGH', e: '🚨', cls: 'critical' };
+  if (v > 180) return { c: 'var(--amber)', lbl: 'HIGH',          e: '📈', cls: 'high' };
+  return { c: 'var(--green)', lbl: 'IN RANGE', e: '✓', cls: 'inrange' };
 }
 
-// ── SVG Glucose Chart ──────────────────────────────────────────────────────
-function GlucoseChart({ readings }) {
-  if (!readings || readings.length < 2) {
-    return (
-      <div style={{ height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted)', fontSize: 12, fontFamily: 'var(--mono)' }}>
-        Collecting readings…
-      </div>
-    );
-  }
-  const W = 560, H = 100, P = 14;
-  const vals = readings.map(r => r.value || r.glucose_mgdl || 0);
-  const minV = Math.min(...vals, 58) - 6, maxV = Math.max(...vals, 200) + 8;
-  const rng = maxV - minV;
-  const pts = readings.map((r, i) => [
-    P + (i / (readings.length - 1)) * (W - P * 2),
-    H - P - ((( r.value || r.glucose_mgdl || 0) - minV) / rng) * (H - P * 2)
-  ]);
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-  const area = d + ` L${pts[pts.length-1][0]},${H} L${pts[0][0]},${H} Z`;
-  const lastVal = vals[vals.length - 1];
-  const col = gColor(lastVal).c;
-  const lowY = H - P - ((70 - minV) / rng) * (H - P * 2);
-  const highY = H - P - ((180 - minV) / rng) * (H - P * 2);
-  const [lx, ly] = pts[pts.length - 1];
+// ── Time in Range Calculator ─────────────────────────────────────────────
+function calcTIR(history) {
+  if (!history || history.length < 2) return null;
+  const vals = history.map(r => r.value || r.glucose_mgdl).filter(v => v > 0);
+  if (vals.length === 0) return null;
+  const total = vals.length;
+  const veryLow = vals.filter(v => v < 54).length;
+  const low = vals.filter(v => v >= 54 && v < 70).length;
+  const inRange = vals.filter(v => v >= 70 && v <= 180).length;
+  const high = vals.filter(v => v > 180 && v <= 250).length;
+  const veryHigh = vals.filter(v => v > 250).length;
+  const avg = vals.reduce((a, b) => a + b, 0) / total;
+  const gmi = 3.31 + 0.02392 * avg; // Glucose Management Indicator
+  const sd = Math.sqrt(vals.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / total);
+  const cv = (sd / avg) * 100;
+  return {
+    veryLow: (veryLow / total * 100).toFixed(1),
+    low: (low / total * 100).toFixed(1),
+    inRange: (inRange / total * 100).toFixed(1),
+    high: (high / total * 100).toFixed(1),
+    veryHigh: (veryHigh / total * 100).toFixed(1),
+    avg: Math.round(avg),
+    gmi: gmi.toFixed(1),
+    cv: cv.toFixed(1),
+    sd: Math.round(sd),
+    readings: total,
+  };
+}
 
+// ── TIR Bar ──────────────────────────────────────────────────────────────
+function TIRBar({ tir }) {
+  if (!tir) return null;
+  const segments = [
+    { pct: parseFloat(tir.veryLow), color: '#dc2626', label: '<54' },
+    { pct: parseFloat(tir.low), color: '#f59e0b', label: '54-69' },
+    { pct: parseFloat(tir.inRange), color: '#22c55e', label: '70-180' },
+    { pct: parseFloat(tir.high), color: '#f59e0b', label: '181-250' },
+    { pct: parseFloat(tir.veryHigh), color: '#dc2626', label: '>250' },
+  ];
   return (
-    <svg className="chart-svg" viewBox={`0 0 ${W} ${H}`}>
-      <defs>
-        <linearGradient id="ggrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={col} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={col} stopOpacity="0" />
-        </linearGradient>
-      </defs>
-      {lowY > P && lowY < H && <line x1={P} y1={lowY.toFixed(1)} x2={W-P} y2={lowY.toFixed(1)} stroke="var(--amber)" strokeWidth="1" strokeDasharray="3,4" opacity="0.5" />}
-      {highY > P && highY < H && <line x1={P} y1={highY.toFixed(1)} x2={W-P} y2={highY.toFixed(1)} stroke="var(--amber)" strokeWidth="1" strokeDasharray="3,4" opacity="0.5" />}
-      <path d={area} fill="url(#ggrad)" />
-      <path d={d} fill="none" stroke={col} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-      <circle cx={lx.toFixed(1)} cy={ly.toFixed(1)} r="5" fill={col} />
-      <circle cx={lx.toFixed(1)} cy={ly.toFixed(1)} r="5" fill={col} opacity="0.35">
-        <animate attributeName="r" values="5;14;5" dur="2s" repeatCount="indefinite" />
-        <animate attributeName="opacity" values="0.4;0;0.4" dur="2s" repeatCount="indefinite" />
-      </circle>
-    </svg>
+    <div className="tir-container">
+      <div className="tir-bar">
+        {segments.map((s, i) => s.pct > 0 && (
+          <div key={i} className="tir-segment" style={{ width: `${s.pct}%`, background: s.color }} title={`${s.label}: ${s.pct}%`} />
+        ))}
+      </div>
+      <div className="tir-labels">
+        {segments.map((s, i) => s.pct > 0 && (
+          <span key={i} style={{ color: s.color }}>{s.pct}%</span>
+        ))}
+      </div>
+    </div>
   );
 }
 
-// ── Metric Tile ────────────────────────────────────────────────────────────
+// ── Recharts Glucose Chart ───────────────────────────────────────────────
+function GlucoseChart({ readings }) {
+  if (!readings || readings.length < 2) {
+    return (
+      <div className="chart-empty">
+        <span className="chart-empty-icon">📉</span>
+        <span>Collecting readings…</span>
+      </div>
+    );
+  }
+
+  const data = readings.map(r => ({
+    time: new Date(r.timestamp).getTime(),
+    value: r.value || r.glucose_mgdl || 0,
+    label: new Date(r.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  })).reverse();
+
+  const lastVal = data[data.length - 1]?.value;
+  const strokeColor = lastVal < 70 ? '#f59e0b' : lastVal > 250 ? '#ef4444' : lastVal > 180 ? '#f59e0b' : '#22c55e';
+
+  return (
+    <ResponsiveContainer width="100%" height={140}>
+      <LineChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: -20 }}>
+        <defs>
+          <linearGradient id="glucoseGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={strokeColor} stopOpacity={0.2} />
+            <stop offset="95%" stopColor={strokeColor} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <ReferenceArea y1={70} y2={180} fill="#22c55e" fillOpacity={0.04} />
+        <ReferenceLine y={70} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.4} />
+        <ReferenceLine y={180} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.4} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 10, fill: '#64748b', fontFamily: 'Share Tech Mono' }}
+          axisLine={false}
+          tickLine={false}
+          interval="preserveStartEnd"
+          minTickGap={40}
+        />
+        <YAxis
+          domain={['dataMin - 10', 'dataMax + 10']}
+          tick={{ fontSize: 10, fill: '#64748b', fontFamily: 'Share Tech Mono' }}
+          axisLine={false}
+          tickLine={false}
+          width={40}
+        />
+        <Tooltip
+          contentStyle={{ background: '#0a1020', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, fontSize: 12, fontFamily: 'Share Tech Mono' }}
+          labelStyle={{ color: '#64748b' }}
+          formatter={(val) => [`${val} mg/dL`, 'Glucose']}
+        />
+        <Line
+          type="monotone"
+          dataKey="value"
+          stroke={strokeColor}
+          strokeWidth={2.5}
+          dot={false}
+          activeDot={{ r: 4, fill: strokeColor, stroke: '#0a1020', strokeWidth: 2 }}
+          fill="url(#glucoseGrad)"
+        />
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Stats Card ───────────────────────────────────────────────────────────
+function StatsCard({ tir }) {
+  if (!tir) return null;
+  return (
+    <div className="stats-grid">
+      <div className="stat-item">
+        <div className="stat-value" style={{ color: 'var(--cyan)' }}>{tir.avg}</div>
+        <div className="stat-label">AVG mg/dL</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-value" style={{ color: parseFloat(tir.gmi) < 7 ? 'var(--green)' : parseFloat(tir.gmi) < 8 ? 'var(--amber)' : 'var(--red)' }}>{tir.gmi}%</div>
+        <div className="stat-label">GMI (est. A1c)</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-value" style={{ color: parseFloat(tir.cv) < 36 ? 'var(--green)' : 'var(--amber)' }}>{tir.cv}%</div>
+        <div className="stat-label">CV</div>
+      </div>
+      <div className="stat-item">
+        <div className="stat-value" style={{ color: 'var(--green)' }}>{tir.inRange}%</div>
+        <div className="stat-label">TIME IN RANGE</div>
+      </div>
+    </div>
+  );
+}
+
+// ── Metric Tile ──────────────────────────────────────────────────────────
 function MetricTile({ icon, name, value, unit, time, color }) {
   return (
     <div className="metric-tile" style={{ borderTop: `2px solid ${color || 'transparent'}` }}>
@@ -77,13 +178,13 @@ function MetricTile({ icon, name, value, unit, time, color }) {
           {time && <div className="metric-time">{time}</div>}
         </>
       ) : (
-        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6 }}>No data yet</div>
+        <div className="metric-empty">No data</div>
       )}
     </div>
   );
 }
 
-// ── Time ago ───────────────────────────────────────────────────────────────
+// ── Time ago hook ────────────────────────────────────────────────────────
 function useTimeAgo(ts) {
   const [label, setLabel] = useState('');
   useEffect(() => {
@@ -91,8 +192,8 @@ function useTimeAgo(ts) {
     const calc = () => {
       const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
       if (s < 60) setLabel(`${s}s ago`);
-      else if (s < 3600) setLabel(`${Math.floor(s/60)}m ago`);
-      else setLabel(`${Math.floor(s/3600)}h ago`);
+      else if (s < 3600) setLabel(`${Math.floor(s / 60)}m ago`);
+      else setLabel(`${Math.floor(s / 3600)}h ago`);
     };
     calc();
     const t = setInterval(calc, 15000);
@@ -101,14 +202,14 @@ function useTimeAgo(ts) {
   return label;
 }
 
-// ── Dashboard ──────────────────────────────────────────────────────────────
+// ── Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard({ onRequestNotifications, notifStatus }) {
   const { glucose, metrics, settings, fetchHealthData, lastSync } = useHealthStore();
   const timeAgo = useTimeAgo(glucose.current?.timestamp);
   const [showNotifBanner, setShowNotifBanner] = useState(false);
 
   useEffect(() => {
-    if (Notification.permission === 'default') {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
       setTimeout(() => setShowNotifBanner(true), 3000);
     }
   }, []);
@@ -117,6 +218,7 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
   const col = gColor(cur?.value);
   const trend = TREND[cur?.trend] || TREND[3];
   const mmol = cur?.value ? (cur.value / 18.0182).toFixed(1) : '—';
+  const tir = useMemo(() => calcTIR(glucose.history), [glucose.history]);
 
   const latestHR = metrics.heartRate?.[0];
   const latestSleep = metrics.sleep?.[0];
@@ -136,22 +238,18 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
             <div className="live-indicator">
               <div className="live-dot" />
             </div>
-            <span style={{ fontFamily: 'var(--mono)', fontSize: 16, fontWeight: 400, letterSpacing: 3, color: 'var(--cyan)' }}>
-              su94r
-            </span>
+            <span className="brand-logo">su94r</span>
           </div>
           {settings.userName && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'var(--mono)', marginTop: 2 }}>
-              {settings.userName}
-            </div>
+            <div className="brand-user">{settings.userName}</div>
           )}
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>
+          <div className="sync-status">
             {lastSync ? `synced ${new Date(lastSync).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'not synced'}
           </div>
           {glucose.error && (
-            <div style={{ fontSize: 10, color: 'var(--amber)', fontFamily: 'var(--mono)' }}>⚠ {glucose.error}</div>
+            <div className="sync-error">⚠ {glucose.error}</div>
           )}
         </div>
       </div>
@@ -160,24 +258,20 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
       {showNotifBanner && (
         <div className="info-card" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <span>🔔 Enable alerts for critical glucose notifications</span>
-          <button style={{ background: 'var(--green)', color: '#000', border: 'none', borderRadius: 8, padding: '5px 12px', fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer' }}
-            onClick={() => { onRequestNotifications(); setShowNotifBanner(false); }}>
-            Enable
-          </button>
-          <button style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: 16 }}
-            onClick={() => setShowNotifBanner(false)}>✕</button>
+          <button className="btn-notif-enable" onClick={() => { onRequestNotifications(); setShowNotifBanner(false); }}>Enable</button>
+          <button className="btn-dismiss" onClick={() => setShowNotifBanner(false)}>✕</button>
         </div>
       )}
 
       {/* No CGM configured */}
       {!hasGlucoseConfig && (
         <div className="warning-card">
-          No CGM configured. Go to <strong>Settings → CGM</strong> to connect Libre, Dexcom, or Nightscout.
+          <strong>No CGM configured.</strong> Go to Settings → CGM to connect Libre, Dexcom, or Nightscout.
         </div>
       )}
 
       {/* Main glucose card */}
-      <div className="card" style={{ borderColor: cur ? col.c.replace('var(--', 'rgba(').replace(')', ', 0.3)').replace('rgba(--', 'rgba(') : 'var(--border2)', borderTopWidth: 2 }}>
+      <div className={`card glucose-card ${col.cls}`}>
         <div className="glucose-hero">
           <div className="glucose-source">
             {cur?.source?.toUpperCase() || 'GLUCOSE'} · CGM
@@ -189,18 +283,10 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
             mg/dL · {mmol} mmol/L
           </div>
           <div style={{ marginTop: 10 }}>
-            <div
-              className="glucose-trend"
-              style={{ color: col.c, transform: `rotate(${trend.rot}deg)`, display: 'inline-block' }}
-            >→</div>
-            <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)', marginTop: 3 }}>
-              {trend.label}
-            </div>
+            <div className="glucose-trend" style={{ color: col.c, transform: `rotate(${trend.rot}deg)` }}>→</div>
+            <div className="glucose-trend-label">{trend.label}</div>
           </div>
-          <div className="glucose-badge" style={{
-            background: cur ? col.c.replace('var(--', '').replace(')', '') === 'green' ? 'rgba(34,197,94,0.12)' : col.c.replace('var(--', '').replace(')', '') === 'amber' ? 'rgba(245,158,11,0.12)' : 'rgba(239,68,68,0.12)' : 'transparent',
-            color: col.c,
-          }}>
+          <div className={`glucose-badge glucose-badge-${col.cls}`}>
             {col.e} {col.lbl}
           </div>
           <div className="glucose-time">
@@ -211,17 +297,21 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
         {/* Chart */}
         <div>
           <div className="chart-meta">
-            <span className="chart-meta-label">3-HOUR HISTORY</span>
+            <span className="chart-meta-label">3-HOUR TREND</span>
             <span className="chart-meta-label" style={{ color: 'var(--amber)' }}>— 70 / 180</span>
           </div>
           <GlucoseChart readings={glucose.history?.slice(-36)} />
-          <div className="chart-legend">
-            <span><span style={{ color: 'var(--red)' }}>●</span> {'<70 / >250'}</span>
-            <span><span style={{ color: 'var(--amber)' }}>●</span> Caution</span>
-            <span><span style={{ color: 'var(--green)' }}>●</span> In range</span>
-          </div>
         </div>
       </div>
+
+      {/* TIR + Stats */}
+      {tir && (
+        <div className="card">
+          <div className="card-title">Time in Range · {tir.readings} readings</div>
+          <TIRBar tir={tir} />
+          <StatsCard tir={tir} />
+        </div>
+      )}
 
       {/* Recent readings */}
       <div className="card">
@@ -242,14 +332,15 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
             );
           })
         ) : (
-          <div style={{ color: 'var(--muted)', fontSize: 13, padding: '12px 0', textAlign: 'center', fontFamily: 'var(--mono)' }}>
-            No readings yet. Configure your CGM in Settings.
+          <div className="empty-state">
+            <span className="empty-icon">📉</span>
+            <span>No readings yet. Configure your CGM in Settings.</span>
           </div>
         )}
       </div>
 
       {/* Other metrics grid */}
-      <div className="card-title" style={{ marginTop: 4, marginBottom: 10 }}>Other Metrics</div>
+      <div className="card-title" style={{ marginTop: 4, marginBottom: 10 }}>Health Metrics</div>
       <div className="metrics-grid">
         <MetricTile icon="❤️" name="HEART RATE" value={latestHR?.bpm || null} unit="bpm" color="var(--red)" time={latestHR ? new Date(latestHR.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null} />
         <MetricTile icon="💤" name="SLEEP" value={latestSleep ? `${Math.round(latestSleep.duration / 3600)}h ${Math.round((latestSleep.duration % 3600) / 60)}m` : null} unit={latestSleep ? `${latestSleep.efficiency || '—'}% eff` : ''} color="var(--purple)" time={latestSleep?.date} />
@@ -260,7 +351,7 @@ export default function Dashboard({ onRequestNotifications, notifStatus }) {
       </div>
 
       {/* Refresh button */}
-      <button onClick={fetchHealthData} disabled={glucose.loading} style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border2)', borderRadius: 12, padding: 13, color: glucose.loading ? 'var(--muted)' : 'var(--cyan)', fontFamily: 'var(--mono)', fontSize: 13, letterSpacing: 1, cursor: 'pointer', transition: 'all .2s', marginTop: 4 }}>
+      <button className="btn-refresh" onClick={fetchHealthData} disabled={glucose.loading}>
         {glucose.loading ? '⟳ Syncing…' : '⟳ Refresh Now'}
       </button>
     </div>

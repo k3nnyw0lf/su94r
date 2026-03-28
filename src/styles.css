@@ -1,4 +1,5 @@
-@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Outfit:wght@400;500;600;700;800&family=Lexend:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.cdnfonts.com/css/opendyslexic');
 
 /* ── Variables ───────────────────────────────────────────────────────────── */
 :root {
@@ -17,7 +18,8 @@
   --muted: #64748b;
   --dim: #1e293b;
   --mono: 'Share Tech Mono', monospace;
-  --ui: 'Outfit', sans-serif;
+  --ui: 'Lexend', 'Outfit', sans-serif;
+  --dyslexic: 'OpenDyslexic', 'Lexend', sans-serif;
   --radius: 16px;
   --nav-height: 64px;
 }
@@ -38,6 +40,9 @@ a:hover { text-decoration: underline; }
 /* ── App Layout ──────────────────────────────────────────────────────────── */
 .app-root { display: flex; flex-direction: column; min-height: 100dvh; }
 .app-root.light { --bg:#f8fafc; --bg2:#f1f5f9; --card:#fff; --card2:#f8fafc; --border:rgba(6,182,212,0.15); --border2:rgba(0,0,0,0.08); --text:#0f172a; --muted:#64748b; --dim:#e2e8f0; }
+.app-root.dyslexic { --ui: 'OpenDyslexic', 'Lexend', sans-serif; }
+.app-root.dyslexic .glucose-value { letter-spacing: 0; }
+.app-root.dyslexic .msg-bubble, .app-root.dyslexic .device-note, .app-root.dyslexic .info-card { font-size: 15px; line-height: 1.7; letter-spacing: 0.3px; word-spacing: 2px; }
 .main-content { flex: 1; padding-bottom: var(--nav-height); overflow-x: hidden; }
 
 /* ── Bottom Nav ──────────────────────────────────────────────────────────── */
@@ -175,6 +180,13 @@ a:hover { text-decoration: underline; }
 .device-note { font-size: 13px; color: var(--text); line-height: 1.55; }
 .device-tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
 .device-tag { font-size: 9px; padding: 2px 8px; border-radius: 99px; background: var(--dim); color: var(--muted); font-family: var(--mono); }
+.device-search { width: 100%; background: var(--card); border: 1px solid var(--border2); border-radius: 12px; padding: 10px 14px; color: var(--text); font-family: var(--ui); font-size: 14px; outline: none; margin-bottom: 16px; transition: border-color .2s; }
+.device-search:focus { border-color: var(--cyan); }
+.device-search::placeholder { color: var(--muted); }
+.device-connected { border-color: rgba(34,197,94,0.25); }
+.device-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; animation: livePulse 2s infinite; }
+.badge-connected { background: rgba(34,197,94,.15); color: var(--green); border: 1px solid rgba(34,197,94,.3); }
+.device-howto { margin-top: 8px; font-size: 11px; color: var(--cyan); font-family: var(--mono); background: rgba(6,182,212,0.06); padding: 5px 10px; border-radius: 6px; display: inline-block; }
 
 /* ── Trackers ────────────────────────────────────────────────────────────── */
 .tracker-tabs { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 16px; scrollbar-width: none; }
@@ -231,6 +243,47 @@ a:hover { text-decoration: underline; }
 .danger-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; font-family: var(--mono); color: var(--red); margin-bottom: 10px; }
 .btn-danger { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.3); border-radius: 10px; padding: 10px 16px; font-size: 13px; font-weight: 600; width: 100%; margin-bottom: 8px; transition: all .2s; }
 .btn-danger:hover { background: rgba(239,68,68,0.2); }
+
+/* ── Dashboard Extras ────────────────────────────────────────────────────── */
+.brand-logo { font-family: var(--mono); font-size: 16px; font-weight: 400; letter-spacing: 3px; color: var(--cyan); }
+.brand-user { font-size: 12px; color: var(--muted); font-family: var(--mono); margin-top: 2px; }
+.sync-status { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+.sync-error { font-size: 10px; color: var(--amber); font-family: var(--mono); }
+.glucose-card { border-top-width: 2px; transition: border-color .4s; }
+.glucose-card.inrange { border-color: rgba(34,197,94,0.3); }
+.glucose-card.low, .glucose-card.high { border-color: rgba(245,158,11,0.3); }
+.glucose-card.critical { border-color: rgba(239,68,68,0.3); }
+.glucose-trend-label { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 3px; }
+.glucose-badge-inrange { background: rgba(34,197,94,0.12); color: var(--green); }
+.glucose-badge-low, .glucose-badge-high { background: rgba(245,158,11,0.12); color: var(--amber); }
+.glucose-badge-critical { background: rgba(239,68,68,0.12); color: var(--red); }
+.btn-notif-enable { background: var(--green); color: #000; border: none; border-radius: 8px; padding: 5px 12px; font-weight: 700; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.btn-dismiss { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 16px; }
+.btn-refresh { width: 100%; background: var(--card); border: 1px solid var(--border2); border-radius: 12px; padding: 13px; color: var(--cyan); font-family: var(--mono); font-size: 13px; letter-spacing: 1px; cursor: pointer; transition: all .2s; margin-top: 4px; }
+.btn-refresh:hover { background: var(--card2); border-color: var(--cyan); }
+.btn-refresh:disabled { color: var(--muted); cursor: default; }
+.chart-empty { height: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; font-family: var(--mono); gap: 6px; }
+.chart-empty-icon { font-size: 24px; opacity: .5; }
+.empty-state { color: var(--muted); font-size: 13px; padding: 16px 0; text-align: center; font-family: var(--mono); display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.empty-icon { font-size: 24px; opacity: .5; }
+.metric-empty { font-size: 12px; color: var(--muted); margin-top: 6px; }
+.tir-container { margin-bottom: 16px; }
+.tir-bar { display: flex; height: 14px; border-radius: 99px; overflow: hidden; gap: 1px; }
+.tir-segment { transition: width .6s ease; min-width: 2px; }
+.tir-labels { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--mono); margin-top: 6px; }
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; }
+.stat-item { text-align: center; padding: 8px 4px; }
+.stat-value { font-family: var(--mono); font-size: 20px; font-weight: 400; line-height: 1.2; }
+.stat-label { font-size: 9px; color: var(--muted); font-family: var(--mono); letter-spacing: .5px; margin-top: 2px; }
+
+/* ── Markdown in Chat ────────────────────────────────────────────────────── */
+.msg-bubble p { margin: 0 0 8px; }
+.msg-bubble p:last-child { margin: 0; }
+.msg-bubble strong { color: var(--text); font-weight: 700; }
+.msg-bubble code { background: var(--dim); padding: 1px 5px; border-radius: 4px; font-family: var(--mono); font-size: 13px; }
+.msg-bubble ul, .msg-bubble ol { margin: 4px 0 8px 16px; }
+.msg-bubble li { margin-bottom: 2px; }
+.msg-bubble h3, .msg-bubble h4 { font-size: 14px; font-weight: 700; margin: 8px 0 4px; color: var(--text); }
 
 /* ── Misc ────────────────────────────────────────────────────────────────── */
 .model-chip { font-size: 11px; color: var(--muted); font-family: var(--mono); display: flex; align-items: center; gap: 5px; }

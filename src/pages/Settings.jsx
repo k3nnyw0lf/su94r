@@ -24,7 +24,7 @@ const TextInput = ({ value, onChange, placeholder, type = 'text' }) => (
 );
 
 export default function Settings({ onRequestNotifications, notifStatus }) {
-  const { settings, updateSettings, theme, toggleTheme } = useHealthStore();
+  const { settings, updateSettings, theme, toggleTheme, dyslexicFont, toggleDyslexic } = useHealthStore();
   const [saved, setSaved] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(Notification.permission === 'granted');
   const [activeTab, setActiveTab] = useState('cgm');
@@ -54,7 +54,10 @@ export default function Settings({ onRequestNotifications, notifStatus }) {
     <div className="page">
       <div className="page-header">
         <h1>Settings</h1>
-        <button className="theme-btn" onClick={toggleTheme}>{theme === 'dark' ? '☀️' : '🌙'}</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button className="theme-btn" onClick={toggleDyslexic} title="Dyslexia-friendly font" style={{ fontSize: 14, opacity: dyslexicFont ? 1 : 0.4 }}>Aa</button>
+          <button className="theme-btn" onClick={toggleTheme}>{theme === 'dark' ? '☀️' : '🌙'}</button>
+        </div>
       </div>
 
       {/* AI status summary */}
@@ -268,6 +271,14 @@ export default function Settings({ onRequestNotifications, notifStatus }) {
               <option value="f">°F</option>
               <option value="c">°C</option>
             </select>
+          </Field>
+          <Field label="Dyslexia-Friendly Font" hint="Uses OpenDyslexic font with increased spacing for easier reading">
+            <button
+              onClick={toggleDyslexic}
+              style={{ width: '100%', background: dyslexicFont ? 'var(--cyan)' : 'var(--bg2)', color: dyslexicFont ? '#000' : 'var(--text)', border: `1px solid ${dyslexicFont ? 'var(--cyan)' : 'var(--border2)'}`, borderRadius: 10, padding: '10px 12px', fontSize: 14, fontWeight: 600, cursor: 'pointer', transition: 'all .2s' }}
+            >
+              {dyslexicFont ? '✓ Dyslexic Font ON' : 'Enable Dyslexic Font'}
+            </button>
           </Field>
           <Field label="Diabetes Type">
             <select className="settings-input" value={settings.diabetesType} onChange={e => updateSettings({ diabetesType: e.target.value })}>

@@ -7,6 +7,7 @@ import Devices from './pages/Devices';
 import Settings from './pages/Settings';
 import { requestNotificationPermission, getNotificationSupport, registerPeriodicSync } from './lib/notifications';
 import { useHealthStore } from './store/healthStore';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
 
 const TABS = [
@@ -25,7 +26,7 @@ export default function App() {
   const [deferredInstall, setDeferredInstall] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [notifStatus, setNotifStatus] = useState(null);
-  const { theme, settings, initializeApp } = useHealthStore();
+  const { theme, dyslexicFont, settings, initializeApp } = useHealthStore();
 
   // Init app on mount
   useEffect(() => {
@@ -92,7 +93,7 @@ export default function App() {
   const ActivePage = PAGE_MAP[tab] || Dashboard;
 
   return (
-    <div className={`app-root ${theme}`}>
+    <div className={`app-root ${theme}${dyslexicFont ? ' dyslexic' : ''}`}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' } }} />
 
       {/* iOS Install Banner */}
@@ -114,10 +115,12 @@ export default function App() {
 
       {/* Main content */}
       <main className="main-content">
-        <ActivePage
-          onRequestNotifications={handleEnableNotifications}
-          notifStatus={notifStatus}
-        />
+        <ErrorBoundary>
+          <ActivePage
+            onRequestNotifications={handleEnableNotifications}
+            notifStatus={notifStatus}
+          />
+        </ErrorBoundary>
       </main>
 
       {/* Bottom nav */}

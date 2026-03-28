@@ -1,8 +1,32 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AGENTS, getAgentSystemPrompt } from '../lib/agents';
 import { chat, listAvailableModels } from '../lib/ai-router';
 import { useHealthStore } from '../store/healthStore';
 import toast from 'react-hot-toast';
+
+// Simple markdown renderer for chat messages
+function renderMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/```[\s\S]*?```/g, m => `<pre><code>${m.slice(3, -3).replace(/^\w*\n/, '')}</code></pre>`)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>')
+    .replace(/(<li>.*<\/li>\n?)+/g, m => `<ul>${m}</ul>`)
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br/>')
+    .replace(/^/, '<p>')
+    .replace(/$/, '</p>');
+}
+
+function ChatBubble({ content, role }) {
+  if (role === 'user') return <div className="msg-bubble">{content}</div>;
+  return <div className="msg-bubble" dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }} />;
+}
 
 export default function Agents() {
   const [activeAgent, setActiveAgent] = useState(null);
@@ -147,7 +171,7 @@ export default function Agents() {
             {m.role === 'assistant' && (
               <div className="msg-agent-icon">{activeAgent.icon}</div>
             )}
-            <div className="msg-bubble">{m.content}</div>
+            <ChatBubble content={m.content} role={m.role} />
           </div>
         ))}
 
