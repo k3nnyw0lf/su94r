@@ -23,7 +23,8 @@
     "recharts": "^2.12.7",
     "react-hot-toast": "^2.4.1",
     "date-fns": "^3.6.0",
-    "idb": "^8.0.0"
+    "idb": "^8.0.0",
+    "@supabase/supabase-js": "^2.45.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

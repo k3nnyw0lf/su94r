@@ -5,17 +5,20 @@ import Agents from './pages/Agents';
 import Trackers from './pages/Trackers';
 import Devices from './pages/Devices';
 import Settings from './pages/Settings';
+import Auth from './components/Auth';
 import { requestNotificationPermission, getNotificationSupport, registerPeriodicSync } from './lib/notifications';
 import { useHealthStore } from './store/healthStore';
+import { useTranslation } from './lib/i18n';
+import { supabase } from './lib/supabase';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import './styles.css';
 
 const TABS = [
-  { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-  { id: 'agents', label: 'Agents', icon: '🤖' },
-  { id: 'trackers', label: 'Trackers', icon: '📈' },
-  { id: 'devices', label: 'Devices', icon: '🔌' },
-  { id: 'settings', label: 'Settings', icon: '⚙️' },
+  { id: 'dashboard', labelKey: 'nav.dashboard', icon: '📊' },
+  { id: 'agents', labelKey: 'nav.agents', icon: '🤖' },
+  { id: 'trackers', labelKey: 'nav.trackers', icon: '📈' },
+  { id: 'devices', labelKey: 'nav.devices', icon: '🔌' },
+  { id: 'settings', labelKey: 'nav.settings', icon: '⚙️' },
 ];
 
 export default function App() {
@@ -26,7 +29,22 @@ export default function App() {
   const [deferredInstall, setDeferredInstall] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
   const [notifStatus, setNotifStatus] = useState(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [user, setUser] = useState(null);
   const { theme, dyslexicFont, settings, initializeApp } = useHealthStore();
+  const { t, locale, setLocale, locales } = useTranslation();
+
+  // Auth state listener
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) setShowAuth(false);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Sync body background with theme
   useEffect(() => {
@@ -38,7 +56,6 @@ export default function App() {
   useEffect(() => {
     initializeApp();
 
-    // PWA install prompt capture (Android Chrome)
     const handleInstall = e => {
       e.preventDefault();
       setDeferredInstall(e);
@@ -46,22 +63,18 @@ export default function App() {
     };
     window.addEventListener('beforeinstallprompt', handleInstall);
 
-    // Check notification support
     const support = getNotificationSupport();
     setNotifStatus(support);
 
-    // iOS install banner
     if (support.iosNeedsInstall && !localStorage.getItem('ios_install_dismissed')) {
       setTimeout(() => setShowInstallBanner(true), 2000);
     }
 
-    // Register periodic background sync (Android Chrome)
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.ready.then(reg => {
         registerPeriodicSync().then(ok => {
           if (ok) console.log('[App] Background glucose sync registered');
         });
-        // Listen for SW messages (glucose updates)
         navigator.serviceWorker.addEventListener('message', e => {
           if (e.data?.type === 'GLUCOSE_UPDATE') {
             useHealthStore.getState().updateGlucose(e.data.glucose);
@@ -73,7 +86,6 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handleInstall);
   }, [initializeApp]);
 
-  // Request notifications after user interaction
   const handleEnableNotifications = useCallback(async () => {
     const result = await requestNotificationPermission();
     if (result.granted) {
@@ -83,13 +95,12 @@ export default function App() {
     }
   }, []);
 
-  // Handle PWA install
   const handleInstall = useCallback(async () => {
     if (deferredInstall) {
       deferredInstall.prompt();
       const { outcome } = await deferredInstall.userChoice;
       if (outcome === 'accepted') {
-        toast.success('✅ App installed!');
+        toast.success('App installed!');
         setShowInstallBanner(false);
       }
     }
@@ -101,6 +112,9 @@ export default function App() {
   return (
     <div className={`app-root ${theme}${dyslexicFont ? ' dyslexic' : ''}`}>
       <Toaster position="top-center" toastOptions={{ style: { background: 'var(--card)', color: 'var(--text)', border: '1px solid var(--border)' } }} />
+
+      {/* Auth modal */}
+      {showAuth && <Auth onClose={() => setShowAuth(false)} />}
 
       {/* iOS Install Banner */}
       {showInstallBanner && notifStatus?.isIOS && !notifStatus?.isPWA && (
@@ -125,26 +139,35 @@ export default function App() {
           <ActivePage
             onRequestNotifications={handleEnableNotifications}
             notifStatus={notifStatus}
+            user={user}
+            onShowAuth={() => setShowAuth(true)}
           />
         </ErrorBoundary>
       </main>
 
       {/* Footer credit */}
       <footer className="app-footer">
-        Made by Ken Wolf with 💚 &nbsp;|&nbsp; <a href="https://su94r.com">Med Inc</a>
+        {t('footer.madeBy')} &nbsp;|&nbsp; <a href="https://su94r.com">{t('footer.company')}</a>
+        <div className="lang-picker">
+          {locales.map(l => (
+            <button key={l.code} className={`lang-btn ${locale === l.code ? 'active' : ''}`} onClick={() => setLocale(l.code)} title={l.label}>
+              {l.flag}
+            </button>
+          ))}
+        </div>
       </footer>
 
       {/* Bottom nav */}
       <nav className="bottom-nav">
-        {TABS.map(t => (
+        {TABS.map(tabItem => (
           <button
-            key={t.id}
-            className={`nav-item ${tab === t.id ? 'active' : ''}`}
-            onClick={() => setTab(t.id)}
-            aria-label={t.label}
+            key={tabItem.id}
+            className={`nav-item ${tab === tabItem.id ? 'active' : ''}`}
+            onClick={() => setTab(tabItem.id)}
+            aria-label={t(tabItem.labelKey)}
           >
-            <span className="nav-icon">{t.icon}</span>
-            <span className="nav-label">{t.label}</span>
+            <span className="nav-icon">{tabItem.icon}</span>
+            <span className="nav-label">{t(tabItem.labelKey)}</span>
           </button>
         ))}
       </nav>
