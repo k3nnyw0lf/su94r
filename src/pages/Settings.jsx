@@ -23,11 +23,14 @@ const TextInput = ({ value, onChange, placeholder, type = 'text' }) => (
   <input className="settings-input" type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} autoComplete="off" />
 );
 
-export default function Settings({ onRequestNotifications, notifStatus }) {
-  const { settings, updateSettings, theme, toggleTheme, dyslexicFont, toggleDyslexic } = useHealthStore();
+export default function Settings({ onRequestNotifications, notifStatus, user, onShowAuth }) {
+  const { settings, updateSettings, theme, toggleTheme, dyslexicFont, toggleDyslexic, fetchHealthData } = useHealthStore();
   const [saved, setSaved] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(Notification.permission === 'granted');
   const [activeTab, setActiveTab] = useState('cgm');
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState(null);
+  const [connectSuccess, setConnectSuccess] = useState(false);
   const availableModels = listAvailableModels();
 
   const save = (updates) => {
@@ -55,6 +58,11 @@ export default function Settings({ onRequestNotifications, notifStatus }) {
       <div className="page-header">
         <h1>Settings</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {user ? (
+            <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'var(--mono)' }}>{user.email?.split('@')[0]}</span>
+          ) : (
+            <button className="theme-btn" onClick={onShowAuth} title="Sign in" style={{ fontSize: 14 }}>👤</button>
+          )}
           <button className="theme-btn" onClick={toggleDyslexic} title="Dyslexia-friendly font" style={{ fontSize: 14, opacity: dyslexicFont ? 1 : 0.4 }}>Aa</button>
           <button className="theme-btn" onClick={toggleTheme}>{theme === 'dark' ? '☀️' : '🌙'}</button>
         </div>
@@ -107,6 +115,40 @@ export default function Settings({ onRequestNotifications, notifStatus }) {
               </Field>
               <div className="info-card">💡 Make sure LibreLinkUp sharing is enabled in your LibreLink app.</div>
             </>
+          )}
+
+          {/* Connect & Sync button */}
+          {(settings.libreEmail || settings.dexcomUser || settings.nightscoutUrl) && (
+            <div style={{ marginTop: 12 }}>
+              {connectError && <div className="warning-card">❌ {connectError}</div>}
+              {connectSuccess && <div className="info-card green">✅ Connected! Glucose data syncing.</div>}
+              <button
+                className="btn-save"
+                disabled={connecting}
+                onClick={async () => {
+                  setConnecting(true);
+                  setConnectError(null);
+                  setConnectSuccess(false);
+                  try {
+                    await fetchHealthData();
+                    const { glucose } = useHealthStore.getState();
+                    if (glucose.error) {
+                      setConnectError(glucose.error);
+                    } else if (glucose.current) {
+                      setConnectSuccess(true);
+                      toast.success(`Connected! Current glucose: ${glucose.current.value} mg/dL`);
+                    } else {
+                      setConnectError('No data returned. Check your credentials.');
+                    }
+                  } catch (err) {
+                    setConnectError(err.message);
+                  }
+                  setConnecting(false);
+                }}
+              >
+                {connecting ? '⏳ Connecting...' : '🔗 Connect & Sync Now'}
+              </button>
+            </div>
           )}
 
           {settings.glucoseSource === 'dexcom' && (
