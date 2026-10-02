@@ -46,7 +46,9 @@ export function screenStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     update: (id, patch) => call(`?id=eq.${q(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     /** Claims a row only if nobody has yet; true when this call won. */
     claimIfOpen: async (id, patch) => (await call(`?id=eq.${q(id)}&claimed_at=is.null&revoked=is.false`, { method: 'PATCH', body: JSON.stringify(patch) })).length > 0,
-    list: () => call('?select=id,name,kind,created_at,claimed_at,last_seen,expires_at&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
+    /** A family phone may log, or not (only phones linked as family; true when one changed). */
+    allowLog: async (id, canLog) => (await call(`?id=eq.${q(id)}&kind=eq.screen&role=eq.family&revoked=is.false`, { method: 'PATCH', body: JSON.stringify({ can_log: canLog === true }) })).length > 0,
+    list: () => call('?select=id,name,kind,role,can_log,created_at,claimed_at,last_seen,expires_at&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
     sweep: () => call(`?claimed_at=is.null&expires_at=lt.${q(new Date().toISOString())}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
   };
 }
@@ -120,10 +122,12 @@ export async function shareNew(request, store) {
   const role = body.role === 'family' ? 'family' : 'me';
   await store.insert({
     id: crypto.randomUUID(), secret_hash: await sha256(invite), kind: 'screen', role,
+    // A family member who lives with the owner may log doses and meals; the owner's own phone always can.
+    can_log: role === 'family' && body.canLog === true,
     name: clean(body.name) || (role === 'family' ? 'Family phone' : 'My other phone'),
     expires_at: new Date(Date.now() + SHARE_TTL_MS).toISOString(),
   });
-  return { invite, role, expiresIn: SHARE_TTL_MS / 1000 };
+  return { invite, role, canLog: role === 'family' && body.canLog === true, expiresIn: SHARE_TTL_MS / 1000 };
 }
 
 /** POST share/claim — the phone that opened the invite takes its own token, once. */

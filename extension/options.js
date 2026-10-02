@@ -776,7 +776,7 @@ async function refreshScreens() {
   list.replaceChildren(...screens.map((sc) => {
     const li = document.createElement('li');
     const seen = sc.last_seen ? `seen ${new Date(sc.last_seen).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'not seen yet';
-    li.append(Object.assign(document.createElement('span'), { textContent: `${sc.kind === 'widget' ? '🔲' : sc.kind === 'ai' ? '✳️' : sc.kind === 'doctor' ? '🩺' : '🖥️'} ${sc.name || 'Screen'} · ${sc.kind === 'doctor' ? `report link, ends ${new Date(sc.expires_at).toLocaleDateString([], { dateStyle: 'medium' })}` : seen}` }));
+    li.append(Object.assign(document.createElement('span'), { textContent: `${sc.kind === 'widget' ? '🔲' : sc.kind === 'ai' ? '✳️' : sc.kind === 'doctor' ? '🩺' : sc.role ? '📱' : '🖥️'} ${sc.name || 'Screen'}${sc.role === 'family' ? (sc.can_log ? ' (family, can log)' : ' (family)') : ''} · ${sc.kind === 'doctor' ? `report link, ends ${new Date(sc.expires_at).toLocaleDateString([], { dateStyle: 'medium' })}` : seen}` }));
     const rm = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost', textContent: 'Remove' });
     rm.onclick = async () => {
       if (!confirm(`Remove ${sc.name || 'this screen'}? It stops showing your glucose at once.`)) return;

@@ -48,7 +48,7 @@ const json = (body, status = 200) =>
 const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
   '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove',
   '/share/new', '/share/claim', '/share/extras', '/doctor/new', '/doctor/data',
-  '/app/me', '/app/history', '/app/report', '/app/recent', '/app/log', '/app/undo']);
+  '/app/me', '/app/history', '/app/report', '/app/recent', '/app/log', '/app/undo', '/app/phones', '/app/phones/allow', '/screens/allow']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 

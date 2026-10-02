@@ -1,6 +1,6 @@
 // The su94r phone app (workers/app.js routes, su94r-proxy /app/ files and /app/meal). What must
 // hold: only a phone linked by a share code gets in (not a TV, a widget, a doctor link or an AI
-// connector); a family member's phone reads but never logs; logging a second dose asks first;
+// connector); a family member's phone reads, and logs only once the owner allows it; logging a second dose asks first;
 // a phone can undo only its own dose, and only for 30 minutes; meal photos cost AI only for the
 // owner's own phone; the built files match their sources.
 
@@ -24,7 +24,8 @@ function memScreens() {
     async insert(row) { rows.set(row.id, { revoked: false, last_seen: null, ...row }); return [rows.get(row.id)]; },
     async byToken(h) { return [...rows.values()].find((r) => r.token_hash === h && !r.revoked) || null; },
     async update(id, p) { if (rows.has(id)) Object.assign(rows.get(id), p); return []; },
-    async list() { return [...rows.values()]; },
+    async list() { return [...rows.values()].filter((r) => r.claimed_at && !r.revoked); },
+    async allowLog(id, canLog) { const r = rows.get(id); if (!r || r.kind !== 'screen' || r.role !== 'family' || r.revoked) return false; r.can_log = canLog === true; return true; },
   };
 }
 function memDoses() {
@@ -158,6 +159,54 @@ describe('logging', () => {
     await call('app/log', { token: tok('a'), method: 'POST', body: { kind: 'carbs', amount: 30 } });
     const r = await (await call('voice/sync', { method: 'POST', query: '?key=tv-key-123', body: { markers: [], removed: [] } })).json();
     expect(r.doses).toEqual([expect.objectContaining({ type: 'meal', amount: 30, source: 'phone' })]);
+  });
+});
+
+describe('family members who live with the owner', () => {
+  it('a family phone logs once allowed, and undoes its own dose; the list says which phone logged', async () => {
+    expect((await call('app/log', { token: tok('b'), method: 'POST', body: { kind: 'carbs', amount: 30 } })).status).toBe(403);
+    screens.rows.get('bbbbbbbb-2222').can_log = true;
+    expect(await (await call('app/me', { token: tok('b') })).json()).toMatchObject({ role: 'family', canLog: true });
+    const r = await (await call('app/log', { token: tok('b'), method: 'POST', body: { kind: 'carbs', amount: 30 } })).json();
+    expect(r.ok).toBe(true);
+    expect(r.id).toMatch(/^app-bbbbbbbb-/);
+    const list = await (await call('app/recent', { token: tok('a') })).json();
+    expect(list.events[0]).toMatchObject({ source: 'phone', by: 'Mom', mine: false });
+    expect((await call('app/undo', { token: tok('a'), method: 'POST', body: { id: r.id } })).status).toBe(400);
+    expect(await (await call('app/undo', { token: tok('b'), method: 'POST', body: { id: r.id } })).json()).toEqual({ ok: true });
+  });
+
+  it('a family member\'s dose gets the same double-dose check', async () => {
+    screens.rows.get('bbbbbbbb-2222').can_log = true;
+    await call('app/log', { token: tok('a'), method: 'POST', body: { kind: 'rapid', amount: 4 } });
+    const second = await (await call('app/log', { token: tok('b'), method: 'POST', body: { kind: 'rapid', amount: 4 } })).json();
+    expect(second).toMatchObject({ ok: false, confirm: true });
+  });
+
+  it('the owner\'s phone lists family phones and allows or stops them; nobody else can', async () => {
+    const list = await (await call('app/phones', { token: tok('a') })).json();
+    expect(list.phones).toEqual([{ id: 'bbbbbbbb-2222', name: 'Mom', canLog: false, lastSeen: null }]);
+    expect((await call('app/phones', { token: tok('b') })).status).toBe(403);
+    expect((await call('app/phones/allow', { token: tok('b'), method: 'POST', body: { id: 'bbbbbbbb-2222', canLog: true } })).status).toBe(403);
+    expect(await (await call('app/phones/allow', { token: tok('a'), method: 'POST', body: { id: 'bbbbbbbb-2222', canLog: true } })).json()).toEqual({ ok: true, canLog: true });
+    expect(screens.rows.get('bbbbbbbb-2222').can_log).toBe(true);
+    for (const id of ['cccccccc-3333', 'dddddddd-4444', 'eeeeeeee-5555', 'aaaaaaaa-1111']) {
+      expect((await call('app/phones/allow', { token: tok('a'), method: 'POST', body: { id, canLog: true } })).status).toBe(404);
+    }
+    await call('app/phones/allow', { token: tok('a'), method: 'POST', body: { id: 'bbbbbbbb-2222', canLog: false } });
+    expect((await call('app/log', { token: tok('b'), method: 'POST', body: { kind: 'carbs', amount: 10 } })).status).toBe(403);
+  });
+
+  it('su94r Mini allows it with its key, and can tick it when making a family code', async () => {
+    expect((await call('screens/allow', { method: 'POST', body: { id: 'bbbbbbbb-2222', canLog: true } })).status).toBe(401);
+    expect(await (await call('screens/allow', { method: 'POST', query: '?key=tv-key-123', body: { id: 'bbbbbbbb-2222', canLog: true } })).json()).toEqual({ ok: true, canLog: true });
+    expect((await call('screens/allow', { method: 'POST', query: '?key=tv-key-123', body: { id: 'cccccccc-3333', canLog: true } })).status).toBe(404);
+    screens.sweep = async () => {};
+    const fam = await (await call('share/new', { method: 'POST', query: '?key=tv-key-123', body: { role: 'family', canLog: true } })).json();
+    expect(fam.canLog).toBe(true);
+    expect([...screens.rows.values()].at(-1)).toMatchObject({ role: 'family', can_log: true });
+    const mine = await (await call('share/new', { method: 'POST', query: '?key=tv-key-123', body: { role: 'me', canLog: true } })).json();
+    expect(mine.canLog).toBe(false);
   });
 });
 

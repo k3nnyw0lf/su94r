@@ -68,7 +68,7 @@ Each code works once, for 10 minutes. Linked phones appear with the other screen
 - **Report**: the 14-day report (the same one as the doctor's link), printable.
 - **More**: low alerts (ntfy, Telegram), the watch token, install, and Unlink.
 
-A family member's phone reads everything and cannot log. TVs, widgets, doctor links and AI connectors cannot use the app's routes. Doses logged here have the source `phone` and reach su94r Mini, Alexa and Telegram's double-dose checks. The app keeps the last reading in the phone's own storage so it opens offline. Code: `workers/app.js` (routes), `workers/app/` (page, client, service worker, icons; `node scripts/build-app.mjs` packs them into `workers/app-assets.js`), `/app/meal` in `workers/proxy.js`.
+A family member's phone reads everything, and logs only when you allow it: tick **They live with me** when you make the family code, or later press **Allow logging** next to that phone (su94r Mini → Share to another phone, or your own phone's app → More → Family phones). Each dose shows which phone logged it, and gets the same double-dose check. TVs, widgets, doctor links and AI connectors cannot use the app's routes. Doses logged here have the source `phone` and reach su94r Mini, Alexa and Telegram's double-dose checks. The app keeps the last reading in the phone's own storage so it opens offline. Code: `workers/app.js` (routes), `workers/app/` (page, client, service worker, icons; `node scripts/build-app.mjs` packs them into `workers/app-assets.js`), `/app/meal` in `workers/proxy.js`.
 
 ### A live link for the doctor
 

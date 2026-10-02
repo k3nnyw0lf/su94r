@@ -52,7 +52,8 @@ const screens = {
   async byToken(h) { return [...rows.values()].find((r) => r.token_hash === h && !r.revoked) || null; },
   async update(id, p) { if (rows.has(id)) Object.assign(rows.get(id), p); return []; },
   async claimIfOpen(id, p) { const r = rows.get(id); if (!r || r.claimed_at || r.revoked) return false; Object.assign(r, p); return true; },
-  async list() { return [...rows.values()]; },
+  async list() { return [...rows.values()].filter((r) => r.claimed_at && !r.revoked); },
+  async allowLog(id, canLog) { const r = rows.get(id); if (!r || r.kind !== 'screen' || r.role !== 'family') return false; r.can_log = canLog === true; return true; },
   async sweep() {},
 };
 const deps = { screens, history, store: doses, forecasts, night: { ready: false }, telegram: { ready: false } };
@@ -64,7 +65,9 @@ const server = http.createServer(async (req, res) => {
   for await (const c of req) chunks.push(c);
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const request = new Request(url, { method: req.method, headers: req.headers, body: req.method === 'GET' ? undefined : body });
-  const r = url.pathname === '/app' || url.pathname.startsWith('/app/') && (req.method === 'GET' || url.pathname === '/app/meal') && !['/app/me', '/app/history', '/app/report', '/app/recent'].includes(url.pathname)
+  // The proxy serves the app's own files and the meal photo; everything else is su94r-cgm.
+  const appFile = req.method === 'GET' && ['/app', '/app/', '/app/app.js', '/app/sw.js', '/app/manifest.webmanifest', '/app/icon.svg', '/app/icon-192.png', '/app/icon-512.png', '/app/apple-touch-icon.png'].includes(url.pathname);
+  const r = appFile || url.pathname === '/app/meal'
     ? await proxy.fetch(request, { CGM_URL: `http://localhost:${PORT}`, AI: ai })
     : await handleCgm(url.pathname.slice(1), request, ENV, deps);
   res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -152,6 +155,25 @@ await p2.click('#tabs button[data-tab="log"]');
 await p2.waitForSelector('text=This phone shows the glucose and the history');
 checks.familyCannotLog = !(await p2.$('#logBtn'));
 await p2.screenshot({ path: path.join(OUT, 'app-11-family-log.png'), fullPage: true });
+// The owner allows it from their own phone; the family phone can log.
+await tab('more');
+await page.waitForSelector('button[data-allow]');
+await page.click('button[data-allow]');
+await page.waitForSelector('text=That phone can log now.');
+await page.waitForSelector('button[data-allow][data-on="0"]');
+await shot('13-owner-allows');
+await p2.click('#tabs button[data-tab="now"]');
+await p2.click('#tabs button[data-tab="log"]');
+await p2.waitForSelector('#logBtn');
+await p2.click('button[data-kind="carbs"]');
+await p2.click('button[data-amount="30"]');
+await p2.click('#logBtn');
+await p2.click('#sheet button[data-b="0"]');
+await p2.waitForSelector('#toast');
+checks.familyLogsWhenAllowed = doseRows.some((d) => d.source === 'phone' && d.kind === 'carbs' && d.amount === 30 && !d.deleted);
+await p2.waitForSelector('.list .src >> text=phone · Mom');
+checks.listSaysWho = true;
+await p2.screenshot({ path: path.join(OUT, 'app-14-family-logs.png'), fullPage: true });
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

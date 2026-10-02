@@ -319,12 +319,12 @@
     const ev = S.recent ? S.recent.events.filter((e) => !c.pid || e.p === c.pid).sort((a, b) => b.t - a.t) : [];
     if (!ev.length) return '<p class="muted">Nothing logged in the last 48 hours.</p>';
     return '<ul class="list">' + ev.slice(0, 30).map((e) => '<li><span class="t">' + esc(dayLabel(e.t) === 'Today' ? clock(e.t) : dayLabel(e.t) + ' ' + clock(e.t)) + '</span><span>' + esc(short(e)) + '</span>' +
-      '<span class="src">' + esc(SOURCE[e.source] || e.source || '') + '</span>' + (editable && e.mine ? '<button data-undo="' + esc(e.id) + '">Undo</button>' : '') + '</li>').join('') + '</ul>';
+      '<span class="src">' + esc((SOURCE[e.source] || e.source || '') + (e.by ? ' · ' + e.by : '')) + '</span>' + (editable && e.mine ? '<button data-undo="' + esc(e.id) + '">Undo</button>' : '') + '</li>').join('') + '</ul>';
   }
   function renderLog() {
     const canLog = S.me && S.me.canLog;
     if (!canLog) {
-      main(card('<h2>Logging</h2><p>This phone shows the glucose and the history. Doses and meals are logged on the owner\'s own phone, in su94r Mini, by Alexa or in Telegram.</p>') +
+      main(card('<h2>Logging</h2><p>This phone shows the glucose and the history. It can\'t log yet: the owner can allow it in su94r Mini (Share to another phone) or in their own su94r app (More).</p>') +
         card('<h2>Last 48 hours</h2>' + recentList(false)));
       return;
     }
@@ -482,7 +482,16 @@
     if (x.telegram) alerts += '<p>Prefer Telegram? <a class="btn ghost" href="' + esc(x.telegram) + '">Open in Telegram</a> then press <b>Start</b>. The link works once, for 15 minutes.</p>';
     html += card(alerts);
     if (ns) html += card('<h2>Watch and widgets</h2><p>In <b>GlucoDataHandler</b> (free, also on the Pixel Watch): Sources → Nightscout, with this address and token.</p><p class="small"><code>' + esc(base) + '/ns</code>' + copy(base + '/ns') + '</p><p class="small"><code>' + esc(ns) + '</code>' + copy(ns) + '</p>');
-    html += card('<h2>This phone</h2><p>' + (role === 'family' ? 'A family member\'s phone: it reads, and does not log.' : 'Your own phone: it reads and logs.') + (S.me && S.me.name ? ' Named “' + esc(S.me.name) + '” in su94r Mini.' : '') + '</p>' +
+    if (role === 'me') {
+      let phones = null;
+      try { phones = (await api('app/phones')).phones; } catch (e) { /* shown below */ }
+      if (S.tab !== 'more') return;
+      html += card('<h2>Family phones</h2>' + (phones == null ? '<p class="muted">Could not load the family phones.</p>'
+        : !phones.length ? '<p class="muted">No family phones linked yet. Make a family code in su94r Mini → Share to another phone.</p>'
+          : '<p class="muted small">A family member who lives with you can log doses and meals too. Their doses get the same double-dose check.</p><ul class="list">' +
+            phones.map((p) => '<li><span>' + esc(p.name) + '</span><span class="src">' + (p.canLog ? 'can log' : 'reads only') + '</span><button data-allow="' + esc(p.id) + '" data-on="' + (p.canLog ? '0' : '1') + '">' + (p.canLog ? 'Stop logging' : 'Allow logging') + '</button></li>').join('') + '</ul>'));
+    }
+    html += card('<h2>This phone</h2><p>' + (role === 'family' ? (S.me && S.me.canLog ? 'A family member\'s phone: it reads and logs (the owner allowed it).' : 'A family member\'s phone: it reads; the owner can allow it to log.') : 'Your own phone: it reads and logs.') + (S.me && S.me.name ? ' Named “' + esc(S.me.name) + '” in su94r Mini.' : '') + '</p>' +
       '<button class="btn ghost" id="unlink">Unlink this phone</button>');
     html += '<p class="note" style="text-align:center">su94r · not a medical device. Readings come from LibreLinkUp and can be a few minutes behind.</p>';
     main(html);
@@ -496,6 +505,10 @@
     document.querySelectorAll('#tabs button').forEach((b) => { if (b.dataset.tab === tab) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); });
     window.scrollTo(0, 0);
     ({ now: renderNow, history: renderHistory, log: renderLog, report: renderReport, more: renderMore })[tab]();
+    if (tab === 'log' || tab === 'more') {
+      const before = S.me && S.me.canLog;
+      api('app/me').then((me) => { S.me = me; store.set(K.me, JSON.stringify(me)); if (S.tab === tab && me.canLog !== before) show(tab); }).catch(() => {});
+    }
   }
   $('tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); });
   $('people').addEventListener('click', (e) => {
@@ -516,6 +529,13 @@
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (t.id === 'logBtn') askToLog();
     else if (d.undo) undo(d.undo);
+    else if (d.allow) {
+      t.disabled = true;
+      api('app/phones/allow', { method: 'POST', body: { id: d.allow, canLog: d.on === '1' } })
+        .then(() => toast(d.on === '1' ? 'That phone can log now.' : 'That phone reads only now.'))
+        .catch((e) => toast(e.message))
+        .then(() => { if (S.tab === 'more') renderMore(); });
+    }
     else if (t.id === 'print') window.print();
     else if (t.id === 'install' && S.installEvt) { S.installEvt.prompt(); S.installEvt = null; }
     else if (t.id === 'unlink') {

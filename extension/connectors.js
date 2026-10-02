@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -74,8 +74,10 @@ function qrImage(h, text, label) {
   return h('img', { class: 'qr', src: qr.createDataURL(5, 4), alt: label, title: label, width: String(qr.getModuleCount() * 5 + 40) });
 }
 
-/** The share code on screen, if any: { url, role, until }. Kept only in this page. */
+/** The share code on screen, if any: { url, role, canLog, until }. Kept only in this page. */
 let shareShown = null;
+/** "Lives with me" ticked for the next family code. */
+let shareCanLog = false;
 let shareTimer = null;
 /** The doctor link just made, if any: { url, name, expiresAt }. Shown once; kept only in this page. */
 let doctorShown = null;
@@ -103,7 +105,7 @@ export const CONNECTORS = [
         clearTimeout(shareTimer);
         shareTimer = setTimeout(() => ctx.refresh(), shareShown.until - Date.now() + 500);
         return [
-          state(h, `Scan this with the ${shareShown.role === 'family' ? 'family member\'s' : 'other'} phone's camera and open the link. It works once, for about ${left} more minute${left === 1 ? '' : 's'}.`, 'on'),
+          state(h, `Scan this with the ${shareShown.role === 'family' ? 'family member\'s' : 'other'} phone's camera and open the link. It works once, for about ${left} more minute${left === 1 ? '' : 's'}.${shareShown.role === 'family' ? (shareShown.canLog ? ' That phone will be able to log doses and meals.' : ' That phone will read only.') : ''}`, 'on'),
           h('div', { class: 'qr-row' }, qrImage(h, shareShown.url, 'Scan with the other phone')),
           msg,
           h('div', { class: 'actions' }, action(ctx, msg, 'Done', 'Closing…', async () => { shareShown = null; })),
@@ -111,16 +113,32 @@ export const CONNECTORS = [
       }
       shareShown = null;
       const make = (role) => async () => {
-        const r = await shareNew(settings.screenLink, role);
-        shareShown = { url: shareUrl(settings.screenLink, r.invite), role, until: Date.now() + (r.expiresIn || 600) * 1000 };
+        const canLog = role === 'family' && shareCanLog;
+        const r = await shareNew(settings.screenLink, role, undefined, canLog);
+        shareShown = { url: shareUrl(settings.screenLink, r.invite), role, canLog: Boolean(r.canLog), until: Date.now() + (r.expiresIn || 600) * 1000 };
       };
-      return [
+      const tick = h('input', { type: 'checkbox', id: 'share-can-log', onchange: (e) => { shareCanLog = e.target.checked; } });
+      tick.checked = shareCanLog;
+      const out = [
         msg,
         h('div', { class: 'actions' },
           action(ctx, msg, 'My other phone', 'Making a code…', make('me'), 'primary'),
           action(ctx, msg, 'A family member\'s phone', 'Making a code…', make('family'))),
-        state(h, 'My other phone gets your own low alerts. A family member\'s phone is told only when a low is not handled, once you switch on "Tell caregivers too" in Low alerts.'),
+        h('label', { class: 'check', for: 'share-can-log' }, tick, ' They live with me: the family phone can log doses and meals too'),
+        state(h, 'My other phone gets your own low alerts and logs. A family member\'s phone reads, and logs only if you allow it; it is told about lows only when one is not handled, once you switch on "Tell caregivers too" in Low alerts.'),
       ];
+      // Phones already linked: who may log, and Remove.
+      let phones = [];
+      try { phones = ((await listScreens(settings.screenLink)).screens || []).filter((s) => s.kind === 'screen' && s.role); } catch { /* the list is optional */ }
+      if (phones.length) {
+        out.push(h('div', { class: 'state' }, 'Linked phones'), h('ul', { class: 'chats' }, phones.map((s) => h('li', {},
+          h('span', {}, `${s.name || 'Phone'} · ${s.role === 'family' ? (s.can_log ? 'family, can log' : 'family, reads only') : 'your phone, logs'} `),
+          s.role === 'family'
+            ? action(ctx, msg, s.can_log ? 'Stop logging' : 'Allow logging', 'Saving…', () => allowLogging(settings.screenLink, s.id, !s.can_log))
+            : null,
+          action(ctx, msg, 'Remove', 'Removing…', () => removeScreen(settings.screenLink, s.id))))));
+      }
+      return out;
     },
   },
   {

@@ -59,3 +59,4 @@
 .connector input.num { width: 64px; }
 .connector ul.chats { padding-left: 18px; margin: 6px 0; }
 .connector ul.chats li { margin: 3px 0; }
+.connector label.check { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 13px; cursor: pointer; }

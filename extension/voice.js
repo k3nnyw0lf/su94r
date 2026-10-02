@@ -95,7 +95,9 @@ export const newNsLink = (link, name) => call(link, 'ns/new', { method: 'POST', 
 
 // Sharing to another phone (server: workers/screens.js): a one-time invite shown as a QR code;
 // the phone that opens it links itself. The invite rides after the #, never sent to a server.
-export const shareNew = (link, role, name) => call(link, 'share/new', { method: 'POST', body: { role, name } });
+export const shareNew = (link, role, name, canLog = false) => call(link, 'share/new', { method: 'POST', body: { role, name, canLog } });
+/** Lets a linked family member's phone log doses and meals, or stops it. */
+export const allowLogging = (link, id, canLog) => call(link, 'screens/allow', { method: 'POST', body: { id, canLog } });
 export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/app/#join=${invite}`;
 
 // A live report link for the doctor (server: workers/doctor.js): always the latest 14 days,

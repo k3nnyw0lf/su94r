@@ -8,16 +8,19 @@
 //   GET  app/recent                 doses and meals of the last 48 hours, and fresh estimates
 //   POST app/log                    { kind, amount, minutesAgo, pid, confirm } → logs, or asks to confirm
 //   POST app/undo                   { id } → removes a dose this phone logged in the last 30 minutes
+//   GET  app/phones                 (owner's phone) the family phones and whether each may log
+//   POST app/phones/allow           (owner's phone) { id, canLog }
 //
-// A family member's phone reads; only the owner's own phone ('me') logs. Paired TVs and
-// widgets (no role) and every other token get none of this.
+// The owner's own phone ('me') logs. A family member's phone reads, and logs too once the owner
+// allows it (su94r_screens.can_log: su94r Mini, or the owner's phone here). Paired TVs and widgets
+// (no role) and every other token get none of this.
 
 import { screenFor } from './screens.js';
 import { asMarkers } from './doses.js';
 import { reportFor } from './doctor.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 
-export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo']);
+export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -31,6 +34,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   const screen = await screenFor(request, screens, '');
   if (!screen || screen.kind !== 'screen' || (screen.role !== 'me' && screen.role !== 'family')) return json({ error: 'unauthorized' }, 401);
   const owner = screen.role === 'me';
+  const canLog = owner || screen.can_log === true;
   let list = null;
   const people = async () => {
     if (!list) { try { list = (await snapshot()).people || []; } catch { list = []; } }
@@ -40,7 +44,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
 
   if (path === 'app/me') {
     return json({
-      name: screen.name || '', role: screen.role, canLog: owner,
+      name: screen.name || '', role: screen.role, canLog,
       people: (await people()).map((p) => ({ pid: p.pid, name: p.firstName || p.name, units: p.units, low: p.low, high: p.high, sensorStart: p.sensorStart || null })),
     });
   }
@@ -79,11 +83,29 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       } catch { /* no estimate */ }
     }
     const mine = `app-${screen.id.slice(0, 8)}-`;
-    return json({ events: events.map((e) => ({ ...e, mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, at: now });
+    // Which phone logged what ("phone · Mom"), from the linked phones' names.
+    const names = {};
+    try { for (const s of await screens.list()) if (s.kind === 'screen' && s.role) names[`app-${String(s.id).slice(0, 8)}-`] = s.name || ''; } catch { /* without names */ }
+    const by = (id) => (id.startsWith('app-') ? names[id.slice(0, 13)] || '' : '');
+    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, at: now });
   }
 
-  // Logging: the owner's own phone only.
-  if (!owner) return json({ error: 'Only the owner\'s own phone can log. This phone shows the glucose and the history.' }, 403);
+  // The owner's phone decides which family phones may log.
+  if (path === 'app/phones' || path === 'app/phones/allow') {
+    if (!owner) return json({ error: 'Only the owner\'s own phone can change this.' }, 403);
+    if (path === 'app/phones') {
+      const phones = (await screens.list()).filter((s) => s.kind === 'screen' && s.role === 'family')
+        .map((s) => ({ id: s.id, name: s.name || 'Family phone', canLog: s.can_log === true, lastSeen: s.last_seen || null }));
+      return json({ phones });
+    }
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const b = await request.json().catch(() => ({}));
+    if (!b.id) return json({ error: 'id needed' }, 400);
+    return (await screens.allowLog(String(b.id), b.canLog === true)) ? json({ ok: true, canLog: b.canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
+
+  // Logging: the owner's own phone, and family phones the owner allowed.
+  if (!canLog) return json({ error: 'This phone can\'t log yet. The owner can allow it in su94r Mini (Share to another phone) or in their own su94r app (More).' }, 403);
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
   if (!doses?.ready) return json({ error: 'The dose store is not set up' }, 503);
   const body = await request.json().catch(() => ({}));

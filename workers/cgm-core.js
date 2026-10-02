@@ -357,6 +357,12 @@ async function screensRoute(path, request, url, env, deps) {
   }
   if (path === 'pair/claim') return json(await pairClaim(request, store));
   if (path === 'screens') return json({ screens: await store.list() });
+  if (path === 'screens/allow') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const { id, canLog } = await request.json().catch(() => ({}));
+    if (!id) return json({ error: 'id needed' }, 400);
+    return (await store.allowLog(String(id), canLog === true)) ? json({ ok: true, canLog: canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
   if (path === 'screens/remove') {
     const { id } = await request.json().catch(() => ({}));
     if (!id) return json({ error: 'id needed' }, 400);
@@ -365,7 +371,7 @@ async function screensRoute(path, request, url, env, deps) {
   }
   return json({ error: 'not found' }, 404);
 }
-const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove', 'share/new', 'share/claim', 'share/extras', 'doctor/new', 'doctor/data']);
+const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove', 'share/new', 'share/claim', 'share/extras', 'doctor/new', 'doctor/data', 'screens/allow']);
 
 // One person, flattened for widget apps (KWGT, Scriptable): ready-made text and a colour.
 async function glance(env, n) {
