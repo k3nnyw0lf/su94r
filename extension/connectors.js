@@ -36,7 +36,29 @@ function copyable(h, text) {
   return h('div', { class: 'actions' }, code, h('button', { type: 'button', class: 'ghost', onclick: async (e) => { await navigator.clipboard.writeText(text); e.target.textContent = 'Copied'; } }, 'Copy'));
 }
 
-const needServer = (h) => state(h, 'Needs your su94r server: paste its big-screen link in Settings → Alexa and screens first.', 'warn');
+const needServer = (h) => state(h, 'Needs your su94r server: Settings → Alexa and screens → Connect to my su94r server first.', 'warn');
+
+/** One click for Gemini: make the AI address if needed, copy it, open Gemini's Connected Apps.
+ *  The note survives the redraw that follows (the card is rebuilt). */
+let geminiNote = '';
+function geminiButton(ctx, msg, ensureAddress) {
+  return ctx.h('button', {
+    type: 'button', class: 'primary',
+    onclick: async () => {
+      msg.textContent = 'Getting the address ready…';
+      try {
+        const address = await ensureAddress();
+        let copied = true;
+        try { await navigator.clipboard.writeText(address); } catch { copied = false; }
+        await chrome.tabs.create({ url: 'https://gemini.google.com/apps' });
+        geminiNote = copied
+          ? 'Copied. In the Gemini tab, scroll down to Custom apps, click the link box, press Ctrl+V, then Next.'
+          : 'Gemini is open. Press Copy below, then in Gemini scroll down to Custom apps, paste it and press Next.';
+      } catch (e) { geminiNote = e.message; }
+      ctx.refresh();
+    },
+  }, 'Set up Gemini');
+}
 
 export const CONNECTORS = [
   {
@@ -176,21 +198,29 @@ export const CONNECTORS = [
       if (!parseScreenLink(settings.screenLink)) return needServer(h);
       const ai = ctx.state.connectors?.ai;
       const msg = h('div', { class: 'state' });
+      const make = async () => {
+        const r = await newAiConnector(settings.screenLink, 'AI apps');
+        await setConnector('ai', { id: r.id, token: r.token, at: Date.now() });
+        return r.token;
+      };
+      const address = async () => aiAddress(settings.screenLink, ai?.token || await make());
+      const note = geminiNote ? state(h, geminiNote, 'on') : null;
+      geminiNote = '';
       if (!ai?.token) {
-        const make = async () => {
-          const r = await newAiConnector(settings.screenLink, 'AI apps');
-          await setConnector('ai', { id: r.id, token: r.token, at: Date.now() });
-        };
-        return [msg, h('div', { class: 'actions' }, action(ctx, msg, 'Make the AI address', 'Making it…', make, 'primary')),
-          state(h, 'On Android, the Claude app (Pro or Max) can also read Health Connect itself: Claude → Settings → Health.')];
+        return [msg, note, h('div', { class: 'actions' },
+          geminiButton(ctx, msg, address),
+          action(ctx, msg, 'Make the AI address', 'Making it…', make)),
+        state(h, 'On Android, the Claude app (Pro or Max) can also read Health Connect itself: Claude → Settings → Health.')];
       }
       return [
         state(h, 'Ready. Add this address once in each AI app. Keep it private: anyone with it can read your glucose.', 'on'),
         copyable(h, aiAddress(settings.screenLink, ai.token)),
+        note,
         h('p', { class: 'sub-h' }, 'Google Gemini (then also on your Pixel and Android phone)'),
+        h('div', { class: 'actions' }, geminiButton(ctx, msg, address)),
         steps(h, [
-          'Open gemini.google.com/apps, signed in with your Google account, and go to Custom apps.',
-          'Paste the address into "Add a custom app link" and press Next.',
+          'Press Set up Gemini: it copies the address and opens gemini.google.com/apps.',
+          'Scroll down to Custom apps, paste the address into "Add a custom app link" and press Next.',
           'Ask Gemini on the web, or say "Hey Google" on your phone: "@su94r what is my glucose?" or "How was my sugar overnight?"',
         ], true),
         h('p', { class: 'sub-h' }, 'Claude'),
