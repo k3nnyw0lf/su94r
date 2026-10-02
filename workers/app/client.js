@@ -363,7 +363,8 @@
       else if (L.meal && L.meal.food) m += '<div class="meal">About <b>' + L.meal.total + ' g</b> of carbs (likely ' + L.meal.low + '–' + L.meal.high + ' g, ' + esc(L.meal.confidence) + ' confidence)' +
         (L.meal.items.length ? ': ' + L.meal.items.map((x) => esc(x.name) + (x.carbs != null ? ' about ' + x.carbs + ' g' : '')).join(', ') : '') + '.<br><span class="muted small">Photo estimates are rough: check the number before logging.</span></div>';
     }
-    const html = card('<h2>Log</h2><div class="kinds">' + kindBtn('rapid', 'Rapid insulin') + kindBtn('basal', 'Long-acting') + kindBtn('carbs', 'Carbs') + '</div>' + m +
+    const mic = (window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" id="micBtn" style="display:block;width:100%;margin-bottom:12px">🎤 Say it: "4 units rapid" or "40 grams"</button>' + (S.heard ? '<p class="note" style="margin-top:-6px">' + esc(S.heard) + '</p>' : '') : '';
+    const html = card('<h2>Log</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', 'Rapid insulin') + kindBtn('basal', 'Long-acting') + kindBtn('carbs', 'Carbs') + '</div>' + m +
       '<div class="row" style="margin-top:10px"><label class="muted small" for="otherKind">Other insulin</label><select id="otherKind"><option value="">—</option>' +
       [['short', 'Regular'], ['intermediate', 'NPH'], ['mix', 'Pre-mixed']].map((o) => '<option value="' + o[0] + '"' + (L.kind === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>' +
       '<div class="amount"><button data-step="-1" aria-label="Less">−</button><output id="amt" aria-live="polite">' + (L.amount || 0) + '<small>' + (carbs ? 'grams' : 'units') + '</small></output><button data-step="1" aria-label="More">+</button></div>' +
@@ -407,6 +408,34 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.remove(), action ? 10000 : 4000);
   }
+  // Log by voice: the phone's own speech recognition turns it into text; the server reads the
+  // text the same way as a Telegram message (tglog.js); nothing is saved before "Log it".
+  function listen(btn) {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = navigator.language && /^es/i.test(navigator.language) ? 'es-US' : 'en-US';
+    rec.interimResults = false;
+    rec.maxAlternatives = 3;
+    btn.disabled = true; btn.textContent = '🎤 Listening…';
+    rec.onerror = (e) => { S.heard = e.error === 'not-allowed' ? 'The microphone is blocked for su94r. Allow it in the browser settings.' : 'Did not catch that. Try again.'; renderLog(); };
+    rec.onend = () => { if (btn.isConnected) { btn.disabled = false; btn.textContent = '🎤 Say it: "4 units rapid" or "40 grams"'; } };
+    rec.onresult = async (e) => {
+      const alts = Array.from(e.results[0] || []).map((a) => a.transcript);
+      let r = null;
+      for (const text of alts) {
+        try { r = await api('app/parse', { method: 'POST', body: { text } }); } catch (x) { r = { ok: false, error: x.message }; }
+        if (r.ok) break;
+      }
+      if (!r || !r.ok) { S.heard = 'Heard "' + (alts[0] || '') + '". ' + ((r && r.error) || ''); renderLog(); return; }
+      S.heard = 'Heard "' + r.heard + '".';
+      S.log.kind = r.kind; S.log.amount = r.amount; S.log.ago = r.minutesAgo || 0; S.log.meal = null;
+      renderLog();
+      askToLog();
+    };
+    try { rec.start(); } catch (x) { btn.disabled = false; }
+  }
+
   function askToLog() {
     const L = S.log, c = cur();
     const when = L.ago ? L.ago + ' min ago' : 'now';
@@ -557,6 +586,33 @@
     main('<div class="row noprint" style="margin-bottom:12px"><button class="btn ghost" id="print">Print or save as PDF</button></div>' +
       card(reportHtml(S.report[c.pid].data), 'report') +
       '<p class="note noprint">For your doctor: su94r Mini → Health vault → <b>Live link for my doctor</b> makes a private link that always shows this report.</p>');
+    let labs = null;
+    try { labs = await api('app/labs?pid=' + encodeURIComponent(c.pid)); } catch (e) { labs = null; }
+    if (S.tab !== 'report' || !labs) return;
+    $('main').insertAdjacentHTML('beforeend', card('<h2>Lab results</h2>' + (labs.labs.length ? '<ul class="list">' + labs.labs.map((l) => '<li><span class="t">' + esc(l.takenOn) + '</span><span>' + esc(l.name) + ' <b>' + esc(String(l.value)) + (l.unit ? ' ' + esc(l.unit) : '') + '</b></span>' + (labs.canEdit ? '<button data-lab-del="' + esc(l.id) + '" style="margin-left:auto">Remove</button>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">None yet. An A1c typed in here shows in the report and the doctor\'s link next to the GMI.</p>') +
+      (labs.canEdit ? '<button class="btn ghost" id="labAdd">Add a lab result</button>' : ''), 'noprint'));
+  }
+
+  function editLab() {
+    const today = new Date(); const iso = new Date(today.getTime() - today.getTimezoneOffset() * 60e3).toISOString().slice(0, 10);
+    sheet('<h3>Add a lab result</h3><label for="labKind">Test</label><select id="labKind"><option value="a1c">A1c (%)</option><option value="other">Another test</option></select>' +
+      '<div id="labOther" hidden><label for="labName">Name</label><input id="labName" maxlength="40" placeholder="for example LDL cholesterol"><label for="labUnit">Unit</label><input id="labUnit" maxlength="16" placeholder="for example mg/dL"></div>' +
+      '<label for="labValue">Result</label><input id="labValue" type="number" inputmode="decimal" step="any"><label for="labDate">Date of the test</label><input id="labDate" type="date" value="' + iso + '">',
+      [['Save', 'btn', saveLab], ['Cancel', 'btn ghost', closeSheet]]);
+    $('labKind').onchange = () => { $('labOther').hidden = $('labKind').value !== 'other'; };
+  }
+  async function saveLab() {
+    const body = { pid: cur().pid, kind: $('labKind').value, name: $('labName').value, unit: $('labUnit').value, value: $('labValue').value, takenOn: $('labDate').value };
+    try { await api('app/labs/save', { method: 'POST', body }); closeSheet(); toast('Saved. It shows in the report.'); }
+    catch (e) { toast(e.message); return; }
+    S.report = {};
+    if (S.tab === 'report') renderReport();
+  }
+  async function removeLab(id) {
+    try { await api('app/labs/remove', { method: 'POST', body: { pid: cur().pid, id } }); toast('Removed.'); }
+    catch (e) { toast(e.message); return; }
+    S.report = {};
+    if (S.tab === 'report') renderReport();
   }
 
   // ---------- More ----------
@@ -648,6 +704,9 @@
     else if (d.amount) setAmount(Number(d.amount));
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (t.id === 'logBtn') askToLog();
+    else if (t.id === 'micBtn') listen(t);
+    else if (t.id === 'labAdd') editLab();
+    else if (d.labDel) removeLab(d.labDel);
     else if (d.undo) undo(d.undo);
     else if (d.supply !== undefined) editSupply(d.supply);
     else if (d.treatG) { S.treatGrams = Number(d.treatG); renderNow(); }

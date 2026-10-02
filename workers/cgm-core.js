@@ -43,6 +43,7 @@ import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 import { nightStore, nightRoute, alertFanOut } from './night.js';
 import { pushStore, pushToPhones } from './webpush.js';
 import { supplyStore } from './supplies.js';
+import { labStore } from './labs.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
 import { historyStore, historyRoute } from './history.js';
 import { doctorNew, doctorData } from './doctor.js';
@@ -345,7 +346,7 @@ async function screensRoute(path, request, url, env, deps) {
   }
   if (path === 'doctor/data') {
     const screen = await screenFor(request, store, '');
-    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), snapshot: () => snapshot(env) });
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), snapshot: () => snapshot(env) });
     return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {
@@ -436,7 +437,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       return await appRoute(path, request, url, env, {
         screens: deps.screens || screenStore(env), history: deps.history || historyStore(env), doses: deps.store || doseStore(env),
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
-        night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env),
+        night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env), labs: deps.labs || labStore(env),
         notify: (row, role, msg) => alertFanOut(env, row, {
           push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
           webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),

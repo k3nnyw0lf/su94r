@@ -63,7 +63,9 @@ let nightRow = { id: 1, ...NIGHT_DEFAULTS, self_topic: 's-topic', care_topic: 'c
 const night = { ready: true, async get() { return structuredClone(nightRow); }, async patch(p) { nightRow = { ...nightRow, ...structuredClone(p) }; }, async claimTick() { return false; } };
 let supplyRows = [];
 const supplies = { ready: true, async list() { return supplyRows; }, async save(r) { supplyRows = supplyRows.filter((x) => x.item !== r.item).concat([r]); }, async remove(pid, item) { supplyRows = supplyRows.filter((x) => x.item !== item); } };
-const deps = { screens, history, store: doses, forecasts, night, supplies, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
+let labRows = [];
+const labs = { ready: true, async list() { return labRows.map((r, i) => ({ id: String(i), ...r })); }, async add(r) { labRows.push(r); }, async remove(pid, id) { labRows.splice(Number(id), 1); } };
+const deps = { screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -146,6 +148,14 @@ await tab('report');
 await page.waitForSelector('.report svg.agp');
 checks.reportFits = await noSideScroll();
 await shot('9-report');
+await page.waitForSelector('#labAdd');
+await page.click('#labAdd');
+await page.waitForSelector('#labValue');
+await page.fill('#labValue', '7.1');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('text=Latest A1c');
+checks.labInReport = labRows.length === 1 && (await page.textContent('.report')).includes('Latest A1c 7.1%');
+await shot('9b-report-labs');
 await tab('more');
 await page.waitForSelector('#unlink');
 await shot('10-more');

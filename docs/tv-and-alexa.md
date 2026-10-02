@@ -70,6 +70,10 @@ Each code works once, for 10 minutes. Linked phones appear with the other screen
 
 **Missed-dose reminders**: from the doses on the server (the last 14 days; su94r Mini copies its 90-day insulin history once), su94r learns your usual long-acting and mealtime times and reminds you when one is not logged: long-acting 90 minutes late (none in 18 hours for a once-a-day dose), mealtimes 75 minutes late only when your glucose shows it, never at night, once a day each. It never says what or how much to take. Off switch: su94r Mini → Low alerts → Levels and warnings. Code: `workers/nudges.js`.
 
+**Log by voice** (app → Log → 🎤): say "4 units rapid", "18 Lantus 30 minutes ago" or "40 grams"; the phone's own speech recognition writes it down, the server reads it like a Telegram message (`app/parse`), and the usual confirm and double-dose check follow. Nothing is saved before **Log it**.
+
+**Lab results** (app → Report): type in an A1c or any other result; the report and the doctor's link show the last 12 months and put the latest A1c next to the GMI. Code: `workers/labs.js`.
+
 **Supplies** (app → More): insulin and sensors on hand count down as doses are logged (pen priming is not counted) and as new sensors start; su94r reminds you by day when one runs low or a refill date is near. The app also says when the sensor ends. Code: `workers/supplies.js`.
 
 When you are low, **Now** shows **Treat the low** with your plan (su94r Mini → Low alerts on your phone → **My low plan**): one tap logs the grams, stops the reminders and tells caregivers who were alerted that it is handled. After the plan's minutes su94r says where it went; still low (or no reading), the reminders start again. App alerts use Web Push with the server's own VAPID key (`workers/webpush.js`, checked byte for byte against RFC 8291's example and end to end through Microsoft Edge's push service in `tests/push-browser.mjs`).

@@ -14,6 +14,7 @@
 import { sha256, randomToken } from './screens.js';
 import { agp } from '../extension/agp.js';
 import { asMarkers } from './doses.js';
+import { labsForReport } from './labs.js';
 
 const DAY = 864e5;
 const clean = (s, max = 40) => String(s || '').replace(/[^\p{L}\p{N} '.,()-]/gu, '').trim().slice(0, max);
@@ -35,7 +36,7 @@ export async function doctorNew(request, store, snapshot) {
 }
 
 /** The 14-day report numbers for one person, from the server's history and logged doses. */
-export async function reportFor(pid, { history, doses, snapshot, now = Date.now() }) {
+export async function reportFor(pid, { history, doses, snapshot, labs = null, now = Date.now() }) {
   let person = null;
   try { person = (await snapshot()).people?.find((p) => p.pid === pid) || null; } catch { /* history only */ }
   const from = now - 14 * DAY;
@@ -44,20 +45,22 @@ export async function reportFor(pid, { history, doses, snapshot, now = Date.now(
   try { if (doses?.ready) events = asMarkers(await doses.between(pid, from, now)); } catch { /* none */ }
   const low = person?.low ?? 70, high = person?.high ?? 180;
   const r = agp(points, events, { from, to: now, low, high });
+  let lab = { labs: [], a1c: null };
+  try { if (labs?.ready) lab = labsForReport(await labs.list(pid), now); } catch { /* without labs */ }
   return {
     person: person ? (person.firstName || person.name) : '',
     units: person?.units || 'mg/dL', low, high,
     from, to: now, days: r.days,
     readings: r.n, coverage: r.coverage, mean: r.mean, gmi: r.gmi, cv: r.cv,
     ranges: { veryLow: r.veryLow, low: r.low, inRange: r.inRange, high: r.high, veryHigh: r.veryHigh },
-    profile: r.profile, insulin: r.insulin, meals: r.meals,
+    profile: r.profile, insulin: r.insulin, meals: r.meals, labs: lab.labs, a1c: lab.a1c,
   };
 }
 
 /** The report numbers for a doctor link's token, or null when the link is unknown, removed or expired. */
-export async function doctorData(screen, { history, doses, snapshot, now = Date.now() }) {
+export async function doctorData(screen, { history, doses, snapshot, labs = null, now = Date.now() }) {
   if (!screen || screen.kind !== 'doctor' || !screen.pid || Date.parse(screen.expires_at) <= now) return null;
-  return { ...(await reportFor(screen.pid, { history, doses, snapshot, now })), expiresAt: screen.expires_at, label: screen.name };
+  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, now })), expiresAt: screen.expires_at, label: screen.name };
 }
 
 /** The report as HTML in the browser: esc, pct, day, val, stat, chart and reportHtml(d). Plain ES2017,
@@ -92,7 +95,13 @@ function reportHtml(d){
     '<table><tr><td>Very high (&gt;250)</td><td class="num">'+pct(r.veryHigh)+'</td><td class="muted small">target &lt;5%</td></tr><tr><td>High</td><td class="num">'+pct(r.high)+'</td><td class="muted small">target &lt;25% with very high</td></tr><tr><td>In range ('+val(d.low,u)+'–'+val(d.high,u)+')</td><td class="num">'+pct(r.inRange)+'</td><td class="muted small">target &gt;70%</td></tr><tr><td>Low</td><td class="num">'+pct(r.low)+'</td><td class="muted small">target &lt;4% with very low</td></tr><tr><td>Very low (&lt;54)</td><td class="num">'+pct(r.veryLow)+'</td><td class="muted small">target &lt;1%</td></tr></table></div>'+
     '<h2>Glucose by time of day</h2><p class="muted small">Median line, 25–75% band and 5–95% band of all days; target range shaded.</p>'+chart(d)+
     '<h2>Logged insulin and meals</h2>'+(ins?'<table><tr><th>Insulin</th><th class="num">Doses</th><th class="num">Units per day</th></tr>'+ins+'</table>':'<p class="muted">No insulin logged on the server in this period.</p>')+
-    '<p class="muted small">'+(d.meals?d.meals.count:0)+' meals logged. Logged markers are what was entered and may be incomplete.</p>';
+    '<p class="muted small">'+(d.meals?d.meals.count:0)+' meals logged. Logged markers are what was entered and may be incomplete.</p>'+
+    labsHtml(d);
+}
+function labsHtml(d){
+  if(!d.labs||!d.labs.length)return '';
+  var cmp=d.a1c?'<p class="small">Latest A1c <b>'+d.a1c.value.toFixed(1)+'%</b> ('+day(d.a1c.takenOn+'T12:00:00')+'). GMI over these 14 days: <b>'+(d.gmi!=null?d.gmi.toFixed(1)+'%':'not enough readings')+'</b>. They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.</p>':'';
+  return '<h2>Lab results (last 12 months)</h2>'+cmp+'<table><tr><th>Date</th><th>Test</th><th class="num">Result</th></tr>'+d.labs.map(function(l){return '<tr><td>'+day(l.takenOn+'T12:00:00')+'</td><td>'+esc(l.name)+'</td><td class="num">'+esc(String(l.value))+(l.unit?' '+esc(l.unit):'')+'</td></tr>'}).join('')+'</table><p class="muted small">Typed in by the patient.</p>';
 }
 `;
 

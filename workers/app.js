@@ -16,6 +16,8 @@
 //   POST app/push/test              a test alert to this phone
 //   POST app/treat                  { grams, pid } a low treated: logs the carbs, stops the reminders,
 //                                   rechecks after the owner's plan's minutes (night.js)
+//   POST app/parse                  { text } what a spoken "4 units rapid" means (nothing is logged)
+//   GET  app/labs?pid=              lab results (labs.js); POST app/labs/save, app/labs/remove
 //   GET  app/supplies?pid=          insulin and sensors on hand (supplies.js)
 //   POST app/supplies/save          { pid, item, onHand, warnAt, refillOn }
 //   POST app/supplies/remove        { pid, item }
@@ -31,9 +33,12 @@ import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { pushTo, pushEndpointOk } from './webpush.js';
 import { startTreatment, NIGHT_DEFAULTS } from './night.js';
 import { supplyStatus, supplyRow } from './supplies.js';
+import { labRow } from './labs.js';
+import { parseLog } from './tglog.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
-  'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove']);
+  'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
+  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -41,7 +46,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -80,7 +85,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (path === 'app/report') {
     const pid = await pidFor(url.searchParams.get('pid'));
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
-    return json(await reportFor(pid, { history, doses, snapshot, now }));
+    return json(await reportFor(pid, { history, doses, snapshot, labs, now }));
   }
 
   if (path === 'app/recent') {
@@ -127,6 +132,26 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const b = await request.json().catch(() => ({}));
     if (!b.id) return json({ error: 'id needed' }, 400);
     return (await screens.allowLog(String(b.id), b.canLog === true)) ? json({ ok: true, canLog: b.canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
+
+  if (path === 'app/labs') {
+    if (!labs?.ready) return json({ error: 'Lab results are not set up on the server.' }, 503);
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const rows = pid ? await labs.list(pid) : [];
+    return json({ labs: rows.map((r) => ({ id: r.id, takenOn: r.taken_on, kind: r.kind, name: r.name, value: Number(r.value), unit: r.unit || '' })), canEdit: canLog });
+  }
+
+  if (path === 'app/parse') {
+    // A spoken or typed "4 units rapid", "40 grams", "20 Lantus 30 minutes ago": what it would log.
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const b = await request.json().catch(() => ({}));
+    const text = spokenNumbers(String(b.text || '').slice(0, 200));
+    const e = parseLog(text);
+    if (!e) return json({ ok: false, heard: text, error: 'Say an amount and what it is, for example "4 units rapid" or "40 grams".' });
+    const minutesAgo = Math.min(24 * 60, Math.round((e.back || 0) / MIN));
+    return json(e.type === 'carbs'
+      ? { ok: true, heard: text, kind: 'carbs', amount: e.grams, minutesAgo }
+      : { ok: true, heard: text, kind: e.kind, amount: e.units, minutesAgo });
   }
 
   if (path === 'app/supplies') {
@@ -213,6 +238,17 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ ok: true, id, recheckAt: t.recheckAt, text: `Logged ${grams} g. Reminders stop; recheck in ${Math.round((t.recheckAt - now) / MIN)} min.` });
   }
 
+  if (path === 'app/labs/save' || path === 'app/labs/remove') {
+    if (!labs?.ready) return json({ ok: false, error: 'Lab results are not set up on the server.' }, 503);
+    const pid = await pidFor(String(body.pid || ''));
+    if (!pid) return json({ ok: false, error: 'No one to keep results for yet.' }, 400);
+    if (path === 'app/labs/remove') { await labs.remove(pid, String(body.id || '')); return json({ ok: true }); }
+    const row = labRow(pid, body, now);
+    if (row.error) return json({ ok: false, error: row.error }, 400);
+    await labs.add(row);
+    return json({ ok: true });
+  }
+
   if (path === 'app/supplies/save' || path === 'app/supplies/remove') {
     if (!supplies?.ready) return json({ ok: false, error: 'Supplies are not set up on the server.' }, 503);
     const pid = await pidFor(String(body.pid || ''));
@@ -233,6 +269,19 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ ok: true });
   }
   return json({ error: 'not found' }, 404);
+}
+
+const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+/** "four and a half units", "twenty five grams", "a hundred" → digits, for the text parser. */
+export function spokenNumbers(text) {
+  let t = String(text).toLowerCase().replace(/-/g, ' ');
+  t = t.replace(/\bhalf an hour\b/g, '30 minutes').replace(/\ban hour\b/g, '1 hour').replace(/\b(a|one) hundred( and)?\b/g, '100 ');
+  t = t.replace(new RegExp(`\\b(${TENS.slice(2).join('|')})(?: (${ONES.slice(1, 10).join('|')}))?\\b`, 'g'), (m, tens, one) => String(TENS.indexOf(tens) * 10 + (one ? ONES.indexOf(one) : 0)));
+  t = t.replace(new RegExp(`\\b(${ONES.join('|')})\\b`, 'g'), (m) => String(ONES.indexOf(m)));
+  t = t.replace(/\s+/g, ' ').replace(/\b100 (\d{1,2})\b/g, (m, n) => String(100 + Number(n)));
+  t = t.replace(/(\d+) and a half\b/g, (m, n) => `${n}.5`).replace(/\ba half\b/g, '0.5');
+  return t.replace(/\s+/g, ' ').trim();
 }
 
 /** When an app-logged dose was saved (its id ends in the time, base 36). */
