@@ -20,10 +20,13 @@ const FOLDER = 'su94r';
 export const DRIVE_SCOPES = ['openid', 'email', 'https://www.googleapis.com/auth/drive.file'];
 export const GOOGLE_HOSTS = ['https://www.googleapis.com/*', 'https://health.googleapis.com/*', 'https://openidconnect.googleapis.com/*', 'https://oauth2.googleapis.com/*'];
 
-// The OAuth client su94r Mini signs in with: a "Web application" client whose redirect URI
-// is this extension's chrome.identity.getRedirectURL(). A client ID is public by design (it
-// is in every sign-in link); it can be set in Settings to use your own Google Cloud project.
-export const BUILT_IN_CLIENT_ID = '';
+// The OAuth client su94r Mini signs in with: the "su94r" Web application client in the su94r
+// Google Cloud project, whose redirect URIs include this extension's chrome.identity.getRedirectURL()
+// (https://gcdoahfflgpabebcbhohaklfmpnnggpi.chromiumapp.org/). A client ID is public by design (it
+// is in every sign-in link). The app is in Google's Testing mode, so only the test users added
+// in that project can sign in; a copy of su94r run by someone else should set its own client ID
+// on the vault page's Google Drive card.
+export const BUILT_IN_CLIENT_ID = '1009934716310-6qf6p6344544bngramu28vl9u7l1r5vf.apps.googleusercontent.com';
 
 import { mergeMonth } from './drive-month.js';
 export { mergeMonth, monthOf, monthRange } from './drive-month.js';
