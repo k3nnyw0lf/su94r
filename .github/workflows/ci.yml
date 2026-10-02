@@ -1,0 +1,26 @@
+name: CI
+
+# Tests and builds every push and pull request. Deploying is done by hand
+# (npx wrangler pages deploy dist --project-name <your project>), so no
+# deployment secrets live in this public repository.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx vitest run
+      - run: npm run build
