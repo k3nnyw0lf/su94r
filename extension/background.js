@@ -11,7 +11,7 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
@@ -148,6 +148,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) autoConnect().catch(() => {});
     if (!LEGACY) weeklySummary().catch(() => {});
     if (!LEGACY) copyHistoryOnce().catch(() => {});
+    if (!LEGACY) copyDosesOnce().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -787,6 +788,24 @@ async function weeklySummary({ force = false } = {}) {
 // ---- the server's history (history.js): copy what this computer has kept, once per person ----
 // The server keeps every reading itself from then on; this fills in the past 90 days so reports
 // and the phone app have history at once. 5-minute steps, pieces of 4000, one person per run.
+/** Once per computer: its logged insulin of the last 90 days to the server, so missed-dose
+ *  reminders and the doctor's report know the usual times (voice/sync carries only 48 hours). */
+async function copyDosesOnce() {
+  const settings = await getSettings();
+  if (!settings.screenLink) return;
+  const { dosesCopied } = await local.get('dosesCopied');
+  if (dosesCopied) return;
+  const { events = [] } = await local.get('events');
+  const list = events.filter((e) => e.type === 'insulin' && e.t >= Date.now() - 90 * 864e5 && !isDemo(e.p));
+  const tomb = list.length ? await tombstoned(list).catch(() => new Set()) : new Set();
+  const markers = list.filter((e) => !tomb.has(e.id)).map(({ id, p, t, type, kind, amount, source }) => ({ id, p, t, type, kind, amount, source }));
+  for (let i = 0; i < markers.length; i += 1000) {
+    const r = await dosesImport(settings.screenLink, markers.slice(i, i + 1000));
+    if (r?.ok !== true) throw new Error('dose copy not confirmed');
+  }
+  await local.set({ dosesCopied: Date.now() });
+}
+
 async function copyHistoryOnce() {
   const settings = await getSettings();
   if (!settings.screenLink) return;

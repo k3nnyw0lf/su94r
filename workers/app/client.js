@@ -263,8 +263,10 @@
         '<p class="note">An estimate from su94r Mini\'s learner, made ' + esc(ago(est.at)) + ' from your own past data. Not a reason to dose.</p>');
     }
     if (L.sensorStart) {
-      const days = Math.floor((now - L.sensorStart) / DAY);
-      html += '<p class="muted small" style="text-align:center">Sensor started ' + (days < 1 ? 'today' : days === 1 ? 'yesterday' : days + ' days ago') + '</p>';
+      const ends = L.sensorStart + ((S.recent && S.recent.sensorDays) || 14) * DAY;
+      const left = ends - now;
+      const when = left <= 0 ? 'Sensor has ended' : left < DAY ? 'Sensor ends ' + (dateKey(ends) === dateKey(now) ? 'today' : 'tomorrow') + ' at ' + clock(ends) : left < 2 * DAY ? 'Sensor ends tomorrow at ' + clock(ends) : 'Sensor ends in ' + Math.floor(left / DAY) + ' days (' + new Date(ends).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }) + ')';
+      html += '<p class="small" style="text-align:center;color:' + (left < DAY ? 'var(--h)' : 'var(--muted)') + '">' + esc(when) + '</p>';
     }
     main(html);
   }
@@ -494,6 +496,31 @@
     await sub.unsubscribe();
   }
 
+  // ---------- supplies ----------
+  const SUPPLY = [['rapid', 'Rapid insulin'], ['basal', 'Long-acting insulin'], ['short', 'Regular insulin'], ['intermediate', 'NPH insulin'], ['mix', 'Pre-mixed insulin'], ['sensors', 'Sensors']];
+  function editSupply(item) {
+    const s = (S.supplies || []).find((x) => x.item === item) || null;
+    const free = SUPPLY.filter((o) => !(S.supplies || []).some((x) => x.item === o[0]));
+    sheet('<h3>' + (s ? esc(s.label) : 'Add supplies') + '</h3>' +
+      (s ? '' : '<label for="supItem">What</label><select id="supItem">' + free.map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('') + '</select>') +
+      '<label for="supHave">On hand now (units of insulin, or sensors)</label><input id="supHave" type="number" inputmode="decimal" min="0" value="' + (s ? s.left : '') + '">' +
+      '<p class="note" style="margin-top:-4px">A U-100 pen holds 300 units; a 10 mL vial 1000.</p>' +
+      '<label for="supWarn">Remind me when it is down to</label><input id="supWarn" type="number" inputmode="decimal" min="0" placeholder="for example 300 units, or 1 sensor" value="' + (s && s.warnAt ? s.warnAt : '') + '">' +
+      '<label for="supRefill">Refill date (optional)</label><input id="supRefill" type="date" value="' + (s && s.refillOn ? esc(s.refillOn) : '') + '">',
+      [['Save', 'btn', () => saveSupply(s ? s.item : null)]].concat(s ? [['Remove', 'btn ghost', () => removeSupply(s.item)]] : []).concat([['Cancel', 'btn ghost', closeSheet]]));
+  }
+  async function saveSupply(item) {
+    const body = { pid: cur().pid, item: item || $('supItem').value, onHand: $('supHave').value, warnAt: $('supWarn').value, refillOn: $('supRefill').value || null };
+    try { await api('app/supplies/save', { method: 'POST', body }); closeSheet(); toast('Saved.'); }
+    catch (e) { toast(e.message); return; }
+    if (S.tab === 'more') renderMore();
+  }
+  async function removeSupply(item) {
+    try { await api('app/supplies/remove', { method: 'POST', body: { pid: cur().pid, item } }); closeSheet(); toast('Removed.'); }
+    catch (e) { toast(e.message); return; }
+    if (S.tab === 'more') renderMore();
+  }
+
   // ---------- treating a low ----------
   function askToTreat(grams) {
     const plan = (S.recent && S.recent.plan) || { minutes: 15 };
@@ -574,6 +601,16 @@
           : '<p class="muted small">A family member who lives with you can log doses and meals too. Their doses get the same double-dose check.</p><ul class="list">' +
             phones.map((p) => '<li><span>' + esc(p.name) + '</span><span class="src">' + (p.canLog ? 'can log' : 'reads only') + '</span><button data-allow="' + esc(p.id) + '" data-on="' + (p.canLog ? '0' : '1') + '">' + (p.canLog ? 'Stop logging' : 'Allow logging') + '</button></li>').join('') + '</ul>'));
     }
+    let sup = null;
+    try { sup = await api('app/supplies?pid=' + encodeURIComponent(cur().pid)); } catch (e) { sup = null; }
+    if (S.tab !== 'more') return;
+    if (sup) {
+      const items = sup.items || [];
+      S.supplies = items;
+      html += card('<h2>Supplies</h2>' + (items.length ? '<ul class="list">' + items.map((s) => '<li><span>' + esc(s.label) + '</span><span class="src" style="' + (s.low || s.refillDue ? 'color:var(--h);font-weight:600' : '') + '">' + s.left + ' ' + esc(s.unit) + ' left' + (s.daysLeft != null ? ' · ~' + s.daysLeft + ' d' : '') + (s.refillOn ? ' · refill ' + esc(s.refillOn) : '') + '</span>' + (sup.canEdit ? '<button data-supply="' + esc(s.item) + '">Edit</button>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">Nothing tracked yet.</p>') +
+        (sup.canEdit && items.length < 6 ? '<button class="btn ghost" data-supply="">Add insulin or sensors</button>' : '') +
+        '<p class="note">Counts down as doses are logged (pen priming is not counted) and as new sensors start. su94r reminds you by day when it runs low or a refill is due.</p>');
+    }
     html += card('<h2>This phone</h2><p>' + (role === 'family' ? (S.me && S.me.canLog ? 'A family member\'s phone: it reads and logs (the owner allowed it).' : 'A family member\'s phone: it reads; the owner can allow it to log.') : 'Your own phone: it reads and logs.') + (S.me && S.me.name ? ' Named “' + esc(S.me.name) + '” in su94r Mini.' : '') + '</p>' +
       '<button class="btn ghost" id="unlink">Unlink this phone</button>');
     html += '<p class="note" style="text-align:center">su94r · not a medical device. Readings come from LibreLinkUp and can be a few minutes behind.</p>';
@@ -612,6 +649,7 @@
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (t.id === 'logBtn') askToLog();
     else if (d.undo) undo(d.undo);
+    else if (d.supply !== undefined) editSupply(d.supply);
     else if (d.treatG) { S.treatGrams = Number(d.treatG); renderNow(); }
     else if (t.id === 'treatBtn') askToTreat(Number(d.g));
     else if (t.id === 'ackBtn') sendAck();

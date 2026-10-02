@@ -61,7 +61,9 @@ const screens = {
 };
 let nightRow = { id: 1, ...NIGHT_DEFAULTS, self_topic: 's-topic', care_topic: 'c-topic', treat_plan: '4 glucose tabs, then recheck', state: {} };
 const night = { ready: true, async get() { return structuredClone(nightRow); }, async patch(p) { nightRow = { ...nightRow, ...structuredClone(p) }; }, async claimTick() { return false; } };
-const deps = { screens, history, store: doses, forecasts, night, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
+let supplyRows = [];
+const supplies = { ready: true, async list() { return supplyRows; }, async save(r) { supplyRows = supplyRows.filter((x) => x.item !== r.item).concat([r]); }, async remove(pid, item) { supplyRows = supplyRows.filter((x) => x.item !== item); } };
+const deps = { screens, history, store: doses, forecasts, night, supplies, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -101,6 +103,7 @@ await shot('1-linked-more');
 await tab('now');
 await page.waitForSelector('.big .v');
 checks.nowValue = /^\d+$/.test(await page.textContent('.big .v'));
+checks.sensorEnds = /Sensor ends in \d+ days/.test(await page.textContent('#main'));
 checks.estimate = (await page.textContent('#main')).includes('Where it may head');
 checks.nowFits = await noSideScroll();
 await shot('2-now');
@@ -146,6 +149,18 @@ await shot('9-report');
 await tab('more');
 await page.waitForSelector('#unlink');
 await shot('10-more');
+// Supplies: add rapid insulin.
+await page.click('button[data-supply=""]');
+await page.waitForSelector('#supHave');
+await page.selectOption('#supItem', 'rapid');
+await page.fill('#supHave', '600');
+await page.fill('#supWarn', '300');
+await shot('10b-supply-sheet');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('button[data-supply="rapid"]');
+checks.supplySaved = supplyRows.length === 1 && supplyRows[0].on_hand === 600;
+checks.supplyShown = (await page.textContent('#main')).includes('Rapid insulin');
+await shot('10c-supplies');
 
 // A family member's phone: reads, cannot log.
 const fam = await ctx.newPage();

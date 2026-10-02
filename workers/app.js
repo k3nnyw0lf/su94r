@@ -16,6 +16,9 @@
 //   POST app/push/test              a test alert to this phone
 //   POST app/treat                  { grams, pid } a low treated: logs the carbs, stops the reminders,
 //                                   rechecks after the owner's plan's minutes (night.js)
+//   GET  app/supplies?pid=          insulin and sensors on hand (supplies.js)
+//   POST app/supplies/save          { pid, item, onHand, warnAt, refillOn }
+//   POST app/supplies/remove        { pid, item }
 //
 // The owner's own phone ('me') logs. A family member's phone reads, and logs too once the owner
 // allows it (su94r_screens.can_log: su94r Mini, or the owner's phone here). Paired TVs and widgets
@@ -27,9 +30,10 @@ import { reportFor } from './doctor.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { pushTo, pushEndpointOk } from './webpush.js';
 import { startTreatment, NIGHT_DEFAULTS } from './night.js';
+import { supplyStatus, supplyRow } from './supplies.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
-  'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat']);
+  'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -37,7 +41,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -108,7 +112,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       if (tr && now - tr.t < 3 * 60 * MIN) treating[p.pid] = { t: tr.t, grams: tr.grams, by: tr.by || '', recheckAt: tr.recheckAt, done: Boolean(tr.done) };
     }
     const plan = { grams: row?.treat_grams ?? NIGHT_DEFAULTS.treat_grams, minutes: row?.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, text: row?.treat_plan || '' };
-    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, at: now });
+    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14, at: now });
   }
 
   // The owner's phone decides which family phones may log.
@@ -123,6 +127,17 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const b = await request.json().catch(() => ({}));
     if (!b.id) return json({ error: 'id needed' }, 400);
     return (await screens.allowLog(String(b.id), b.canLog === true)) ? json({ ok: true, canLog: b.canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
+
+  if (path === 'app/supplies') {
+    if (!supplies?.ready) return json({ error: 'Supplies are not set up on the server.' }, 503);
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const rows = pid ? await supplies.list(pid) : [];
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* defaults */ }
+    const oldest = Math.min(now - 7 * DAY, ...rows.map((r) => Date.parse(r.set_at)));
+    const list = rows.length && doses?.ready ? await doses.between(pid, oldest, now + MIN) : [];
+    return json({ items: supplyStatus(rows, { doses: list, sensorStarts: row?.state?._sensors?.[pid] || [], sensorDays: row?.sensor_days || 14, now, tz: row?.time_zone }), canEdit: canLog });
   }
 
   // App alerts: any linked phone (family phones get what the care ladder sends them).
@@ -196,6 +211,17 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       await notify(row, 'family', { title: `${person.firstName || person.name || 'They'} ${person.firstName || person.name ? 'is' : 'are'} treating the low`, message: `${grams} g at ${at}${screen.name ? ` (logged on ${screen.name})` : ''}.`, priority: 3, tags: ['white_check_mark'] }).catch(() => {});
     }
     return json({ ok: true, id, recheckAt: t.recheckAt, text: `Logged ${grams} g. Reminders stop; recheck in ${Math.round((t.recheckAt - now) / MIN)} min.` });
+  }
+
+  if (path === 'app/supplies/save' || path === 'app/supplies/remove') {
+    if (!supplies?.ready) return json({ ok: false, error: 'Supplies are not set up on the server.' }, 503);
+    const pid = await pidFor(String(body.pid || ''));
+    if (!pid) return json({ ok: false, error: 'No one to track supplies for yet.' }, 400);
+    if (path === 'app/supplies/remove') { await supplies.remove(pid, String(body.item || '')); return json({ ok: true }); }
+    const row = supplyRow(pid, body, now);
+    if (row.error) return json({ ok: false, error: row.error }, 400);
+    await supplies.save(row);
+    return json({ ok: true });
   }
 
   if (path === 'app/undo') {

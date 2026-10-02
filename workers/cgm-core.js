@@ -42,6 +42,7 @@ import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 import { nightStore, nightRoute, alertFanOut } from './night.js';
 import { pushStore, pushToPhones } from './webpush.js';
+import { supplyStore } from './supplies.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
 import { historyStore, historyRoute } from './history.js';
 import { doctorNew, doctorData } from './doctor.js';
@@ -280,6 +281,23 @@ async function displayPayload(env, extra = {}) {
 // su94r Mini sends its recent insulin markers and the ids of doses it deleted, and gets
 // back the doses said to Alexa. Deletions are only ever explicit: a computer that has
 // not yet received another computer's dose must not erase it.
+// su94r Mini's logged insulin of the last 90 days, once per computer (voice/sync carries only the
+// last 48 hours): missed-dose reminders and the doctor's report learn from it.
+async function dosesImport(request, url, env, deps) {
+  if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
+  const store = deps.store || doseStore(env);
+  if (!store.ready) return json({ error: 'The dose store is not configured' }, 503);
+  const body = await request.json().catch(() => ({}));
+  const now = Date.now();
+  const markers = (Array.isArray(body?.markers) ? body.markers : []).slice(0, 2000)
+    .filter((m) => m?.type === 'insulin' && Number.isFinite(m.t) && now - m.t < 90 * 864e5 && m.t < now + 15 * 60e3);
+  const saved = await store.upsert(markers.map((m) => ({
+    id: m.id, pid: m.p, t: m.t, kind: m.kind || 'rapid', amount: m.amount ?? null,
+    source: m.source === 'alexa' ? 'alexa' : 'extension',
+  })));
+  return json({ ok: true, saved });
+}
+
 async function voiceSync(request, url, env, deps) {
   if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
   const store = deps.store || doseStore(env);
@@ -410,6 +428,7 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'display/data') return await displayData(url, env, deps);
     if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env), history: deps.history || historyStore(env) });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
+    if (path === 'doses/import' && request.method === 'POST') return await dosesImport(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
     if (APP_PATHS.has(path)) {
       const pstore = deps.pushStore || pushStore(env);
@@ -417,7 +436,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       return await appRoute(path, request, url, env, {
         screens: deps.screens || screenStore(env), history: deps.history || historyStore(env), doses: deps.store || doseStore(env),
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
-        night: deps.night || nightStore(env), push: pstore,
+        night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env),
         notify: (row, role, msg) => alertFanOut(env, row, {
           push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
           webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),
@@ -444,6 +463,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push,
       telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
       webpush: deps.webpush || ((role, msg) => pushToPhones(deps.pushStore || pushStore(env), role, msg)),
+      doses: deps.store || doseStore(env), supplies: deps.supplies || supplyStore(env),
       history: deps.history || historyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });

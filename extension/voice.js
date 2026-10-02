@@ -35,6 +35,8 @@ async function call(link, path, { method = 'GET', body } = {}) {
 
 /** Sends recent insulin markers and deletions; returns doses said to Alexa. */
 export const exchangeDoses = (link, markers, removed, forecasts = []) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts } });
+/** The logged insulin of the last 90 days, once (missed-dose reminders and the report learn from it). */
+export const dosesImport = (link, markers) => call(link, 'doses/import', { method: 'POST', body: { markers } });
 export const claimScreen = (link, code, name) => call(link, 'pair/claim', { method: 'POST', body: { code, name } });
 export const listScreens = (link) => call(link, 'screens');
 export const removeScreen = (link, id) => call(link, 'screens/remove', { method: 'POST', body: { id } });

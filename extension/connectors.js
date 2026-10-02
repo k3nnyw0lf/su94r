@@ -288,11 +288,12 @@ export const CONNECTORS = [
           h('summary', {}, 'Levels and warnings'),
           h('div', { class: 'actions' }, 'Low below ', low, ' severe below ', severe, ' mg/dL ',
             action(ctx, msg, 'Save', 'Saving…', () => nightSave(settings.screenLink, { lowMgdl: Number(low.value), severeMgdl: Number(severe.value) }))),
-          state(h, `Low soon: ${v.soonEnabled ? 'on' : 'off'} (a warning when you are falling toward the low line within 20 minutes). Sensor and signal: ${v.watchEnabled ? 'on' : 'off'} (no readings for 30 minutes; a sensor ending within a day, counted as ${v.sensorDays}-day sensors).`),
+          state(h, `Low soon: ${v.soonEnabled ? 'on' : 'off'} (a warning when you are falling toward the low line within 20 minutes). Sensor and signal: ${v.watchEnabled ? 'on' : 'off'} (no readings for 30 minutes; a sensor ending within a day, counted as ${v.sensorDays}-day sensors). Missed-dose reminders: ${v.nudgeEnabled ? 'on' : 'off'} (when a usual dose is not logged, learned from your last 14 days; it never says what to take).`),
           h('div', { class: 'actions' },
             action(ctx, msg, v.soonEnabled ? 'Turn off Low soon' : 'Turn on Low soon', 'Saving…', () => nightSave(settings.screenLink, { soonEnabled: !v.soonEnabled })),
             action(ctx, msg, v.watchEnabled ? 'Turn off sensor and signal' : 'Turn on sensor and signal', 'Saving…', () => nightSave(settings.screenLink, { watchEnabled: !v.watchEnabled })),
-            action(ctx, msg, v.sensorDays === 15 ? 'My sensors last 14 days' : 'My sensors last 15 days', 'Saving…', () => nightSave(settings.screenLink, { sensorDays: v.sensorDays === 15 ? 14 : 15 })))),
+            action(ctx, msg, v.sensorDays === 15 ? 'My sensors last 14 days' : 'My sensors last 15 days', 'Saving…', () => nightSave(settings.screenLink, { sensorDays: v.sensorDays === 15 ? 14 : 15 })),
+            action(ctx, msg, v.nudgeEnabled ? 'Turn off missed-dose reminders' : 'Turn on missed-dose reminders', 'Saving…', () => nightSave(settings.screenLink, { nudgeEnabled: !v.nudgeEnabled })))),
         (() => {
           const lowLink = h('input', { type: 'password', class: 'grow', autocomplete: 'off', placeholder: 'https://www.virtualsmarthome.xyz/url_routine_trigger/…', 'aria-label': 'Trigger link for lows' });
           const soonLink = h('input', { type: 'password', class: 'grow', autocomplete: 'off', placeholder: 'optional: a second trigger for Low soon', 'aria-label': 'Trigger link for Low soon' });

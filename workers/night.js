@@ -29,6 +29,8 @@ import { sha256, randomToken } from './screens.js';
 import { evaluateEscalation, alertPayload, RUNG } from '../src/lib/care/escalation.js';
 import { localHour } from '../src/lib/util/localDay.js';
 import { rowsFromSnapshot } from './history.js';
+import { missedDoseNudges } from './nudges.js';
+import { supplyStatus, supplyReminders } from './supplies.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -40,7 +42,7 @@ export const NIGHT_DEFAULTS = {
   enabled: true, time_zone: 'America/New_York', low_mgdl: 70, severe_mgdl: 55,
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
-  treat_grams: 15, treat_minutes: 15, treat_plan: null,
+  treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true,
 };
 
 export function nightStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
@@ -230,8 +232,11 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   state._soon = state._soon || {};
   state._watch = state._watch || {};
   state._last = state._last || {};
+  state._sensors = state._sensors || {};
   for (const p of list) {
     seen.add(p.pid);
+    // Sensor starts, for counting sensors down (supplies.js).
+    if (p.sensorStart && !(state._sensors[p.pid] || []).includes(p.sensorStart)) state._sensors[p.pid] = [...(state._sensors[p.pid] || []), p.sensorStart].slice(-12);
     const l = p.latest && now - p.latest.t <= STALE_MS ? p.latest : null;
     let ep = state[p.pid] || null;
     const low = cfg.low_mgdl;
@@ -403,6 +408,7 @@ function settingsPatch(body, row) {
   if (typeof body.careEnabled === 'boolean') out.care_enabled = body.careEnabled;
   if (typeof body.soonEnabled === 'boolean') out.soon_enabled = body.soonEnabled;
   if (typeof body.watchEnabled === 'boolean') out.watch_enabled = body.watchEnabled;
+  if (typeof body.nudgeEnabled === 'boolean') out.nudge_enabled = body.nudgeEnabled;
   const tg = int(body.treatGrams, 5, 60);
   if (tg !== undefined) out.treat_grams = tg;
   const tm = int(body.treatMinutes, 5, 30);
@@ -437,7 +443,7 @@ function publicView(row, base) {
   const open = Object.keys(row.state || {}).filter(isLowKey).length;
   return {
     enabled: row.enabled, lowMgdl: row.low_mgdl, severeMgdl: row.severe_mgdl,
-    soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14,
+    soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14, nudgeEnabled: row.nudge_enabled !== false,
     echoLow: Boolean(row.echo_low_url), echoSoon: Boolean(row.echo_soon_url), echoAlways: Boolean(row.echo_always),
     treatGrams: row.treat_grams ?? NIGHT_DEFAULTS.treat_grams, treatMinutes: row.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, treatPlan: row.treat_plan || '',
     nightStart: row.night_start, nightEnd: row.night_end, timeZone: row.time_zone, careEnabled: row.care_enabled,
@@ -466,7 +472,48 @@ export function alertFanOut(env, row, { push = null, telegram = null, webpush = 
   };
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, ring = defaultRing, history = null, now = () => Date.now() }) {
+/**
+ * Missed-dose reminders (nudges.js) and supplies running low (supplies.js), after each check.
+ * They go to the owner only and never block the alerts. Changes `state` in place.
+ */
+export async function reminders(row, people, state, send, { doses = null, supplies = null, now = Date.now() } = {}) {
+  const cfg = { ...NIGHT_DEFAULTS, ...row };
+  const sent = [];
+  if (!cfg.enabled || !people.length) return sent;
+  const many = people.length > 1;
+  const say = async (p, title, message, tag, label) => {
+    try { await send(cfg.self_topic, { title: `${many && p ? `${p.firstName || p.name}: ` : ''}${title}`, message, priority: 3, tags: [tag] }); sent.push({ label, ok: true }); } catch (e) { sent.push({ label, ok: false, error: e.message }); }
+  };
+  if (cfg.nudge_enabled !== false && doses?.ready) {
+    state._nudge = state._nudge || {};
+    for (const p of people) {
+      const list = await doses.between(p.pid, now - 14 * 24 * 60 * MIN, now + MIN);
+      const nudged = state._nudge[p.pid] || {};
+      const { nudges, date } = missedDoseNudges({ person: p, doses: list, now, tz: cfg.time_zone, nudged, nightStart: cfg.night_start, nightEnd: cfg.night_end, fmt: (mg) => fmt(p, mg) });
+      for (const n of nudges) { await say(p, n.title, n.message, 'memo', 'nudge'); nudged[n.key] = date; }
+      for (const k of Object.keys(nudged)) if (nudged[k] !== date) delete nudged[k];
+      state._nudge[p.pid] = nudged;
+    }
+  }
+  if (supplies?.ready) {
+    const rows = await supplies.list();
+    const byPid = new Map();
+    for (const r of rows) byPid.set(r.pid, [...(byPid.get(r.pid) || []), r]);
+    state._supply = state._supply || {};
+    for (const [pid, rs] of byPid) {
+      const oldest = Math.min(now - 7 * 24 * 60 * MIN, ...rs.map((r) => Date.parse(r.set_at)));
+      const list = doses?.ready ? await doses.between(pid, oldest, now + MIN) : [];
+      const statuses = supplyStatus(rs, { doses: list, sensorStarts: (state._sensors || {})[pid] || [], sensorDays: cfg.sensor_days, now, tz: cfg.time_zone });
+      const { reminders: due, date } = supplyReminders(statuses, { reminded: state._supply, now, tz: cfg.time_zone });
+      const p = people.find((x) => x.pid === pid);
+      for (const r of due) { await say(p, r.title, r.message, 'package', 'supplies'); state._supply[r.key] = date; }
+    }
+    for (const k of Object.keys(state._supply)) if (!rows.some((r) => `${r.pid}:${r.item}` === k)) delete state._supply[k];
+  }
+  return sent;
+}
+
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, now = () => Date.now() }) {
   if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const sendFor = (row) => {
@@ -494,6 +541,9 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     let error = null;
     try { people = (await snapshot()).people || []; } catch (e) { error = { code: e.code || 'error', message: String(e.message || e).slice(0, 200) }; }
     const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}`, ring });
+    if (!error) {
+      try { result.sent.push(...await reminders(row, people, result.state, sendFor(row), { doses, supplies, now: now() })); } catch (e) { result.sent.push({ label: 'reminders', ok: false, error: String(e.message || e).slice(0, 120) }); }
+    }
     // Keep the history on the server (history.js), and trim it to 90 days once a day.
     if (history?.ready && people.length) {
       await history.save(rowsFromSnapshot(people)).catch(() => {});
