@@ -19,7 +19,9 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     if (!ready) throw Object.assign(new Error('The dose store is not configured'), { code: 'config' });
     const res = await fetchImpl(`${base}${path}`, { ...init, headers: headers(init.headers) });
     if (!res.ok) throw new Error(`Dose store answered ${res.status}`);
-    return res.status === 204 ? null : res.json();
+    // A save with return=minimal answers 201 with an empty body, not 204: read text, not JSON.
+    const text = res.status === 204 ? '' : await res.text();
+    return text ? JSON.parse(text) : null;
   }
 
   const toRow = (d) => ({

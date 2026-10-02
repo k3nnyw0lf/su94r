@@ -407,6 +407,8 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (ns) return ns;
     return json({ error: 'not found' }, 404);
   } catch (err) {
+    // The route and the error text only (never request data), so a failing route can be found.
+    console.error(`su94r-cgm ${path} failed: ${String(err?.message || err).slice(0, 200)}`);
     return json({ error: String(err?.message || err).slice(0, 300) }, 500);
   }
 }
