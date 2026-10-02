@@ -1,0 +1,73 @@
+# Nightscout on your own server — glucose relay for su94r.
+#
+# Why this exists: Juggluco connects to the Libre 3+ over Bluetooth, which may
+# take the connection away from Abbott's official app. LibreLinkUp is fed BY
+# that official app, so if Juggluco wins the sensor, su94r's current glucose
+# feed goes dark. Nightscout removes the single point of failure — Juggluco
+# uploads here, and su94r reads here.
+#
+# Binds to 127.0.0.1 only. Put it behind a reverse proxy with TLS rather
+# than exposing 1337 to the internet.
+#
+#   docker compose up -d
+#
+# Resource use is small (~300MB), so it fits beside other services on a
+# small VPS.
+
+services:
+  mongo:
+    image: mongo:7
+    container_name: nightscout-mongo
+    restart: unless-stopped
+    volumes:
+      - nightscout-data:/data/db
+    # No ports published. Only the nightscout container talks to it.
+    command: ["--wiredTigerCacheSizeGB", "0.5"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  nightscout:
+    image: nightscout/cgm-remote-monitor:latest
+    container_name: nightscout
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      # localhost only — terminate TLS at the existing reverse proxy.
+      - "127.0.0.1:1337:1337"
+    environment:
+      MONGO_CONNECTION: mongodb://mongo:27017/nightscout
+
+      # REQUIRED. Minimum 12 characters. Set it in a .env file beside this
+      # compose file — never commit it.
+      API_SECRET: ${NIGHTSCOUT_API_SECRET:?set NIGHTSCOUT_API_SECRET in .env}
+
+      # Deny by default. Without this Nightscout serves your glucose history to
+      # anyone who finds the URL. Access requires a token from the admin page.
+      AUTH_DEFAULT_ROLES: denied
+
+      DISPLAY_UNITS: mg/dl
+      TIME_FORMAT: "12"
+
+      ENABLE: careportal basal iob cob boluscalc rawbg cage sage iage
+      SHOW_PLUGINS: careportal basal iob cob
+
+      # Match the thresholds su94r uses so the two agree.
+      BG_HIGH: "250"
+      BG_TARGET_TOP: "180"
+      BG_TARGET_BOTTOM: "70"
+      BG_LOW: "55"
+
+      INSECURE_USE_HTTP: "true"   # safe: TLS terminates at the reverse proxy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:1337/api/v1/status.json"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  nightscout-data:

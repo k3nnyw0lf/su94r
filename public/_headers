@@ -1,0 +1,41 @@
+# Cloudflare Pages cache policy.
+#
+# THE BUG THIS FIXES
+#
+# Vite fingerprints assets (index-CXXZjQ2i.js) but index.html keeps its name.
+# With index.html cached by the browser, a new deploy leaves that cached shell
+# pointing at chunk filenames that no longer exist. Cloudflare's SPA catch-all
+# (/* /index.html 200) then answers those asset requests with HTML and a 200,
+# the browser refuses to execute HTML as a module, and the app renders NOTHING.
+#
+# Observed in production: a browser holding a stale shell requested
+# index-D6TUSfa3.js and received text/html. Blank page, no console error,
+# no service worker involved. Every user with a warm cache would hit this after
+# any deploy — and the symptom looks like the app is simply broken.
+#
+# The shell must always revalidate; the fingerprinted assets can be cached
+# forever precisely because their names change.
+
+/
+  Cache-Control: public, max-age=0, must-revalidate
+
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Never cache the worker itself, or an old one keeps serving an old precache
+# manifest and reintroduces exactly the same class of mismatch.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/registerSW.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+/manifest.json
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Content-hashed. Safe to cache indefinitely — a change produces a new URL.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/icons/*
+  Cache-Control: public, max-age=604800

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="su94r">
+  <!--
+    Favicon variant, redrawn rather than scaled down from logo.svg.
+    At 16-32px the glow filter, dashed band and hairline strokes turn to mush,
+    so this keeps only what survives at that size: one thick trace and the
+    current-reading dot.
+  -->
+  <defs>
+    <linearGradient id="t" x1="5" y1="0" x2="27" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset="0.45" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="7" fill="#050810"/>
+  <rect x="5" y="14" width="22" height="7" rx="3.5" fill="#22c55e" opacity="0.14"/>
+  <path d="M 5 19 C 8 19 8.5 9.5 11.5 9.5 C 15 9.5 14.5 23 18 23 C 21 23 20.5 17.5 23.5 17.5"
+        fill="none" stroke="url(#t)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="23.5" cy="17.5" r="4" fill="#050810"/>
+  <circle cx="23.5" cy="17.5" r="2.6" fill="#22c55e"/>
+</svg>

@@ -1,0 +1,320 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #656d76;
+  --faint: rgba(31, 35, 40, 0.08);
+  --band: rgba(26, 127, 55, 0.10);
+  --in: #1a7f37;
+  --high: #b35900;
+  --low: #cf222e;
+  --stale: #8c959f;
+  --chip: rgba(31, 35, 40, 0.06);
+  --chip-on: rgba(31, 35, 40, 0.14);
+  --field: #f6f8fa;          /* solid: native dropdown lists take this colour */
+  --field-line: #d0d7de;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --faint: rgba(230, 237, 243, 0.08);
+    --band: rgba(63, 185, 80, 0.12);
+    --in: #3fb950;
+    --high: #e3a33b;
+    --low: #ff6b63;
+    --stale: #6e7681;
+    --chip: rgba(230, 237, 243, 0.06);
+    --chip-on: rgba(230, 237, 243, 0.16);
+    --field: #21262d;
+    --field-line: #3d444d;
+  }
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.3 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  user-select: none;
+}
+
+.card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 10px 6px;
+  gap: 4px;
+  --cat: var(--fg);
+}
+.card[data-cat="in"] { --cat: var(--in); }
+.card[data-cat="high"] { --cat: var(--high); }
+.card[data-cat="low"] { --cat: var(--low); }
+.card[data-cat="stale"] { --cat: var(--stale); }
+
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.value {
+  font-size: 34px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--cat);
+}
+.card[data-cat="stale"] .value { text-decoration: line-through; text-decoration-thickness: 2px; }
+
+.arrow {
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: var(--cat);
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 300ms ease;
+}
+
+.units {
+  align-self: flex-end;
+  padding-bottom: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.meta {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.delta { font-size: 13px; font-weight: 550; }
+.ago { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.ago.warn { color: var(--high); font-weight: 550; }
+
+.graph-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 60px;
+}
+.graph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.graph text {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.graph .band { fill: var(--band); }
+.graph .grid { stroke: var(--faint); stroke-width: 1; }
+.graph .seg { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.graph .seg.in { stroke: var(--in); }
+.graph .seg.high { stroke: var(--high); }
+.graph .seg.low { stroke: var(--low); }
+.graph .dot.in { fill: var(--in); }
+.graph .dot.high { fill: var(--high); }
+.graph .dot.low { fill: var(--low); }
+.graph .now { stroke: var(--bg); stroke-width: 2; }
+.graph .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 3; }
+.graph .tip-bg { fill: var(--bg); stroke: var(--faint); }
+.graph .tip { fill: var(--fg); font-size: 11px; font-weight: 550; }
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--muted);
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+}
+.overlay button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--chip-on);
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+}
+.status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 11px;
+}
+.status.error { color: var(--high); }
+
+.ranges { display: flex; gap: 2px; }
+.ranges button, .icon-btn {
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.ranges button:hover, .icon-btn:hover { background: var(--chip); color: var(--fg); }
+.ranges button[aria-pressed="true"] { background: var(--chip-on); color: var(--fg); }
+button:focus-visible { outline: 2px solid var(--in); outline-offset: 1px; }
+
+.icon-btn { display: grid; place-items: center; padding: 2px 4px; }
+.icon-btn svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-btn[aria-pressed="true"] { color: var(--in); }
+.icon-btn[aria-pressed="true"] svg { fill: currentColor; }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+
+.info {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 14px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.info .stats { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sensor.warn { color: var(--high); font-weight: 550; }
+.sensor.bad { color: var(--low); font-weight: 650; }
+
+.graph .future { fill: var(--faint); }
+.graph .proj { fill: none; stroke-width: 2; stroke-dasharray: 3 3; stroke-linecap: round; }
+.graph .proj.in { stroke: var(--in); }
+.graph .proj.high { stroke: var(--high); }
+.graph .proj.low { stroke: var(--low); }
+.graph .proj-end { fill: var(--bg); stroke-width: 2; }
+.graph .proj-end.in { stroke: var(--in); }
+.graph .proj-end.high { stroke: var(--high); }
+.graph .proj-end.low { stroke: var(--low); }
+.graph .proj-label { font-weight: 600; }
+.graph .marker-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 1 3; opacity: 0.7; }
+.graph .marker { font-size: 11px; }
+.card.long .graph .seg { stroke-width: 1.4; }
+
+.add-panel { display: flex; flex-direction: column; min-height: 22px; }
+.add-row { display: flex; align-items: center; gap: 4px; min-height: 22px; }
+.chip {
+  font: inherit;
+  font-size: 11px;
+  color: var(--fg);
+  background: var(--chip);
+  border: 0;
+  border-radius: 5px;
+  padding: 3px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip:hover { background: var(--chip-on); }
+.chip.save { background: var(--in); color: var(--bg); font-weight: 600; }
+.add-row .close { margin-left: auto; font-size: 12px; }
+.add-icon { font-size: 14px; }
+.add-row input, .add-row select {
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--field);
+  border: 1px solid var(--field-line);
+  border-radius: 5px;
+  padding: 2px 4px;
+  min-width: 0;
+}
+/* The open list of a dropdown: solid colours with strong contrast, larger text. */
+.add-row select option, .add-row select optgroup {
+  background: var(--field);
+  color: var(--fg);
+  font-size: 13px;
+}
+.add-row select option:checked { background: var(--in); color: #ffffff; }
+.add-row input::placeholder { color: var(--muted); opacity: 1; }
+.add-row input { width: 64px; }
+.status button {
+  font: inherit;
+  font-size: 11px;
+  color: var(--in);
+  background: none;
+  border: 0;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Short window: drop the stats line. */
+.card.short .info { display: none; }
+
+/* Number only: the reading fills the window. */
+.card.compact { justify-content: center; padding: 4px 10px; }
+.card.compact .info,
+.card.compact .graph-wrap,
+.card.compact .bar,
+.card.compact .add-panel { display: none !important; }
+.card.compact .top { align-items: center; }
+.card.compact .value { font-size: 32px; }
+
+.graph { cursor: crosshair; }
+.add-row { flex-wrap: wrap; }
+.add-at { font-size: 11px; font-weight: 600; color: var(--fg); white-space: nowrap; }
+.mark-text { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+
+.dose { font-size: 11px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dose .iob { font-weight: 650; }
+.card.short .dose { display: block; }
+.card.compact .dose { display: none !important; }
+.add-warn { font-size: 11px; font-weight: 600; color: var(--high); padding: 2px 0; }
+/* The graph redraws on every pointer move; let the svg itself take the pointer so a
+   press and release always land on the same element and the click registers. */
+.graph * { pointer-events: none; }

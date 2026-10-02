@@ -1,0 +1,107 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "my sugar",
+      "intents": [
+        {
+          "name": "GetGlucoseIntent",
+          "slots": [{ "name": "name", "type": "AMAZON.FirstName" }],
+          "samples": [
+            "how is my sugar",
+            "what is my sugar",
+            "what is my glucose",
+            "what is my blood sugar",
+            "check my glucose",
+            "check my sugar",
+            "how am i doing",
+            "how is {name}",
+            "how is {name} doing",
+            "check {name}",
+            "what is the sugar for {name}",
+            "what is the glucose for {name}"
+          ]
+        },
+        {
+          "name": "LogInsulinIntent",
+          "slots": [
+            { "name": "units", "type": "AMAZON.NUMBER" },
+            { "name": "insulin", "type": "INSULIN_TYPE" },
+            { "name": "ago", "type": "AMAZON.DURATION" },
+            { "name": "name", "type": "AMAZON.FirstName" }
+          ],
+          "samples": [
+            "{units} units of {insulin} insulin now",
+            "{units} units of {insulin} now",
+            "{units} units of {insulin} insulin",
+            "{units} units of {insulin}",
+            "{units} {insulin}",
+            "{units} units {insulin}",
+            "I took {units} units of {insulin}",
+            "I took {units} units of {insulin} insulin",
+            "I just took {units} units of {insulin}",
+            "log {units} units of {insulin}",
+            "log {units} units of {insulin} insulin",
+            "add {units} units of {insulin}",
+            "{units} units of {insulin} {ago} ago",
+            "{units} units of {insulin} insulin {ago} ago",
+            "I took {units} units of {insulin} {ago} ago",
+            "{units} units of {insulin} for {name}",
+            "log {units} units of {insulin} for {name}",
+            "log insulin",
+            "log a dose"
+          ]
+        },
+        {
+          "name": "LastInsulinIntent",
+          "slots": [{ "name": "name", "type": "AMAZON.FirstName" }],
+          "samples": [
+            "when did I last take insulin",
+            "when was my last insulin",
+            "when was my last dose",
+            "did I take my insulin",
+            "did I take insulin",
+            "how much insulin did I take",
+            "what was my last dose",
+            "when did {name} last take insulin",
+            "did {name} take insulin"
+          ]
+        },
+        { "name": "AMAZON.HelpIntent", "samples": [] },
+        { "name": "AMAZON.StopIntent", "samples": [] },
+        { "name": "AMAZON.CancelIntent", "samples": [] },
+        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
+        { "name": "AMAZON.FallbackIntent", "samples": [] }
+      ],
+      "types": [
+        {
+          "name": "INSULIN_TYPE",
+          "values": [
+            { "id": "short", "name": { "value": "regular", "synonyms": ["R", "are", "our", "humulin R", "novolin R", "actrapid", "regular human", "short acting"] } },
+            { "id": "rapid", "name": { "value": "rapid", "synonyms": ["fast", "fast acting", "rapid acting", "quick", "humalog", "novolog", "novorapid", "fiasp", "lyumjev", "admelog", "apidra", "lispro", "aspart"] } },
+            { "id": "basal", "name": { "value": "long acting", "synonyms": ["long", "basal", "lantus", "basaglar", "toujeo", "tresiba", "levemir", "semglee", "glargine", "degludec"] } },
+            { "id": "intermediate", "name": { "value": "NPH", "synonyms": ["N", "N P H", "humulin N", "novolin N", "intermediate"] } },
+            { "id": "mix", "name": { "value": "mixed", "synonyms": ["mix", "premixed", "pre mixed", "seventy thirty", "70 30", "humalog mix", "novolog mix"] } }
+          ]
+        }
+      ]
+    },
+    "dialog": {
+      "intents": [
+        {
+          "name": "LogInsulinIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            { "name": "units", "type": "AMAZON.NUMBER", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
+            { "name": "insulin", "type": "INSULIN_TYPE", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
+            { "name": "ago", "type": "AMAZON.DURATION", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
+            { "name": "name", "type": "AMAZON.FirstName", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} }
+          ]
+        }
+      ],
+      "delegationStrategy": "SKILL_RESPONSE"
+    },
+    "prompts": []
+  }
+}

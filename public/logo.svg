@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="su94r">
+  <!--
+    su94r mark — a CGM trace crossing the in-range band.
+
+    The line spikes out of range, comes back down, and settles inside the band
+    with a live reading dot. That is the whole product in one glyph: variability
+    caught, then brought back. The gradient runs amber (out of range) to green
+    (in range) along the path, so the colour itself carries the meaning rather
+    than being decoration.
+
+    All content sits inside the central 80% so the same artwork works as an
+    Android maskable icon without the trace being clipped by a circle mask.
+  -->
+  <defs>
+    <linearGradient id="trace" x1="96" y1="0" x2="416" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06b6d4"/>
+      <stop offset="0.42" stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#22c55e"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a1020"/>
+      <stop offset="1" stop-color="#050810"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- In-range band: the target corridor the trace is judged against. -->
+  <rect x="96" y="232" width="320" height="104" rx="52" fill="#22c55e" opacity="0.10"/>
+  <line x1="96" y1="232" x2="416" y2="232" stroke="#22c55e" stroke-width="2" opacity="0.28" stroke-dasharray="10 12"/>
+  <line x1="96" y1="336" x2="416" y2="336" stroke="#22c55e" stroke-width="2" opacity="0.28" stroke-dasharray="10 12"/>
+
+  <!-- The trace itself. -->
+  <path
+    d="M 96 300 C 140 300 150 168 200 168 C 250 168 246 372 300 372 C 344 372 336 284 384 284"
+    fill="none"
+    stroke="url(#trace)"
+    stroke-width="30"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#glow)"
+  />
+
+  <!-- Current reading: in range, hence green. -->
+  <circle cx="384" cy="284" r="30" fill="#050810"/>
+  <circle cx="384" cy="284" r="21" fill="#22c55e" filter="url(#glow)"/>
+</svg>

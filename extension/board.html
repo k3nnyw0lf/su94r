@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Board · su94r Mini</title>
+  <link rel="stylesheet" href="board.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="title">
+      <img src="icons/icon32.png" width="22" height="22" alt="">
+      <strong>Glucose board</strong>
+      <span id="summary" class="summary"></span>
+    </div>
+    <div class="actions">
+      <div class="seg" role="group" aria-label="Sort">
+        <button type="button" data-sort="urgency">Most urgent first</button>
+        <button type="button" data-sort="name">A–Z</button>
+      </div>
+      <button type="button" id="pin" class="btn" title="Keep the board on top (needs the pin helper)">Keep on top</button>
+      <button type="button" id="aiLook" class="btn">AI look</button>
+      <button type="button" id="settings" class="btn">Settings</button>
+    </div>
+  </header>
+  <main id="grid" class="grid" aria-live="polite"></main>
+  <p id="empty" class="empty" hidden>No one to show yet. Add a LibreLinkUp account in Settings, or turn on demo mode.</p>
+  <footer class="foot">Not a medical device. Readings come through LibreLinkUp and can arrive late or not at all. Click a person to open their own window.</footer>
+  <script type="module" src="board.js"></script>
+</body>
+</html>

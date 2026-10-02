@@ -1,0 +1,23 @@
+# su94r-proxy — the CGM fetcher the PWA calls, the night monitor's feed, the
+# big-screen display and the Alexa endpoint. Source: workers/proxy.js.
+#
+#   cd workers && npx wrangler@4.99.0 deploy -c wrangler.proxy.toml
+#
+# The LibreLinkUp routes (/libre/*, /glucose/latest, /display/data, /alexa) are
+# forwarded to the Supabase edge function su94r-cgm, because LibreView refuses
+# Cloudflare Workers. Their secrets live on that function, not here.
+#
+# Secrets here (`npx wrangler secret put NAME -c wrangler.proxy.toml`), only for
+# Apple Health (/health/ingest) and Google Health (/google/*):
+#   HEALTH_INGEST_TOKEN, SUPABASE_URL, SUPABASE_SERVICE_KEY,
+#   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI
+
+name = "su94r-proxy"
+main = "proxy.js"
+compatibility_date = "2026-01-15"
+
+[observability]
+enabled = true
+
+[vars]
+CGM_URL = "https://sfelhasepvaoianyuvxe.supabase.co/functions/v1/su94r-cgm"

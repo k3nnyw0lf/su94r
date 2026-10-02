@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI look · su94r Mini</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="stylesheet" href="ai.css">
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <img src="icons/icon48.png" width="40" height="40" alt="">
+      <div>
+        <h1>AI look at your data</h1>
+        <p class="sub" id="provider">Checking which AI is connected…</p>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="row-left wrap">
+        <label class="field inline"><span>Person</span><select id="who"></select></label>
+        <label class="field inline"><span>Period</span>
+          <select id="days">
+            <option value="3">3 days</option>
+            <option value="7" selected>7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+          </select>
+        </label>
+        <button id="go" type="button" class="primary">Analyze</button>
+        <button id="settings" type="button" class="ghost">AI settings</button>
+      </div>
+      <p class="hint small">Sends a short summary (daily numbers, hour-of-day pattern, lows and highs, what you logged) to the AI you chose. It never includes names or your LibreLinkUp login.</p>
+    </section>
+
+    <section id="convo" class="convo" aria-live="polite"></section>
+
+    <form id="ask" class="ask" hidden>
+      <input id="q" type="text" placeholder="Ask a follow-up, e.g. why am I high after lunch?" autocomplete="off" class="grow">
+      <button type="submit" class="primary">Ask</button>
+      <button type="button" id="clear" class="ghost">New chat</button>
+    </form>
+
+    <footer class="foot">
+      <p><strong>Not medical advice.</strong> The AI describes patterns and suggests questions for your care team. It is instructed never to suggest doses or medicine changes; decisions about insulin and medicines are yours and your care team's. AI can be wrong; check anything important against your own readings.</p>
+    </footer>
+  </main>
+  <script type="module" src="ai-page.js"></script>
+</body>
+</html>

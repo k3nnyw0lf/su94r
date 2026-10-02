@@ -1,0 +1,46 @@
+# su94r glucose monitor.
+#
+# This is the runner for the escalation ladder. Before it existed, escalation.js
+# was decision logic that nothing called — the care circle, the lights and the
+# siren were all inert.
+#
+# Deployed separately from su94r-proxy (the CGM fetcher) on purpose: the proxy
+# is request-driven and stateless, this is a scheduled job holding episode
+# state. Coupling them would mean a proxy deploy could interrupt monitoring.
+#
+#   cd workers && npx wrangler@4.99.0 deploy
+#
+# Secrets — set each with `npx wrangler secret put NAME`, never in this file:
+#
+#   SUPABASE_URL            https://sfelhasepvaoianyuvxe.supabase.co
+#   SUPABASE_SERVICE_KEY    service_role key. Bypasses RLS; Worker only.
+#   HEALTH_INGEST_TOKEN     shared with the proxy; also guards /monitor/run
+#   PROXY_URL               https://su94r-proxy.ken-e90.workers.dev
+#   PATIENT_EMAIL           whose glucose is being watched
+#   PATIENT_NAME            used in the words spoken aloud at 3am
+#   USER_TZ                 e.g. America/New_York. WRONG VALUE = WRONG NIGHT
+#                           WINDOW. A UTC default would treat mid-afternoon as
+#                           night and 3am as daytime.
+#
+# Optional, each unlocking one rung:
+#   HA_BASE_URL, HA_TOKEN   Home Assistant. Lights and speakers are the most
+#                           reliable way to wake someone — see docs/care-circle.md
+#   HOME_CONFIG             JSON: {"patient":{...},"helpers":{...}}
+#   TWILIO_SID, TWILIO_TOKEN, TWILIO_FROM   SMS rung
+
+name = "su94r-monitor"
+main = "glucose-monitor.js"
+compatibility_date = "2026-01-15"
+
+# Five minutes is a deliberate floor. A CGM reports every 1–5 minutes, so
+# checking faster buys nothing and only multiplies the chance of alerting on a
+# single spurious reading.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[observability]
+enabled = true
+
+# Non-secret defaults. Anything sensitive goes through `wrangler secret put`.
+[vars]
+PROXY_URL = "https://su94r-proxy.ken-e90.workers.dev"

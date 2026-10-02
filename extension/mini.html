@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>su94r Mini</title>
+  <link rel="stylesheet" href="mini.css">
+</head>
+<body>
+  <main id="card" class="card" data-cat="none" title="">
+    <header class="top">
+      <div class="reading">
+        <span id="value" class="value">—</span>
+        <svg id="arrow" class="arrow" viewBox="0 0 24 24" aria-hidden="true" hidden>
+          <path d="M4 12h14M12.5 6l6 6-6 6" />
+        </svg>
+        <span id="units" class="units"></span>
+      </div>
+      <div class="meta">
+        <div id="delta" class="delta"></div>
+        <div id="ago" class="ago"></div>
+      </div>
+    </header>
+
+    <div class="info">
+      <span id="stats" class="stats"></span>
+      <span id="sensor" class="sensor"></span>
+    </div>
+    <div id="dose" class="dose" hidden></div>
+
+    <div class="graph-wrap">
+      <svg id="graph" class="graph" role="img" aria-label="Glucose graph. Click a moment to log insulin, a meal or exercise there."></svg>
+      <div id="overlay" class="overlay" hidden></div>
+    </div>
+
+    <footer id="bar" class="bar">
+      <span id="status" class="status"></span>
+      <div class="ranges" role="group" aria-label="Time range">
+        <button type="button" data-h="3">3h</button>
+        <button type="button" data-h="6">6h</button>
+        <button type="button" data-h="12">12h</button>
+        <button type="button" data-h="24">24h</button>
+        <button type="button" data-h="168">7d</button>
+      </div>
+      <button type="button" id="add" class="icon-btn" title="Add a marker: meal, insulin or exercise">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        <span class="sr-only">Add marker</span>
+      </button>
+      <button type="button" id="aiBtn" class="icon-btn" title="AI look at this data">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
+        <span class="sr-only">AI look</span>
+      </button>
+      <button type="button" id="tiny" class="icon-btn" title="Number only (double-click the number to come back)">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></svg>
+        <span class="sr-only">Number only</span>
+      </button>
+      <button type="button" id="pin" class="icon-btn" title="Keep on top of all windows">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6Z M12 15v6" /></svg>
+        <span class="sr-only">Keep on top</span>
+      </button>
+    </footer>
+
+    <form id="addPanel" class="add-panel" hidden>
+      <div id="addWarn" class="add-warn" role="alert" hidden></div>
+      <div id="addTypes" class="add-row">
+        <span id="addAt" class="add-at" hidden></span>
+        <button type="button" class="chip" data-type="insulin">💉 Insulin</button>
+        <button type="button" class="chip" data-type="meal">🍽️ Meal</button>
+        <button type="button" class="chip" data-type="exercise">🏃 Exercise</button>
+        <button type="button" class="chip" data-type="med">💊 Medicine</button>
+        <button type="button" class="icon-btn close" data-close title="Cancel">✕</button>
+      </div>
+      <div id="addDetail" class="add-row" hidden>
+        <span id="addIcon" class="add-icon"></span>
+        <select id="addMed" aria-label="Medicine" hidden></select>
+        <input id="addAmount" type="number" min="0" step="any" inputmode="decimal" placeholder="amount" aria-label="Amount">
+        <select id="addKind" aria-label="Insulin type" hidden>
+          <option value="rapid">Rapid</option>
+          <option value="short">Regular</option>
+          <option value="intermediate">NPH</option>
+          <option value="basal">Long (basal)</option>
+          <option value="mix">Pre-mixed</option>
+        </select>
+        <select id="addSite" aria-label="Injection site" hidden>
+          <option value="">Site</option>
+          <option value="belly-l">Belly L</option>
+          <option value="belly-r">Belly R</option>
+          <option value="thigh-l">Thigh L</option>
+          <option value="thigh-r">Thigh R</option>
+          <option value="arm-l">Arm L</option>
+          <option value="arm-r">Arm R</option>
+          <option value="buttock-l">Buttock L</option>
+          <option value="buttock-r">Buttock R</option>
+        </select>
+        <span id="addAtLabel" class="add-at" hidden></span>
+        <select id="addWhen" aria-label="When">
+          <option value="0">now</option>
+          <option value="15">15 min ago</option>
+          <option value="30">30 min ago</option>
+          <option value="60">1 h ago</option>
+          <option value="120">2 h ago</option>
+        </select>
+        <button type="submit" class="chip save">Add</button>
+        <button type="button" class="icon-btn close" data-close title="Cancel">✕</button>
+      </div>
+      <div id="markRow" class="add-row" hidden>
+        <span id="markText" class="mark-text"></span>
+        <button type="button" id="markDelete" class="chip">Delete</button>
+        <button type="button" class="icon-btn close" data-close title="Close">✕</button>
+      </div>
+    </form>
+  </main>
+  <script type="module" src="mini.js"></script>
+</body>
+</html>

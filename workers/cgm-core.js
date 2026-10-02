@@ -1,0 +1,290 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// CGM core — every route that has to talk to LibreLinkUp from a server.
+//
+// WHY THIS IS NOT IN THE CLOUDFLARE WORKER
+//
+// LibreView sits behind a bot shield that answers 403 to Cloudflare Workers
+// (tested 2026-10-01: same request, same headers — 200 from a laptop and from a
+// Supabase edge function, 403 from a Worker). That is also why the original
+// su94r-proxy stopped getting Libre data. So this module runs in the Supabase
+// edge function su94r-cgm, and su94r-proxy forwards these routes to it.
+//
+// It is plain Fetch-API JavaScript with no runtime-specific calls, so the same
+// code is tested in Node (vitest) and runs in Deno (Supabase).
+//
+// Routes handled by handleCgm(path, request, env):
+//   POST libre/login, libre/readings   the PWA's own LibreLinkUp login (its credentials)
+//   GET  glucose/latest                the monitor's feed      (HEALTH_INGEST_TOKEN)
+//   GET  display/data                  the big-screen data      (DISPLAY_KEY)
+//   POST alexa                         the Alexa skill          (ALEXA_SKILL_ID + Amazon's signature)
+//   POST voice/sync                    su94r Mini <-> voice doses (DISPLAY_KEY, SUPABASE_*)
+//   POST pair/start, pair/poll         a screen asks for a code and waits (no secret: codes expire)
+//   POST pair/claim                    su94r Mini enters a screen's code (DISPLAY_KEY)
+//   GET  screen/data                   a paired screen's data (its own bearer token)
+//   GET  screens, POST screens/remove  list and remove paired screens (DISPLAY_KEY)
+// Server-side routes also need LLU_EMAIL and LLU_PASSWORD. Anything unset → 503.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { login as lluLogin, getConnections, getGraph, toPoint, sensorOf, LibreError, DEFAULT_VERSION } from '../extension/libre.js';
+import { handleAlexa } from './alexa.js';
+import { doseStore, asMarkers, WINDOW_MS } from './doses.js';
+import { screenStore, pairStart, pairPoll, pairClaim, screenFor } from './screens.js';
+
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
+
+const json = (body, status = 200, extra = {}) =>
+  new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...extra } });
+
+// Constant-time comparison for secrets in URLs and headers.
+export function safeEqual(a, b) {
+  const x = new TextEncoder().encode(String(a ?? ''));
+  const y = new TextEncoder().encode(String(b ?? ''));
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] ?? 0) ^ (y[i] ?? 0);
+  return diff === 0;
+}
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// The LibreLinkUp token is a JWT whose payload carries the user id; the account-id
+// header is its SHA-256. Deriving it here keeps the PWA's stored {token, apiBase} working.
+async function accountIdFromToken(token) {
+  try {
+    const part = String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const id = JSON.parse(atob(part.padEnd(part.length + ((4 - (part.length % 4)) % 4), '='))).id;
+    return id ? await sha256Hex(id) : null;
+  } catch {
+    return null;
+  }
+}
+
+const iso = (t) => new Date(t).toISOString();
+
+// ─── Server-side LibreLinkUp session (for monitor, display, Alexa) ──────────
+
+let memSession = null;
+let memSnapshot = null;
+
+/** Test hook: forget cached sessions and snapshots. */
+export function resetCaches() {
+  memSession = null;
+  memSnapshot = null;
+}
+
+async function serverSession(env) {
+  if (memSession) return memSession;
+  if (env.CACHE) {
+    const cached = await env.CACHE.get('llu-session', 'json');
+    if (cached?.token && (!cached.expires || cached.expires * 1000 > Date.now() + 3600e3)) return (memSession = cached);
+  }
+  if (!env.LLU_EMAIL || !env.LLU_PASSWORD) throw new LibreError('config', 'LLU_EMAIL and LLU_PASSWORD are not set');
+  memSession = await lluLogin(env.LLU_EMAIL, env.LLU_PASSWORD);
+  // Optional KV-style cache (env.CACHE): one write per sign-in, months apart.
+  if (env.CACHE) await env.CACHE.put('llu-session', JSON.stringify(memSession));
+  return memSession;
+}
+
+async function withSession(env, call) {
+  try {
+    const r = await call(await serverSession(env));
+    memSession = r.session;
+    return r;
+  } catch (e) {
+    if (e.code !== 'auth') throw e;
+    memSession = null;
+    if (env.CACHE) await env.CACHE.delete('llu-session');
+    const r = await call(await serverSession(env));
+    memSession = r.session;
+    return r;
+  }
+}
+
+// Everyone this follower account can see, with 12 hours of history. Cached for
+// 55 s so a TV, an Echo Show and the monitor polling together cost one fetch.
+export async function snapshot(env, { maxPeople = 12 } = {}) {
+  if (memSnapshot && Date.now() - memSnapshot.at < 55e3) return memSnapshot;
+  const { connections } = await withSession(env, (s) => getConnections(s));
+  const people = [];
+  for (const c of connections.slice(0, maxPeople)) {
+    let history = [];
+    let sensor = sensorOf(c);
+    try {
+      const g = await withSession(env, (s) => getGraph(s, c.patientId));
+      history = g.graphData.map(toPoint).filter(Boolean);
+      sensor = sensorOf(g.connection, g.activeSensors) || sensor;
+    } catch (e) {
+      if (e.code === 'auth' || e.code === 'config') throw e;
+    }
+    const latest = toPoint(c.glucoseMeasurement);
+    if (latest && !history.some((p) => Math.abs(p.t - latest.t) < 60e3)) history.push(latest);
+    history.sort((a, b) => a.t - b.t);
+    people.push({
+      pid: c.patientId,   // internal: matches doses to people; never sent to a screen
+      name: [c.firstName, c.lastName].filter(Boolean).join(' ') || 'Unnamed',
+      firstName: c.firstName || '',
+      units: (c.glucoseMeasurement?.GlucoseUnits ?? c.uom) === 0 ? 'mmol/L' : 'mg/dL',
+      low: Number.isFinite(c.targetLow) ? c.targetLow : 70,
+      high: Number.isFinite(c.targetHigh) ? c.targetHigh : 180,
+      latest,
+      history,
+      sensorStart: sensor?.start ?? null,
+    });
+  }
+  memSnapshot = { at: Date.now(), people };
+  return memSnapshot;
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+async function libreLogin(request) {
+  const { email, password } = await request.json();
+  try {
+    const s = await lluLogin(email, password);
+    return json({ token: s.token, apiBase: s.base, accountId: s.accountId, version: s.version });
+  } catch (e) {
+    return json({ error: e.message, code: e.code }, e.code === 'credentials' ? 401 : 502);
+  }
+}
+
+async function libreReadings(request) {
+  const { token, apiBase, accountId } = await request.json();
+  if (!token) return json({ error: 'Not logged in' }, 401);
+  const session = {
+    base: apiBase && /^https:\/\/api(-[a-z0-9]+)?\.libreview\.io$/.test(apiBase) ? apiBase : 'https://api.libreview.io',
+    token,
+    accountId: accountId || (await accountIdFromToken(token)),
+    version: DEFAULT_VERSION,
+  };
+  try {
+    const { connections } = await getConnections(session);
+    const conn = connections[0];
+    if (!conn) return json({ error: 'No CGM connections found' }, 404);
+    const g = await getGraph(session, conn.patientId);
+    const latest = toPoint(conn.glucoseMeasurement);
+    const history = g.graphData.map(toPoint).filter(Boolean);
+    return json({
+      current: latest
+        ? { value: latest.mg, trend: latest.trend, timestamp: iso(latest.t), unit: 'mg/dL', source: 'libre' }
+        : null,
+      history: history.reverse().map((p) => ({ value: p.mg, trend: p.trend, timestamp: iso(p.t) })),
+    });
+  } catch (e) {
+    return json({ error: e.message, code: e.code }, e.code === 'auth' ? 401 : 502);
+  }
+}
+
+async function glucoseLatest(request, env) {
+  if (!env.HEALTH_INGEST_TOKEN) return json({ error: 'HEALTH_INGEST_TOKEN is not set' }, 503);
+  const auth = request.headers.get('Authorization') || '';
+  if (!safeEqual(auth, `Bearer ${env.HEALTH_INGEST_TOKEN}`)) return json({ error: 'unauthorized' }, 401);
+  try {
+    const snap = await snapshot(env, { maxPeople: 1 });
+    const p = snap.people[0];
+    if (!p) return json({ error: 'No one is sharing with the server LibreLinkUp account' }, 404);
+    return json(p.history.map((q) => ({ value: q.mg, trend: q.trend, timestamp: iso(q.t), source: 'libre' })));
+  } catch (e) {
+    return json({ error: e.message, code: e.code }, e.code === 'config' ? 503 : 502);
+  }
+}
+
+function displayKeyOk(env, key) {
+  return Boolean(env.DISPLAY_KEY) && safeEqual(key, env.DISPLAY_KEY);
+}
+
+async function displayData(url, env) {
+  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
+  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+  return displayPayload(env);
+}
+
+async function displayPayload(env, extra = {}) {
+  try {
+    const snap = await snapshot(env);
+    const since = Date.now() - 12 * 3600e3;
+    return json({
+      at: snap.at,
+      people: snap.people.map((p) => ({
+        name: p.name, units: p.units, low: p.low, high: p.high, sensorStart: p.sensorStart,
+        latest: p.latest,
+        history: p.history.filter((q) => q.t >= since).map((q) => [q.t, q.mg]),
+      })),
+      ...extra,
+    });
+  } catch (e) {
+    return json({ error: e.message, code: e.code }, e.code === 'config' ? 503 : 502);
+  }
+}
+
+
+// su94r Mini sends its recent insulin markers and the ids of doses it deleted, and gets
+// back the doses said to Alexa. Deletions are only ever explicit: a computer that has
+// not yet received another computer's dose must not erase it.
+async function voiceSync(request, url, env, deps) {
+  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
+  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+  const store = deps.store || doseStore(env);
+  if (!store.ready) return json({ error: 'The dose store is not configured' }, 503);
+  let body;
+  try { body = await request.json(); } catch { return json({ error: 'bad request' }, 400); }
+  const now = Date.now();
+  const markers = (Array.isArray(body?.markers) ? body.markers : [])
+    .filter((m) => m?.type === 'insulin' && Number.isFinite(m.t) && now - m.t < WINDOW_MS && m.t < now + 15 * 60e3)
+    .slice(0, 500);
+  await store.upsert(markers.map((m) => ({
+    id: m.id, pid: m.p, t: m.t, kind: m.kind || 'rapid', amount: m.amount ?? null,
+    source: m.source === 'alexa' ? 'alexa' : 'extension',
+  })));
+  const removed = (Array.isArray(body?.removed) ? body.removed : []).slice(0, 500);
+  if (removed.length) await store.markDeleted(removed);
+  const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa');
+  return json({ doses: asMarkers(doses), at: now });
+}
+
+async function screensRoute(path, request, url, env, deps) {
+  const store = deps.screens || screenStore(env);
+  if (!store.ready) return json({ error: 'Screens are not configured' }, 503);
+  if (path === 'pair/start') return json(await pairStart(request, store));
+  if (path === 'pair/poll') return json(await pairPoll(request, store));
+  if (path === 'screen/data') {
+    const screen = await screenFor(request, store);
+    if (!screen) return json({ error: 'unauthorized' }, 401);
+    return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
+  }
+  // The rest manage screens and need the display key.
+  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
+  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+  if (path === 'pair/claim') return json(await pairClaim(request, store));
+  if (path === 'screens') return json({ screens: await store.list() });
+  if (path === 'screens/remove') {
+    const { id } = await request.json().catch(() => ({}));
+    if (!id) return json({ error: 'id needed' }, 400);
+    await store.update(String(id), { revoked: true, token_once: null });
+    return json({ ok: true });
+  }
+  return json({ error: 'not found' }, 404);
+}
+const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screens', 'screens/remove']);
+
+export async function handleCgm(path, request, env, deps = {}) {
+  if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
+  const url = new URL(request.url);
+  try {
+    if (path === 'libre/login' && request.method === 'POST') return await libreLogin(request);
+    if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
+    if (path === 'glucose/latest') return await glucoseLatest(request, env);
+    if (path === 'display/data') return await displayData(url, env);
+    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa });
+    if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
+    if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
+    return json({ error: 'not found' }, 404);
+  } catch (err) {
+    return json({ error: String(err?.message || err).slice(0, 300) }, 500);
+  }
+}

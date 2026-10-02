@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>su94r Mini · Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="page">
+    <header class="head">
+      <img src="icons/icon48.png" width="40" height="40" alt="">
+      <div>
+        <h1>su94r Mini</h1>
+        <p class="sub">Your FreeStyle Libre reading and graph in a small window on your laptop. Works with FreeStyle Libre through LibreLinkUp.</p>
+      </div>
+    </header>
+
+    <section id="handover" class="panel notice" hidden>
+      <h2 id="handover-title">Moving to su94r Mini</h2>
+      <p id="handover-text" class="hint"></p>
+      <div id="handover-actions" class="row-left wrap" hidden>
+        <button id="bring-over" type="button" class="primary">Bring my data from Libre Mini Graph</button>
+        <input id="old-id" type="text" class="grow" placeholder="Old copy's ID (only on another computer)" aria-label="ID of the old copy">
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>People</h2>
+      <ul id="people" class="people"></ul>
+      <div class="row-left wrap">
+        <button id="open-board" type="button" class="primary">Open the board (everyone)</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>LibreLinkUp accounts</h2>
+      <ul id="accounts" class="accounts"></ul>
+      <details id="add-account">
+        <summary id="add-summary">Add a LibreLinkUp account</summary>
+        <p class="hint">Use a <strong>LibreLinkUp</strong> login (the follower app). One account can follow many people; care teams can add several accounts.</p>
+        <form id="login" autocomplete="on">
+          <label class="field">
+            <span>Email</span>
+            <input id="email" type="email" autocomplete="username" required>
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button id="login-btn" type="submit" class="primary">Sign in</button>
+        </form>
+        <details class="setup">
+          <summary>First time? Turn on sharing (about 2 minutes)</summary>
+          <ol>
+            <li>In the <strong>FreeStyle Libre 3</strong> app on the phone of the person wearing the sensor, open the menu, then <em>Connected Apps</em> → <em>LibreLinkUp</em> → <em>Add Connection</em>. Enter the follower email and send the invite.</li>
+            <li>Install <strong>LibreLinkUp</strong> (App Store or Google Play), create an account with that email, and accept the invitation and the terms.</li>
+            <li>Come back here and sign in with that LibreLinkUp email and password.</li>
+          </ol>
+        </details>
+      </details>
+    </section>
+
+    <p id="msg" class="msg" role="status" aria-live="polite"></p>
+
+    <section class="panel">
+      <h2>Alerts</h2>
+      <label class="check"><input id="a-enabled" type="checkbox"> Desktop alerts (while Chrome is running)</label>
+      <div id="alert-rows" class="rows">
+        <label class="limit"><input id="a-urgentLowOn" type="checkbox"> Urgent low below <input id="a-urgentLow" type="number" class="num"> <span class="u"></span></label>
+        <label class="limit"><input id="a-lowOn" type="checkbox"> Low below <input id="a-low" type="number" class="num"> <span class="u"></span></label>
+        <label class="limit"><input id="a-highOn" type="checkbox"> High above <input id="a-high" type="number" class="num"> <span class="u"></span></label>
+        <label class="check"><input id="a-fallingFast" type="checkbox"> Falling fast</label>
+        <label class="check"><input id="a-risingFast" type="checkbox"> Rising fast</label>
+        <label class="check"><input id="a-noData" type="checkbox"> No reading for 20 minutes</label>
+        <label class="field inline">
+          <span>Alarm sound</span>
+          <select id="a-sound">
+            <option value="urgent">Urgent low only</option>
+            <option value="all">Every alert</option>
+            <option value="off">Off (notification only)</option>
+          </select>
+        </label>
+        <div class="row-left">
+          <button id="test-alert" type="button" class="ghost">Send a test alert</button>
+        </div>
+      </div>
+      <p class="hint">Alerts back up the Libre 3 app's own alarms; they do not replace them. If nothing pops up, check Windows Settings → System → Notifications → Google Chrome, and Do not disturb.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Insulin & medicines</h2>
+      <p class="hint">Log a dose by clicking the graph at the moment you took it (or with the <strong>+</strong> button). The window then shows your last dose, how long ago it was, and how much rapid insulin is still active, and it warns you before you log a second dose too close to the first.</p>
+      <label class="field inline">
+        <span>Your rapid insulin</span>
+        <select id="rapidInsulin">
+          <option value="novorapid">NovoRapid / NovoLog</option>
+          <option value="humalog">Humalog / Admelog</option>
+          <option value="fiasp">Fiasp</option>
+          <option value="lyumjev">Lyumjev</option>
+          <option value="apidra">Apidra</option>
+        </select>
+      </label>
+      <h3>Your medicines</h3>
+      <div class="row-left wrap">
+        <input id="medSearch" type="search" placeholder="Search, e.g. metformin or Lantus" aria-label="Search medicines" class="grow">
+        <button id="medGo" type="button" class="ghost">Search</button>
+      </div>
+      <ul id="medResults" class="markers"></ul>
+      <ul id="medList" class="markers"></ul>
+      <p class="hint small">Names come from RxNorm (U.S. National Library of Medicine), free and without an account. Set your usual amount so logging is one click. Insulins added here are logged as insulin, so active insulin and the double-dose warning include them.</p>
+      <h3>What your history shows</h3>
+      <div id="timing" class="timing hint">Loading…</div>
+      <p class="hint small">Observations from your own logs, not dosing advice. Food, activity, stress, illness and the injection site all change insulin timing. This tool never suggests how many units to take; talk to your care team before changing when or how much you dose.</p>
+    </section>
+
+    <section class="panel">
+      <h2>AI analysis</h2>
+      <p class="hint">A plain-language look at your patterns, with follow-up questions. Pick where the AI runs:</p>
+      <div class="choices">
+        <div class="choice">
+          <label><input type="radio" name="aiProvider" value="ollama"> <strong>This computer</strong> (free and private: nothing leaves your PC)</label>
+          <div class="sub-row"><span id="ollamaStatus" class="hint small">Checking…</span> <select id="ollamaModel" aria-label="Local model"></select></div>
+        </div>
+        <div class="choice">
+          <label><input type="radio" name="aiProvider" value="openrouter"> <strong>OpenRouter</strong> (one-click sign-in, many models, some free)</label>
+          <div class="sub-row"><button id="orConnect" type="button" class="ghost">Sign in with OpenRouter</button> <span id="orStatus" class="hint small"></span> <input id="orModel" type="text" placeholder="openrouter/auto" aria-label="OpenRouter model" class="grow"></div>
+        </div>
+        <div class="choice">
+          <label><input type="radio" name="aiProvider" value="anthropic"> <strong>Claude</strong> (Anthropic API key from console.anthropic.com)</label>
+          <div class="sub-row"><input id="anthropicKey" type="password" placeholder="sk-ant-…" autocomplete="off" aria-label="Anthropic API key" class="grow"> <select id="anthropicModel" aria-label="Claude model"></select></div>
+        </div>
+        <div class="choice">
+          <label><input type="radio" name="aiProvider" value="gemini"> <strong>Google Gemini</strong> (API key from aistudio.google.com, free tier)</label>
+          <div class="sub-row"><input id="geminiKey" type="password" placeholder="Gemini API key" autocomplete="off" aria-label="Gemini API key" class="grow"> <input id="geminiModel" type="text" placeholder="gemini-flash-latest" aria-label="Gemini model"></div>
+        </div>
+        <div class="choice">
+          <label><input type="radio" name="aiProvider" value="custom"> <strong>Other</strong> (any OpenAI-compatible service)</label>
+          <div class="sub-row"><input id="customBase" type="url" placeholder="https://api.example.com/v1" aria-label="Base URL" class="grow"> <input id="customKey" type="password" placeholder="API key" autocomplete="off" aria-label="API key"> <input id="customModel" type="text" placeholder="model" aria-label="Model"> <button id="customSave" type="button" class="ghost">Save</button></div>
+        </div>
+      </div>
+      <label class="check" id="consentRow" hidden><input id="aiConsent" type="checkbox"> <span id="consentText">I agree to send my glucose summary to this provider.</span></label>
+      <div class="row-left"><button id="aiOpen" type="button" class="primary">Open AI look</button></div>
+      <p class="hint small">Keys stay in this browser and never sync to other computers. The AI is instructed never to suggest doses or medicine changes.</p>
+    </section>
+
+    <section class="panel">
+      <h2>Sensor</h2>
+      <p id="sensor-now" class="hint"></p>
+      <label class="field inline">
+        <span>Wear length</span>
+        <select id="sensorDays">
+          <option value="14">14 days (FreeStyle Libre 3)</option>
+          <option value="15">15 days (FreeStyle Libre 3 Plus)</option>
+        </select>
+      </label>
+      <label class="check"><input id="sensorReminder" type="checkbox"> Remind me 24 hours before it ends</label>
+    </section>
+
+    <section class="panel">
+      <h2>Window</h2>
+      <label class="field">
+        <span>Units</span>
+        <select id="units">
+          <option value="auto">Same as the Libre app</option>
+          <option value="mg/dL">mg/dL</option>
+          <option value="mmol/L">mmol/L</option>
+        </select>
+      </label>
+      <label class="check"><input id="projection" type="checkbox"> Show where you're heading (dotted line, next 20 minutes)</label>
+      <label class="check"><input id="badge" type="checkbox"> Show the reading on the toolbar icon</label>
+      <label class="check"><input id="startup" type="checkbox"> Open the mini window when Chrome starts</label>
+      <label class="check"><input id="demo" type="checkbox"> Demo mode (fake data, to try the window before sharing is set up; turns itself off once an account is signed in)</label>
+      <p class="hint" id="shortcut-line">Keyboard shortcut: <kbd id="shortcut">Alt+Shift+G</kbd> shows or hides the mini window. <button id="change-shortcut" type="button" class="link">Change it</button></p>
+    </section>
+
+    <section class="panel">
+      <h2>Keep it on top</h2>
+      <p id="helper-status" class="hint">Checking for the pin helper…</p>
+      <p class="hint">On Windows, the optional <strong>pin helper</strong> keeps the mini window above every other app for good, even after a restart. Without it, the pin button uses Chrome's float, which needs one click each time. To install it, run <code>pin-helper\install.ps1</code> from the extension folder (right-click → Run with PowerShell).</p>
+    </section>
+
+    <section class="panel">
+      <h2>Your computers</h2>
+      <p class="hint">Markers, doses, your medicine list and alert settings sync between every Chrome browser signed in to the same Google account with Chrome sync on, so a dose logged on one computer counts on the others. Each computer signs in to LibreLinkUp once (sign-ins stay on the device). Edge syncs with other Edge browsers, not with Chrome.</p>
+      <label class="field inline"><span>This computer</span><input id="deviceName" type="text" class="grow" placeholder="Name it, e.g. Office laptop"></label>
+      <p id="sync-status" class="hint"></p>
+      <ul id="devices" class="markers"></ul>
+      <details>
+        <summary>Add another computer</summary>
+        <ol>
+          <li>On that computer, open your synced copy of the su94r Mini folder, or download the <code>extension</code> folder from GitHub. Every copy has the same extension ID, wherever the folder is, so they all share one sync.</li>
+          <li>Right-click <code>setup-this-pc.ps1</code> → <strong>Run with PowerShell</strong>. It opens the extensions page, copies the folder path and installs the pin helper.</li>
+          <li>Turn on <strong>Developer mode</strong>, click <strong>Load unpacked</strong>, paste the path (Ctrl+V) and choose <strong>Select Folder</strong>.</li>
+          <li>Sign in to LibreLinkUp once. Markers and settings arrive by themselves, and updates install themselves.</li>
+        </ol>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>History</h2>
+      <label class="field inline"><span>Person</span><select id="who"></select></label>
+      <p id="history-summary" class="hint">Loading…</p>
+      <div id="gaps" class="gaps"></div>
+      <p class="hint">Every reading is saved in this browser and kept. Each update fills gaps of up to 12 hours on its own (that is all LibreLinkUp keeps). To fill older gaps, download your data from <strong>LibreView</strong> (libreview.com → sign in → <em>Download glucose data</em>) and import the file here.</p>
+      <div class="row-left wrap">
+        <label class="ghost file-btn">Import LibreView file (.csv)<input id="import" type="file" accept=".csv,text/csv" hidden></label>
+        <select id="export-days" aria-label="Export range">
+          <option value="7">Last 7 days</option>
+          <option value="14" selected>Last 14 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="0">Everything</option>
+        </select>
+        <button id="export" type="button" class="ghost">Download CSV</button>
+      </div>
+      <details>
+        <summary>Delete saved history</summary>
+        <p class="hint">Removes the saved readings and the AI conversation for the person picked above, from this browser only. Markers and doses are kept: they are shared with your other computers.</p>
+        <button id="clear-history" type="button" class="danger">Delete saved readings</button>
+        <p class="hint">To delete this person's markers and doses too: those from the last 30 days on <strong>all your computers</strong>, older ones on this computer.</p>
+        <button id="clear-markers" type="button" class="danger">Delete markers on all computers</button>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Markers</h2>
+      <p class="hint">Add meals, insulin and exercise with the <strong>+</strong> button in a mini window. They show on the graph and in the CSV export. Showing markers for the person picked under History.</p>
+      <ul id="markers" class="markers"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>How to use it</h2>
+      <ul class="tips">
+        <li>Click the extension's toolbar icon to open the mini window. Pin the icon (puzzle piece → pin) so the number is always visible.</li>
+        <li>The <strong>pin</strong> button keeps the window above everything. The <strong>shrink</strong> button shows just the number; double-click the number to get the graph back.</li>
+        <li>Hover the graph to read any point or marker. Pick 3 hours up to 7 days.</li>
+      </ul>
+    </section>
+
+    <footer class="foot">
+      <p><strong>Not a medical device.</strong> Not made by or affiliated with Abbott. FreeStyle Libre, LibreLinkUp and LibreView are Abbott trademarks. Readings come through LibreLinkUp and can arrive late or not at all. Use your Libre 3 app or reader, and its alarms, for treatment decisions.</p>
+      <p>Your password goes only to Abbott's LibreLinkUp server (libreview.io) and is never saved; the sign-in token and your readings stay in this browser. With Chrome sync on, your markers, doses, medicine list and shared settings sync through your Google account to your other computers. Medicine search sends what you type to the US National Library of Medicine (RxNav). If you turn on AI analysis, a summary without names goes to the AI service you pick. Nothing else leaves this computer.</p>
+    </footer>
+  </main>
+  <script type="module" src="options.js"></script>
+</body>
+</html>
