@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, shareNew, shareUrl } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, shareNew, shareUrl, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -26,7 +26,12 @@ function action(ctx, msg, label, busy, fn, cls = 'ghost') {
     type: 'button', class: cls,
     onclick: async () => {
       msg.textContent = busy;
-      try { const r = await fn(); msg.textContent = r?.ok === false ? r.error || 'Did not work.' : 'Done.'; } catch (e) { msg.textContent = e.message; }
+      // On success the cards are redrawn; on a failure they are not, so the reason stays readable.
+      try {
+        const r = await fn();
+        if (r?.ok === false) { msg.textContent = r.message || r.error || 'Did not work.'; return; }
+        msg.textContent = 'Done.';
+      } catch (e) { msg.textContent = e.message; return; }
       ctx.refresh();
     },
   }, label);
@@ -72,6 +77,10 @@ function qrImage(h, text, label) {
 /** The share code on screen, if any: { url, role, until }. Kept only in this page. */
 let shareShown = null;
 let shareTimer = null;
+/** The Telegram link on screen, if any: { url, role, until }. */
+let tgShown = null;
+
+const openTab = (url) => chrome.tabs.create({ url });
 
 const nightProblem = (code) => (code === 'auth' || code === 'config'
   ? 'the server has no working LibreLinkUp sign-in; open su94r Mini so it reconnects'
@@ -110,6 +119,63 @@ export const CONNECTORS = [
           action(ctx, msg, 'A family member\'s phone', 'Making a code…', make('family'))),
         state(h, 'My other phone gets your own low alerts. A family member\'s phone is told only when a low is not handled, once you switch on "Tell caregivers too" in Low alerts.'),
       ];
+    },
+  },
+  {
+    id: 'telegram',
+    icon: '✈️',
+    name: 'Low alerts on Telegram',
+    what: 'The same low alerts in Telegram, with an "I\'m OK" button, and /sugar for the glucose now. A chat links itself when you tap its link and press Start in Telegram. It uses one bot of your own, made once with @BotFather.',
+    async render(ctx) {
+      const { h, settings } = ctx;
+      if (!parseScreenLink(settings.screenLink)) return needServer(h);
+      const msg = h('div', { class: 'state' });
+      let s;
+      try { s = await tgStatus(settings.screenLink); } catch (e) { return state(h, `Could not reach your su94r server: ${e.message}`, 'warn'); }
+      if (!s.configured) {
+        const field = h('input', { type: 'password', placeholder: '123456789:AAE…', 'aria-label': 'Bot token from BotFather', class: 'grow', autocomplete: 'off', spellcheck: 'false' });
+        return [
+          steps(h, [
+            'Press Open BotFather. In Telegram send /newbot, give it a name (for example "su94r alerts") and a username that ends in "bot".',
+            'BotFather answers with a token: numbers, a colon, then letters. Copy it.',
+            'Paste it below and press Save. It goes only to your su94r server, which checks it with Telegram and points the bot at itself.',
+          ], true),
+          h('div', { class: 'actions' }, h('button', { type: 'button', class: 'ghost', onclick: () => openTab('https://t.me/BotFather') }, 'Open BotFather')),
+          h('div', { class: 'actions' }, field,
+            action(ctx, msg, 'Save', 'Checking with Telegram…', async () => { const r = await tgConfig(settings.screenLink, field.value.trim()); field.value = ''; return r; }, 'primary')),
+          msg,
+        ];
+      }
+      const out = [state(h, s.enabled
+        ? `Bot ${s.bot} is ready. ${s.chats.length ? `${s.chats.length} chat${s.chats.length === 1 ? '' : 's'} linked.` : 'No chat linked yet.'}`
+        : `Bot ${s.bot} is paused: no Telegram alerts are sent.`, s.enabled ? 'on' : 'warn')];
+      if (tgShown && Date.now() < tgShown.until) {
+        out.push(
+          state(h, `Tap Open in Telegram (or scan with the ${tgShown.role === 'family' ? 'family member\'s' : 'phone\'s'} camera), then press Start in Telegram. The link works once, for 15 minutes.`),
+          h('div', { class: 'qr-row' }, qrImage(h, tgShown.url, 'Scan to open the su94r bot in Telegram'),
+            h('div', { class: 'actions' },
+              h('button', { type: 'button', class: 'primary', onclick: () => openTab(tgShown.url) }, 'Open in Telegram'),
+              action(ctx, msg, 'I pressed Start', 'Checking…', async () => { tgShown = null; }))),
+        );
+      } else {
+        tgShown = null;
+        const make = (role) => async () => {
+          const r = await tgLink(settings.screenLink, role);
+          tgShown = { url: r.url, role, until: Date.now() + (r.expiresIn || 900) * 1000 };
+        };
+        out.push(h('div', { class: 'actions' },
+          action(ctx, msg, 'Link my Telegram', 'Making a link…', make('me'), 'primary'),
+          action(ctx, msg, 'Link a family member\'s Telegram', 'Making a link…', make('family'))));
+      }
+      if (s.chats.length) {
+        out.push(h('ul', { class: 'chats' }, s.chats.map((c) => h('li', {},
+          `${c.name || 'Telegram'} (${c.role === 'family' ? 'family' : 'you'}) `,
+          action(ctx, msg, 'Remove', 'Removing…', () => tgRemove(settings.screenLink, c.id))))));
+      }
+      out.push(msg, h('div', { class: 'actions' },
+        action(ctx, msg, 'Send a test message', 'Sending…', () => tgTest(settings.screenLink)),
+        action(ctx, msg, s.enabled ? 'Pause Telegram alerts' : 'Turn Telegram alerts on', 'Saving…', () => tgEnabled(settings.screenLink, !s.enabled))));
+      return out;
     },
   },
   {

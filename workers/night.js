@@ -269,10 +269,18 @@ function publicView(row, base) {
   };
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, now = () => Date.now() }) {
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, now = () => Date.now() }) {
   if (path !== 'night/tick' && path !== 'night/setup' && path !== 'night/test' && path !== 'night/ack') return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
-  const sendPush = push || ((topic, msg) => ntfyPush(env, topic, msg));
+  const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
+  // Every alert goes to ntfy and, when set up, to the linked Telegram chats of the same role
+  // (telegram.js). It counts as sent when either one delivered it.
+  const sendFor = (row) => async (topic, msg) => {
+    const role = topic === row.care_topic ? 'family' : 'me';
+    const [viaNtfy, viaTg] = await Promise.allSettled([ntfy(topic, msg), telegram ? telegram(role, msg) : Promise.resolve(0)]);
+    if (viaNtfy.status === 'fulfilled' || (viaTg.status === 'fulfilled' && viaTg.value > 0)) return true;
+    throw new Error(viaNtfy.reason?.message || 'not sent');
+  };
   const ntfyBase = (env.NTFY_BASE || 'https://ntfy.sh').replace(/\/$/, '');
   const ackBase = `${String(env.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/su94r-cgm/night/ack`;
 
@@ -293,7 +301,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     let people = [];
     let error = null;
     try { people = (await snapshot()).people || []; } catch (e) { error = { code: e.code || 'error', message: String(e.message || e).slice(0, 200) }; }
-    const result = await nightCheck({ row, people, error, now: now(), push: sendPush, ackUrl: (t) => `${ackBase}?t=${t}` });
+    const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}` });
     const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null };
     await store.patch({ state: result.state, last_result: summary });
     return json({ ok: true, people: summary.people, sent: summary.sent.length, error: summary.error });
@@ -306,7 +314,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
   if (path === 'night/test') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     try {
-      await sendPush(row.self_topic, { title: 'su94r test alert', message: 'Night alerts reach this phone. A real low comes with an "I\'m OK" button.', priority: 4, tags: ['test_tube'] });
+      await sendFor(row)(row.self_topic, { title: 'su94r test alert', message: 'Night alerts reach this phone. A real low comes with an "I\'m OK" button.', priority: 4, tags: ['test_tube'] });
     } catch (e) {
       return json({ error: 'push-failed', message: `The alert did not go out (${e.message}). Try again in a minute.` }, 502);
     }

@@ -207,6 +207,7 @@ async function openOpts(first){
       ' Install <b>ntfy</b> (free): <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Play Store</a> · <a href="https://apps.apple.com/app/ntfy/id1625396347">App Store</a>, then:</p>'+
       '<p><a class="btn" href="ntfy://'+esc(a.url.replace('https://','').replace('http://',''))+'">Subscribe in ntfy</a> <a class="btn ghost" href="'+esc(a.url)+'">Open in the browser</a></p>'+
       '<p class="s">Or in ntfy tap + and paste the topic: <code>'+esc(a.topic)+'</code>'+copy(a.topic)+'</p>':'')+
+    (x.telegram?'<h3>Alerts on Telegram</h3><p>Prefer Telegram? Tap below, then press <b>Start</b> in Telegram. The link works once, for 15 minutes.</p><p><a class="btn" href="'+esc(x.telegram)+'">Open in Telegram</a></p>':'')+
     (ns?'<h3>Watch and widgets</h3><p>In <b>GlucoDataHandler</b> (free, also on the Pixel Watch): Sources → Nightscout, then this address and token.</p>'+
       '<p class="s"><code>'+esc(base)+'/ns</code>'+copy(base+'/ns')+'</p><p class="s"><code>'+esc(ns)+'</code>'+copy(ns)+'</p>':'')+
     '<p><button id="optsClose" class="btn">Done</button> <button id="unlink" class="btn ghost">Unlink this phone</button></p></div>';

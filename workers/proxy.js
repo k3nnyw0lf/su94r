@@ -151,7 +151,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg)(\/|$)/.test(path)) return await forward(request, url, env);
       if (path === '/tv' || path === '/tv/') {
         // Pairing screen: shows a code; su94r Mini enters it; the screen keeps its own token.
         return new Response(displayPage('', { pair: true }), {

@@ -27,6 +27,7 @@
 //   ns/new, ns/*                       Nightscout-style feed for watch faces and widgets (nightscout.js)
 //   connect, connect/status, connect/session   su94r Mini connects with its LibreLinkUp sign-in (owner.js)
 //   night/tick, night/setup, night/test, night/ack   low alerts on the phone, every 5 min (night.js)
+//   tg/*                               the same alerts on Telegram, chats linked by a tap (telegram.js)
 // Where DISPLAY_KEY is named, a connected su94r Mini's own key works too.
 // Server-side routes also need LLU_EMAIL and LLU_PASSWORD. Anything unset → 503.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -41,6 +42,7 @@ import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 import { nightStore, nightRoute } from './night.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
+import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor } from './telegram.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -329,7 +331,9 @@ async function screensRoute(path, request, url, env, deps) {
       const topic = row && (screen.role === 'family' ? row.care_topic : row.self_topic);
       if (topic) alerts = { topic, url: `${(env.NTFY_BASE || 'https://ntfy.sh').replace(/\/$/, '')}/${topic}`, role: screen.role, on: screen.role === 'family' ? Boolean(row.care_enabled) : Boolean(row.enabled) };
     }
-    return json({ name: screen.name, role: screen.role, alerts });
+    // And a one-time Telegram link for the same role, when the su94r bot is set up.
+    const telegram = await telegramLinkFor(deps.telegram || telegramStore(env), screen.role).catch(() => null);
+    return json({ name: screen.name, role: screen.role, alerts, telegram });
   }
   // The rest manage screens and need the display key (or a connected su94r Mini's key).
   if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
@@ -401,8 +405,14 @@ export async function handleCgm(path, request, env, deps = {}) {
       doses: () => (deps.store || doseStore(env)).recent(null),
     });
     if (mcp) return mcp;
-    const night = await nightRoute(path, request, url, env, { store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push });
+    const tgStore = deps.telegram || telegramStore(env);
+    const night = await nightRoute(path, request, url, env, {
+      store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push,
+      telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
+    });
     if (night) return night;
+    const tg = await telegramRoute(path, request, url, env, { store: tgStore, json, keyOk, snapshot: () => snapshot(env), night: deps.night || nightStore(env), api: deps.tgApi });
+    if (tg) return tg;
     const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (ns) return ns;
     return json({ error: 'not found' }, 404);

@@ -98,6 +98,15 @@ export const newNsLink = (link, name) => call(link, 'ns/new', { method: 'POST', 
 export const shareNew = (link, role, name) => call(link, 'share/new', { method: 'POST', body: { role, name } });
 export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/tv#join=${invite}`;
 
+// Low alerts on Telegram (server: workers/telegram.js): one bot of the owner's, chats linked by a
+// one-time t.me link and Start. The bot token goes to the server once and never comes back.
+export const tgStatus = (link) => call(link, 'tg/status');
+export const tgConfig = (link, token) => call(link, 'tg/config', { method: 'POST', body: { token } });
+export const tgLink = (link, role) => call(link, 'tg/link/new', { method: 'POST', body: { role } });
+export const tgRemove = (link, chatId) => call(link, 'tg/chats/remove', { method: 'POST', body: { chatId } });
+export const tgEnabled = (link, enabled) => call(link, 'tg/enabled', { method: 'POST', body: { enabled } });
+export const tgTest = (link) => call(link, 'tg/test', { method: 'POST', body: {} });
+
 // Night safety net (server: workers/night.js): phone alerts through ntfy, checked every 5 minutes.
 export const nightSetup = (link) => call(link, 'night/setup');
 export const nightSave = (link, patch) => call(link, 'night/setup', { method: 'POST', body: patch });

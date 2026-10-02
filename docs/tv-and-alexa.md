@@ -108,6 +108,16 @@ The server itself checks every 5 minutes (a database cron calls `night/tick`, se
 
 In ntfy, let the topic override Do Not Disturb for urgent alerts, or night alerts stay silent. Optional secrets `SU94R_NTFY_BASE` / `SU94R_NTFY_TOKEN` point it at your own ntfy server or account. Code: `workers/night.js`, table `su94r_night`.
 
+### The same alerts on Telegram (tap a link, press Start)
+
+su94r Mini → Health vault → **Low alerts on Telegram**:
+
+1. Once: **Open BotFather**, send `/newbot`, pick a name and a username ending in "bot", paste the token BotFather gives you into the card and press **Save**. It goes only to your su94r server, which checks it with Telegram and points the bot at itself (with a secret header, so only Telegram can call it). No route ever returns the token.
+2. **Link my Telegram** (or a family member's): tap **Open in Telegram** or scan the QR code, then press **Start** in Telegram. The link works once, for 15 minutes. A phone you shared (above) finds the same button in its Phone options.
+3. Alerts arrive with an **I'm OK** button; `/sugar` answers with the glucose now; `/stop` unlinks. Chats that never linked get no answer at all.
+
+An alert counts as delivered when ntfy or Telegram took it. **Pause Telegram alerts** stops only this bot. Code: `workers/telegram.js`, tables `su94r_telegram_bot`, `su94r_telegram_chats`, `su94r_telegram_links`.
+
 ### The older su94r-monitor Worker
 
 `su94r-monitor` already calls `/glucose/latest` every five minutes with `HEALTH_INGEST_TOKEN`. Once `SU94R_HEALTH_INGEST_TOKEN` matches it and su94r Mini is connected, check it with:
