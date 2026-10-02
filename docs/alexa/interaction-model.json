@@ -192,7 +192,7 @@
             "did I go low last night",
             "how was the night",
             "how was {name} last night",
-            "how was {name}'s night"
+            "how was the night for {name}"
           ]
         },
         {
@@ -210,7 +210,29 @@
             "give me my week",
             "what was my time in range this week",
             "how is my week going",
-            "how was {name}'s week"
+            "how was the week for {name}"
+          ]
+        },
+        {
+          "name": "PatternIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "what patterns do you see",
+            "any patterns",
+            "about patterns",
+            "about my patterns",
+            "tell me my patterns",
+            "what are my patterns",
+            "what keeps happening",
+            "what repeats",
+            "find patterns",
+            "what patterns do you see for {name}",
+            "about patterns for {name}"
           ]
         }
       ],

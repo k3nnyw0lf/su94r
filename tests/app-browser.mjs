@@ -111,6 +111,8 @@ checks.nowFits = await noSideScroll();
 await shot('2-now');
 await tab('history');
 await page.waitForSelector('.days');
+await page.waitForSelector('h2:has-text("Patterns")');
+checks.patternsCard = true;
 checks.historyDays = (await page.$$('.days li')).length >= 14;
 checks.historyFits = await noSideScroll();
 await shot('3-history');

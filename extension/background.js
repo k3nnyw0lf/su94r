@@ -13,6 +13,7 @@ import {
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
 import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
+import { findPatterns } from './patterns.js';
 import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
 import { careTick, careRefresh, careClicked } from './care-bg.js';
@@ -780,7 +781,10 @@ async function weeklySummary({ force = false } = {}) {
   const cur = agp(points, mine, { from: t - 7 * D, to: t, ...range });
   const prev = agp(points, mine, { from: t - 14 * D, to: t - 7 * D, ...range });
   const units = displayUnits(settings, p);
-  const text = weeklyText(cur, prev, { lows: lowEpisodes(points, { from: t - 7 * D, to: t, low: range.low }), fmt: (mg) => `${fmtGlucose(mg, units)} ${units}` });
+  let text = weeklyText(cur, prev, { lows: lowEpisodes(points, { from: t - 7 * D, to: t, low: range.low }), fmt: (mg) => `${fmtGlucose(mg, units)} ${units}` });
+  // What repeats over two weeks (extension/patterns.js), the two most useful.
+  const found = findPatterns(points, mine, { now: t, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, ...range, fmt: (mg) => fmtGlucose(mg, units), unit: units });
+  if (found.patterns.length) text += `\n\nPatterns: ${found.patterns.slice(0, 2).map((p) => p.text).join(' ')}`;
   await nightNotify(settings.screenLink, `Your week${people.length > 1 ? ` (${firstName(p.name)})` : ''}`, text);
   return { ok: true };
 }

@@ -324,6 +324,11 @@
       '<p class="muted small" style="margin:6px 0 0">' + pct(s.vl + s.lo) + ' below · ' + pct(s.hi + s.vh) + ' above · readings for ' + pct(coverage) + ' of the time</p>' +
       chart({ pts, from, to: now, low, high, units, events: days <= 2 ? events : [], label: 'Glucose for the last ' + days + ' days' }) +
       (coverage < 0.7 ? '<p class="note">The server has readings from ' + esc(dayLabel(pts[0][0])) + '. Each day fills in more; su94r Mini on your computer also copies the history it has kept.</p>' : ''));
+    if (days >= 7) {
+      const pr = S.patterns && S.patterns.pid === c.pid && Date.now() - S.patterns.at < 10 * MIN ? S.patterns : null;
+      if (pr) html += card('<h2>Patterns</h2>' + (pr.data.patterns.length ? '<ul class="pat">' + pr.data.patterns.map((p) => '<li>' + esc(p.text) + '</li>').join('') + '</ul><p class="note">From the last 14 days. It describes what repeated; it does not advise.</p>' : '<p class="muted">' + esc(pr.data.note || 'No clear patterns yet.') + '</p>'));
+      else api('app/patterns?pid=' + encodeURIComponent(c.pid)).then((data) => { S.patterns = { pid: c.pid, at: Date.now(), data }; if (S.tab === 'history' && !S.dayView) renderHistory(); }).catch(() => {});
+    }
     if (days > 1) {
       const byDay = new Map();
       pts.forEach((p) => { const k = dateKey(p[0]); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(p); });

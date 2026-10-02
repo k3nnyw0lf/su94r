@@ -346,7 +346,9 @@ async function screensRoute(path, request, url, env, deps) {
   }
   if (path === 'doctor/data') {
     const screen = await screenFor(request, store, '');
-    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), snapshot: () => snapshot(env) });
+    let tz;
+    try { const n = deps.night || nightStore(env); if (n.ready) tz = (await n.get()).time_zone; } catch { /* default */ }
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), tz, snapshot: () => snapshot(env) });
     return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {

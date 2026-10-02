@@ -15,6 +15,7 @@ import { sha256, randomToken } from './screens.js';
 import { agp } from '../extension/agp.js';
 import { asMarkers } from './doses.js';
 import { labsForReport } from './labs.js';
+import { findPatterns } from '../extension/patterns.js';
 
 const DAY = 864e5;
 const clean = (s, max = 40) => String(s || '').replace(/[^\p{L}\p{N} '.,()-]/gu, '').trim().slice(0, max);
@@ -36,7 +37,7 @@ export async function doctorNew(request, store, snapshot) {
 }
 
 /** The 14-day report numbers for one person, from the server's history and logged doses. */
-export async function reportFor(pid, { history, doses, snapshot, labs = null, now = Date.now() }) {
+export async function reportFor(pid, { history, doses, snapshot, labs = null, tz = 'America/New_York', now = Date.now() }) {
   let person = null;
   try { person = (await snapshot()).people?.find((p) => p.pid === pid) || null; } catch { /* history only */ }
   const from = now - 14 * DAY;
@@ -45,6 +46,8 @@ export async function reportFor(pid, { history, doses, snapshot, labs = null, no
   try { if (doses?.ready) events = asMarkers(await doses.between(pid, from, now)); } catch { /* none */ }
   const low = person?.low ?? 70, high = person?.high ?? 180;
   const r = agp(points, events, { from, to: now, low, high });
+  const mmol = person?.units === 'mmol/L';
+  const found = findPatterns(points, events, { now, tz, low, high, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL' });
   let lab = { labs: [], a1c: null };
   try { if (labs?.ready) lab = labsForReport(await labs.list(pid), now); } catch { /* without labs */ }
   return {
@@ -53,14 +56,14 @@ export async function reportFor(pid, { history, doses, snapshot, labs = null, no
     from, to: now, days: r.days,
     readings: r.n, coverage: r.coverage, mean: r.mean, gmi: r.gmi, cv: r.cv,
     ranges: { veryLow: r.veryLow, low: r.low, inRange: r.inRange, high: r.high, veryHigh: r.veryHigh },
-    profile: r.profile, insulin: r.insulin, meals: r.meals, labs: lab.labs, a1c: lab.a1c,
+    profile: r.profile, insulin: r.insulin, meals: r.meals, labs: lab.labs, a1c: lab.a1c, patterns: found.patterns.map((p) => p.text),
   };
 }
 
 /** The report numbers for a doctor link's token, or null when the link is unknown, removed or expired. */
-export async function doctorData(screen, { history, doses, snapshot, labs = null, now = Date.now() }) {
+export async function doctorData(screen, { history, doses, snapshot, labs = null, tz, now = Date.now() }) {
   if (!screen || screen.kind !== 'doctor' || !screen.pid || Date.parse(screen.expires_at) <= now) return null;
-  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, now })), expiresAt: screen.expires_at, label: screen.name };
+  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, tz, now })), expiresAt: screen.expires_at, label: screen.name };
 }
 
 /** The report as HTML in the browser: esc, pct, day, val, stat, chart and reportHtml(d). Plain ES2017,
@@ -94,6 +97,7 @@ function reportHtml(d){
     '<h2>Time in ranges</h2><div class="ranges"><div class="col">'+[['vh',r.veryHigh],['hh',r.high],['in',r.inRange],['lo',r.low],['vl',r.veryLow]].map(function(a){return '<span class="seg '+a[0]+'" style="flex-grow:'+(a[1]||0)+'"></span>'}).join('')+'</div>'+
     '<table><tr><td>Very high (&gt;250)</td><td class="num">'+pct(r.veryHigh)+'</td><td class="muted small">target &lt;5%</td></tr><tr><td>High</td><td class="num">'+pct(r.high)+'</td><td class="muted small">target &lt;25% with very high</td></tr><tr><td>In range ('+val(d.low,u)+'–'+val(d.high,u)+')</td><td class="num">'+pct(r.inRange)+'</td><td class="muted small">target &gt;70%</td></tr><tr><td>Low</td><td class="num">'+pct(r.low)+'</td><td class="muted small">target &lt;4% with very low</td></tr><tr><td>Very low (&lt;54)</td><td class="num">'+pct(r.veryLow)+'</td><td class="muted small">target &lt;1%</td></tr></table></div>'+
     '<h2>Glucose by time of day</h2><p class="muted small">Median line, 25–75% band and 5–95% band of all days; target range shaded.</p>'+chart(d)+
+    (d.patterns&&d.patterns.length?'<h2>Patterns</h2><ul class="pat">'+d.patterns.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul><p class="muted small">What repeated in these 14 days. It describes; it does not advise.</p>':'')+
     '<h2>Logged insulin and meals</h2>'+(ins?'<table><tr><th>Insulin</th><th class="num">Doses</th><th class="num">Units per day</th></tr>'+ins+'</table>':'<p class="muted">No insulin logged on the server in this period.</p>')+
     '<p class="muted small">'+(d.meals?d.meals.count:0)+' meals logged. Logged markers are what was entered and may be incomplete.</p>'+
     labsHtml(d);

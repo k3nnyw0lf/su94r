@@ -13,6 +13,7 @@ import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 import { nightSummary, weekLine } from './history.js';
+import { findPatterns } from '../extension/patterns.js';
 
 const MMOL = 18.0182;
 export const MAX_UNITS = 100;
@@ -152,6 +153,7 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
   if (intent === 'LogCarbsIntent') return carbsIntent(body, { say, reply, store, getSnapshot });
   if (intent === 'ForecastIntent') return forecastIntent(body, { say, getSnapshot, store, forecasts });
   if (intent === 'NightIntent' || intent === 'WeekIntent') return pastIntent(body, intent, { say, getSnapshot, store, history });
+  if (intent === 'PatternIntent') return patternIntent(body, { say, getSnapshot, store, history });
 
   let snap;
   try {
@@ -346,6 +348,28 @@ async function forecastIntent(body, { say, getSnapshot, store, forecasts }) {
   let units = 'mg/dL';
   try { units = (await getSnapshot()).people.find((p) => p.pid === who.pid)?.units || units; } catch { /* keep mg/dL */ }
   return say(speakForecast(f, { units, name: who.many ? who.name : '' }));
+}
+
+// ---- "what patterns do you see?" (extension/patterns.js over the last 14 days) ----
+
+async function patternIntent(body, { say, getSnapshot, store, history }) {
+  if (!history?.ready) return say('The history is not set up on the server yet.');
+  const who = await whoFor(body, getSnapshot, store || { recent: async () => [] });
+  if (who.missing) return say(`I don't follow anyone called ${who.missing}.`);
+  if (who.none) return say('No one is sharing their glucose with this account yet.');
+  let person = null;
+  try { person = (await getSnapshot()).people.find((p) => p.pid === who.pid) || null; } catch { /* defaults */ }
+  const mmol = person?.units === 'mmol/L';
+  const now = Date.now();
+  let points, events = [];
+  try { points = await history.range(who.pid, now - 14 * 24 * 3600e3, now + 60e3); } catch { return say('I could not reach the history just now.'); }
+  try { if (store?.between) events = asMarkers(await store.between(who.pid, now - 14 * 24 * 3600e3, now)); } catch { /* without doses */ }
+  // Spoken without the unit (Alexa reads "mg/dL" letter by letter).
+  const r = findPatterns(points, events, { now, low: person?.low ?? 70, high: person?.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: '' });
+  const text = r.patterns.length
+    ? `Over the last ${r.days} days: ${r.patterns.slice(0, 3).map((p) => p.text.replace(/ {2,}/g, ' ').replace(/ \./g, '.').replace(/ \(/g, ' (').replace(/ ,/g, ',')).join(' ')} The app's History shows more.`
+    : r.note;
+  return say(who.many && who.name ? `${who.name}: ${text}` : text);
 }
 
 // ---- "how was my night?" and "how was my week?" (the server's history, history.js) ----

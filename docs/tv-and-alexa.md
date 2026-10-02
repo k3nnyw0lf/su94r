@@ -70,6 +70,8 @@ Each code works once, for 10 minutes. Linked phones appear with the other screen
 
 **Missed-dose reminders**: from the doses on the server (the last 14 days; su94r Mini copies its 90-day insulin history once), su94r learns your usual long-acting and mealtime times and reminds you when one is not logged: long-acting 90 minutes late (none in 18 hours for a once-a-day dose), mealtimes 75 minutes late only when your glucose shows it, never at night, once a day each. It never says what or how much to take. Off switch: su94r Mini → Low alerts → Levels and warnings. Code: `workers/nudges.js`.
 
+**Patterns**: what repeated in the last 14 days, in plain sentences: lows at the same hour, highs above 250 at the same time, a rise before waking, how much glucose rises after each meal time, weekdays against weekends, the steadiest and hardest part of the day. In the app's History, the report and the doctor's link, the Sunday summary, and "Alexa, ask my sugar what patterns do you see". It needs 5 days with readings for at least 12 hours; it describes and never advises. Code: `extension/patterns.js`.
+
 **Log by voice** (app → Log → 🎤): say "4 units rapid", "18 Lantus 30 minutes ago" or "40 grams"; the phone's own speech recognition writes it down, the server reads it like a Telegram message (`app/parse`), and the usual confirm and double-dose check follow. Nothing is saved before **Log it**.
 
 **Lab results** (app → Report): type in an A1c or any other result; the report and the doctor's link show the last 12 months and put the latest A1c next to the GMI. Code: `workers/labs.js`.

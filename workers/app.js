@@ -16,6 +16,7 @@
 //   POST app/push/test              a test alert to this phone
 //   POST app/treat                  { grams, pid } a low treated: logs the carbs, stops the reminders,
 //                                   rechecks after the owner's plan's minutes (night.js)
+//   GET  app/patterns?pid=          what repeats in the last 14 days (extension/patterns.js)
 //   POST app/parse                  { text } what a spoken "4 units rapid" means (nothing is logged)
 //   GET  app/labs?pid=              lab results (labs.js); POST app/labs/save, app/labs/remove
 //   GET  app/supplies?pid=          insulin and sensors on hand (supplies.js)
@@ -35,10 +36,12 @@ import { startTreatment, NIGHT_DEFAULTS } from './night.js';
 import { supplyStatus, supplyRow } from './supplies.js';
 import { labRow } from './labs.js';
 import { parseLog } from './tglog.js';
+import { findPatterns } from '../extension/patterns.js';
+import { asMarkers as markersOf } from './doses.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
-  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove']);
+  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -85,7 +88,9 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (path === 'app/report') {
     const pid = await pidFor(url.searchParams.get('pid'));
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
-    return json(await reportFor(pid, { history, doses, snapshot, labs, now }));
+    let tz;
+    try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
+    return json(await reportFor(pid, { history, doses, snapshot, labs, tz, now }));
   }
 
   if (path === 'app/recent') {
@@ -132,6 +137,20 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const b = await request.json().catch(() => ({}));
     if (!b.id) return json({ error: 'id needed' }, 400);
     return (await screens.allowLog(String(b.id), b.canLog === true)) ? json({ ok: true, canLog: b.canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
+
+  if (path === 'app/patterns') {
+    if (!history?.ready) return json({ error: 'The server history is not set up' }, 503);
+    const pid = await pidFor(url.searchParams.get('pid'));
+    if (!pid) return json({ patterns: [], days: 0, note: 'No one to look at yet.' });
+    const person = (await people()).find((p) => p.pid === pid) || {};
+    let tz;
+    try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
+    const points = await history.range(pid, now - 14 * DAY, now + MIN);
+    let events = [];
+    try { if (doses?.ready) events = markersOf(await doses.between(pid, now - 14 * DAY, now)); } catch { /* none */ }
+    const mmol = person.units === 'mmol/L';
+    return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL' }));
   }
 
   if (path === 'app/labs') {
