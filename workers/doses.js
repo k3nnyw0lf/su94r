@@ -46,6 +46,11 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
       const rows = await call(`?select=*&deleted=is.false&t=gte.${encodeURIComponent(since)}${who}&order=t.desc&limit=500`);
       return rows.map(fromRow);
     },
+    /** Non-deleted doses and meals of one person between two times (the doctor's report). */
+    async between(pid, from, to) {
+      const rows = await call(`?select=*&deleted=is.false&pid=eq.${encodeURIComponent(pid)}&t=gte.${encodeURIComponent(new Date(from).toISOString())}&t=lt.${encodeURIComponent(new Date(to).toISOString())}&order=t.asc&limit=1000`);
+      return rows.map(fromRow);
+    },
     async upsert(doses) {
       const rows = doses.filter(valid).map(toRow);
       if (!rows.length) return 0;
@@ -67,7 +72,7 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
 export function valid(d) {
   return d && /^[\w-]{1,80}$/.test(String(d.id)) && d.pid && Number.isFinite(new Date(d.t).getTime())
     && KINDS.has(d.kind) && (d.amount == null || (Number(d.amount) > 0 && Number(d.amount) <= 300))
-    && (d.source === 'alexa' || d.source === 'extension' || d.source === 'telegram');
+    && (d.source === 'alexa' || d.source === 'extension' || d.source === 'telegram' || d.source === 'phone');
 }
 
 /** Doses in the marker shape su94r Mini and its double-dose guard use. */

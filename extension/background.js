@@ -11,7 +11,7 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
@@ -147,6 +147,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) refreshServer().catch(() => {});
     if (!LEGACY) autoConnect().catch(() => {});
     if (!LEGACY) weeklySummary().catch(() => {});
+    if (!LEGACY) copyHistoryOnce().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -345,7 +346,7 @@ function serial(fn) {
 
 const validEvent = (e) => e && typeof e.id === 'string' && e.p && Number.isFinite(e.t) && typeof e.type === 'string';
 // What the su94r server shares with Alexa and Telegram: every insulin dose, and meals said to Alexa or logged in Telegram.
-const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && (e.source === 'alexa' || e.source === 'telegram'));
+const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && (e.source === 'alexa' || e.source === 'telegram' || e.source === 'phone'));
 
 function addEvents(list) {
   return serial(async () => {
@@ -783,6 +784,31 @@ async function weeklySummary({ force = false } = {}) {
   return { ok: true };
 }
 
+// ---- the server's history (history.js): copy what this computer has kept, once per person ----
+// The server keeps every reading itself from then on; this fills in the past 90 days so reports
+// and the phone app have history at once. 5-minute steps, pieces of 4000, one person per run.
+async function copyHistoryOnce() {
+  const settings = await getSettings();
+  if (!settings.screenLink) return;
+  // historyCopied2: the first copies (2.12) reached a proxy that did not forward them, so they run again.
+  const { historyCopied2: historyCopied = {} } = await local.get('historyCopied2');
+  for (const p of await allPatients(settings)) {
+    if (historyCopied[p.pid] || isDemo(p.pid)) continue;
+    const pts = wholeSeries(await loadReadings(p.pid, Date.now() - 90 * 864e5));
+    const thin = [];
+    let last = 0;
+    for (const q of pts) if (q.t - last >= 4.5 * 60e3) { thin.push([q.t, q.mg]); last = q.t; }
+    for (let i = 0; i < thin.length; i += 4000) {
+      // Done only when the server says so; anything else tries again at the next 5-minute check.
+      const r = await historyImport(settings.screenLink, p.pid, thin.slice(i, i + 4000));
+      if (r?.ok !== true) throw new Error('history copy not confirmed');
+    }
+    historyCopied[p.pid] = Date.now();
+    await local.set({ historyCopied2: historyCopied });
+    return;
+  }
+}
+
 // ---- connecting without the button, on the owner's own computers ----
 // A connect-here.json file put by hand in the extension folder ({ "server": "https://…" };
 // never shipped) connects this copy to that su94r server by itself, the same way the Settings
@@ -1021,7 +1047,7 @@ async function syncVoice(settings) {
       // and the server is told on the next exchange.
       const tomb = offered.length ? await tombstoned(offered).catch(() => new Set()) : new Set();
       const waiting = new Set([...voiceRemoved.filter((id) => !sent.has(id)), ...(syncQueue?.remove || []).map((e) => e.id)]);
-      const fresh = offered.filter((d) => !tomb.has(d.id) && !waiting.has(d.id)).map((d) => ({ ...d, source: d.source === 'telegram' ? 'telegram' : 'alexa' }));
+      const fresh = offered.filter((d) => !tomb.has(d.id) && !waiting.has(d.id)).map((d) => ({ ...d, source: d.source === 'telegram' || d.source === 'phone' ? d.source : 'alexa' }));
       const stillToTell = [...voiceRemoved.filter((id) => !sent.has(id)), ...offered.filter((d) => tomb.has(d.id)).map((d) => d.id)];
       await local.set({ voiceRemoved: [...new Set(stillToTell)].slice(-500) });
       if (fresh.length) {

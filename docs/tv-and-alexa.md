@@ -50,13 +50,29 @@ Anyone with the link can see the readings, so keep it private. Paired screens ca
 
 ### Share to another phone (QR code, nothing to type)
 
-su94r Mini → Health vault → **Share to another phone** → **My other phone** or **A family member's phone**. It shows a QR code; scan it with that phone's camera and open the link. The phone links itself (`/tv#join=…`: the one-time invite rides after the `#`, so it never reaches a server log), keeps its own token, and shows the glucose live. The first time it opens **Phone options**:
+su94r Mini → Health vault → **Share to another phone** → **My other phone** or **A family member's phone**. It shows a QR code; scan it with that phone's camera and open the link. The phone links itself (`/app/#join=…`: the one-time invite rides after the `#`, so it never reaches a server log), keeps its own token, and opens the **su94r phone app** (below). The first time it opens **More**:
 
-- **Add to Home screen** so it is one tap away.
+- **Install** so it is one tap away (Android: Install app; iPhone: Share → Add to Home Screen).
 - **Low alerts on this phone**: install ntfy, tap **Subscribe in ntfy**. Your other phone gets your own alerts; a family phone gets the care topic, which only speaks when you have switched on **Tell caregivers too** and a low is not handled.
 - **Watch and widgets**: the phone gets its own Nightscout-style token for GlucoDataHandler (and the Pixel Watch); address and token have Copy buttons.
 
-Each code works once, for 10 minutes. Linked phones appear with the other screens in su94r Mini Settings, where **Remove** cuts them off at once. Code: `workers/screens.js` (shareNew, shareClaim), `share/extras` in `workers/cgm-core.js`, the page in `workers/display.js`.
+Each code works once, for 10 minutes. Linked phones appear with the other screens in su94r Mini Settings, where **Remove** cuts them off at once. Code: `workers/screens.js` (shareNew, shareClaim), `share/extras` in `workers/cgm-core.js`. Phones linked earlier through `/tv#join=` keep working and get an **Open the su94r app** button in Phone options.
+
+### The su94r phone app
+
+`https://<your-proxy>.workers.dev/app/`, installable, works with every computer off. Five tabs:
+
+- **Now**: the reading, arrow and change in 15 minutes, a 3/6/12-hour graph with logged insulin and carbs, and su94r Mini's learner estimate for the next hour when it has passed its accuracy check (never a dosing suggestion).
+- **History**: 1 to 90 days from the server's own history (`workers/history.js`): time in range, average, GMI, lows, and each day as a bar; tap a day for its graph.
+- **Log** (your own phone only): rapid, long-acting, other insulin or carbs, an amount and a time; nothing is saved until you confirm. A second dose within the double-dose window shows the warning first. **Undo** for 30 minutes. **Estimate from a photo** asks Workers AI for the carbs and fills in the number for you to check.
+- **Report**: the 14-day report (the same one as the doctor's link), printable.
+- **More**: low alerts (ntfy, Telegram), the watch token, install, and Unlink.
+
+A family member's phone reads everything and cannot log. TVs, widgets, doctor links and AI connectors cannot use the app's routes. Doses logged here have the source `phone` and reach su94r Mini, Alexa and Telegram's double-dose checks. The app keeps the last reading in the phone's own storage so it opens offline. Code: `workers/app.js` (routes), `workers/app/` (page, client, service worker, icons; `node scripts/build-app.mjs` packs them into `workers/app-assets.js`), `/app/meal` in `workers/proxy.js`.
+
+### A live link for the doctor
+
+su94r Mini → Health vault → **Live link for my doctor**: name it, choose 1 week, 30 or 90 days, **Make the link**. Copy, scan or email it. The link (`/r/<token>`) always shows the latest 14-day report from the server's history: time in ranges, GMI, variability, the daily pattern (AGP) and logged insulin. It is read-only and cannot see the live glucose. su94r keeps only a fingerprint of it, so it is shown once; it ends by itself, or at once with **Remove**. Code: `workers/doctor.js`.
 
 ## 3. Alexa skill (private, on your own Amazon account)
 

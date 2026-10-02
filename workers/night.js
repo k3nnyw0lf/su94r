@@ -24,6 +24,7 @@
 import { sha256, randomToken } from './screens.js';
 import { evaluateEscalation, alertPayload, RUNG } from '../src/lib/care/escalation.js';
 import { localHour } from '../src/lib/util/localDay.js';
+import { rowsFromSnapshot } from './history.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -34,6 +35,7 @@ const AUTH_WARN_EVERY_MS = 12 * 60 * MIN;
 export const NIGHT_DEFAULTS = {
   enabled: true, time_zone: 'America/New_York', low_mgdl: 70, severe_mgdl: 55,
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
+  echo_low_url: null, echo_soon_url: null, echo_always: false,
 };
 
 export function nightStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
@@ -125,7 +127,7 @@ function localTime(t, timeZone) {
  *   people: snapshot people [{ pid, firstName, name, units, latest: { t, mg, trend } }]
  *   push(topic, msg) sends; ackUrl(token) builds the "I'm OK" address.
  */
-export async function nightCheck({ row, people, error = null, now = Date.now(), push, ackUrl }) {
+export async function nightCheck({ row, people, error = null, now = Date.now(), push, ackUrl, ring = null }) {
   const cfg = { ...NIGHT_DEFAULTS, ...row };
   const state = structuredClone(row.state || {});
   const sent = [];
@@ -134,6 +136,14 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   };
   const night = hourIn(localHour(now, cfg.time_zone), cfg.night_start, cfg.night_end);
   if (!cfg.enabled) return { state, sent, skipped: 'off' };
+
+  // The Echo in the room says it out loud (an Alexa routine fired by its trigger link): at night,
+  // for a severe low at any hour, or always when the owner chose so. Each reminder fires again.
+  const echo = async (kind, severe = false) => {
+    const url = kind === 'soon' ? cfg.echo_soon_url : cfg.echo_low_url;
+    if (!url || !ring || !(night || severe || cfg.echo_always)) return;
+    try { await ring(url); sent.push({ label: `echo-${kind}`, ok: true }); } catch (e) { sent.push({ label: `echo-${kind}`, ok: false, error: e.message }); }
+  };
 
   // Without a reading from LibreLinkUp, everyone who was low counts as gone silent.
   const openLows = Object.entries(state).filter(([k]) => isLowKey(k))
@@ -178,6 +188,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         tags: ['chart_with_downwards_trend'],
         actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
       }, 'soon');
+      await echo('soon', severeSoon);
     } else if (soon && (projected == null || projected >= low + 10 || !falling)) {
       delete state._soon[p.pid];                        // the fall stopped: the next one warns again
     }
@@ -258,6 +269,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
           tags: [severe ? 'rotating_light' : 'warning'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
         }, severe ? 'severe' : 'low');
+        await echo('low', severe);
       }
     } else if (ep && !ep.ackAt && now - ep.since >= GAP_AFTER_MS) {
       // Was low and has gone silent: a lost sensor and a person who cannot answer look the same.
@@ -272,6 +284,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
           priority: 5, tags: ['rotating_light'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
         }, 'gap');
+        await echo('low', true);
       }
     }
 
@@ -319,6 +332,10 @@ export async function acknowledge(row, token, now = Date.now()) {
   return null;
 }
 
+// Trigger links of the free Virtual Smart Home skill (an Alexa routine per link). They are
+// private keys: stored here, never shown back.
+export const ECHO_URL = /^https:\/\/(www\.)?virtualsmarthome\.xyz\/url_routine_trigger\/[^\s]{10,500}$/;
+
 const TZ_OK = (tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; } };
 const int = (v, lo, hi) => (Number.isInteger(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : undefined);
 
@@ -331,6 +348,14 @@ function settingsPatch(body, row) {
   if (typeof body.watchEnabled === 'boolean') out.watch_enabled = body.watchEnabled;
   const sd = int(body.sensorDays, 10, 15);
   if (sd !== undefined) out.sensor_days = sd;
+  if (typeof body.echoAlways === 'boolean') out.echo_always = body.echoAlways;
+  for (const [key, col] of [['echoLowUrl', 'echo_low_url'], ['echoSoonUrl', 'echo_soon_url']]) {
+    if (body[key] === undefined) continue;
+    const v = String(body[key] || '').trim();
+    if (!v) { out[col] = null; continue; }
+    if (!ECHO_URL.test(v)) throw Object.assign(new Error('Paste the trigger link from virtualsmarthome.xyz (it starts with https://www.virtualsmarthome.xyz/url_routine_trigger/).'), { status: 400 });
+    out[col] = v;
+  }
   const low = int(body.lowMgdl, 60, 100);
   if (low !== undefined) out.low_mgdl = low;
   const severe = int(body.severeMgdl, 40, 70);
@@ -351,6 +376,7 @@ function publicView(row, base) {
   return {
     enabled: row.enabled, lowMgdl: row.low_mgdl, severeMgdl: row.severe_mgdl,
     soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14,
+    echoLow: Boolean(row.echo_low_url), echoSoon: Boolean(row.echo_soon_url), echoAlways: Boolean(row.echo_always),
     nightStart: row.night_start, nightEnd: row.night_end, timeZone: row.time_zone, careEnabled: row.care_enabled,
     selfTopic: row.self_topic, selfUrl: topicUrl(row.self_topic),
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
@@ -358,8 +384,8 @@ function publicView(row, base) {
   };
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, now = () => Date.now() }) {
-  if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify'].includes(path)) return null;
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, ring = defaultRing, history = null, now = () => Date.now() }) {
+  if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
   // Every alert goes to ntfy and, when set up, to the linked Telegram chats of the same role
@@ -390,7 +416,16 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     let people = [];
     let error = null;
     try { people = (await snapshot()).people || []; } catch (e) { error = { code: e.code || 'error', message: String(e.message || e).slice(0, 200) }; }
-    const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}` });
+    const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}`, ring });
+    // Keep the history on the server (history.js), and trim it to 90 days once a day.
+    if (history?.ready && people.length) {
+      await history.save(rowsFromSnapshot(people)).catch(() => {});
+      const meta = result.state._meta || {};
+      if (!meta.prunedAt || now() - meta.prunedAt > 24 * 60 * MIN) {
+        await history.prune(now()).catch(() => {});
+        result.state._meta = { ...meta, prunedAt: now() };
+      }
+    }
     const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null };
     await store.patch({ state: result.state, last_result: summary });
     return json({ ok: true, people: summary.people, sent: summary.sent.length, error: summary.error });
@@ -399,6 +434,15 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
   // Owner-only below.
   if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
   const row = await store.get();
+
+  if (path === 'night/echo-test') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const body = await request.json().catch(() => ({}));
+    const target = body.which === 'soon' ? row.echo_soon_url : row.echo_low_url;
+    if (!target) return json({ error: 'no-echo', message: 'Save the trigger link first.' }, 409);
+    try { await ring(target); } catch (e) { return json({ error: 'echo-failed', message: `The trigger did not answer (${e.message}).` }, 502); }
+    return json({ ok: true });
+  }
 
   if (path === 'night/notify') {
     // A plain message to the owner's phone (ntfy and Telegram): the Sunday summary from su94r Mini.
@@ -430,4 +474,11 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     return json(publicView({ ...row, ...patch }, ntfyBase));
   }
   return json(publicView(row, ntfyBase));
+}
+
+/** Fires a trigger link (GET); throws when it does not answer OK. */
+async function defaultRing(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`answered ${res.status}`);
+  return true;
 }

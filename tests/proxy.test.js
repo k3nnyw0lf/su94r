@@ -179,6 +179,28 @@ describe('su94r-proxy forwarding', () => {
     expect(seen[1].init.method).toBe('POST');
     expect(new TextDecoder().decode(seen[1].init.body)).toBe('{"email":"a"}');
   });
+  it('serves the doctor page only at /r/<64 hex>, holding nothing, and forwards its data call', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => { seen.push({ url, init }); return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }); }));
+    const env = { CGM_URL: 'https://cgm.test/functions/v1/su94r-cgm' };
+    const token = 'c'.repeat(64);
+    const page = await proxy.fetch(new Request(`https://proxy.test/r/${token}`), env);
+    expect(page.status).toBe(200);
+    expect(page.headers.get('Cache-Control')).toBe('no-store');
+    expect(page.headers.get('Referrer-Policy')).toBe('no-referrer');
+    const html = await page.text();
+    expect(html).toContain('Glucose report');
+    expect(html).not.toContain(token);
+    expect(seen).toHaveLength(0);
+    expect(await (await proxy.fetch(new Request('https://proxy.test/r/short'), env)).text()).toBe('su94r CGM proxy alive');
+    await proxy.fetch(new Request('https://proxy.test/doctor/data', { headers: { Authorization: `Bearer ${token}` } }), env);
+    expect(seen[0].url).toBe('https://cgm.test/functions/v1/su94r-cgm/doctor/data');
+    // su94r Mini's history copy and the history read reach the server too (they once got "alive").
+    await proxy.fetch(new Request('https://proxy.test/history/import?key=k', { method: 'POST', body: '{}' }), env);
+    await proxy.fetch(new Request('https://proxy.test/history?key=k&days=14'), env);
+    expect(seen.slice(1).map((s) => s.url)).toEqual(['https://cgm.test/functions/v1/su94r-cgm/history/import?key=k', 'https://cgm.test/functions/v1/su94r-cgm/history?key=k&days=14']);
+    expect(seen[0].init.headers.get('authorization')).toBe(`Bearer ${token}`);
+  });
   it('fails closed when CGM_URL is unset', async () => {
     expect((await proxy.fetch(new Request('https://proxy.test/alexa', { method: 'POST', body: '{}' }), {})).status).toBe(503);
   });

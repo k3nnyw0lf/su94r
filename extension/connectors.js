@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, shareNew, shareUrl, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -77,6 +77,8 @@ function qrImage(h, text, label) {
 /** The share code on screen, if any: { url, role, until }. Kept only in this page. */
 let shareShown = null;
 let shareTimer = null;
+/** The doctor link just made, if any: { url, name, expiresAt }. Shown once; kept only in this page. */
+let doctorShown = null;
 /** The Telegram link on screen, if any: { url, role, until }. */
 let tgShown = null;
 
@@ -91,7 +93,7 @@ export const CONNECTORS = [
     id: 'share',
     icon: '📲',
     name: 'Share to another phone',
-    what: 'Show a QR code, scan it with another phone, and that phone links itself: live glucose with every computer off, plus one tap for low alerts and for its watch. Nothing to type. Each code works once, for 10 minutes; linked phones are listed, and removed, in Settings → Alexa and screens.',
+    what: 'Show a QR code, scan it with another phone, and that phone links itself and gets the su94r app: live glucose and history with every computer off, logging with a double-dose check, the 14-day report, and one tap for low alerts and for its watch. Nothing to type. Each code works once, for 10 minutes; linked phones are listed, and removed, in Settings → Alexa and screens.',
     async render(ctx) {
       const { h, settings } = ctx;
       if (!parseScreenLink(settings.screenLink)) return needServer(h);
@@ -119,6 +121,56 @@ export const CONNECTORS = [
           action(ctx, msg, 'A family member\'s phone', 'Making a code…', make('family'))),
         state(h, 'My other phone gets your own low alerts. A family member\'s phone is told only when a low is not handled, once you switch on "Tell caregivers too" in Low alerts.'),
       ];
+    },
+  },
+  {
+    id: 'doctor',
+    icon: '🩺',
+    name: 'Live link for my doctor',
+    what: 'One private link for your doctor or nurse: it always shows your latest 14-day glucose report (time in ranges, GMI, variability, the daily pattern, logged insulin), straight from your su94r server, with every computer off. Read-only: it never shows the live glucose. It ends by itself after 30 days, or at once when you remove it.',
+    async render(ctx) {
+      const { h, settings } = ctx;
+      if (!parseScreenLink(settings.screenLink)) return needServer(h);
+      const msg = h('div', { class: 'state' });
+      const out = [];
+      if (doctorShown) {
+        const { url, name, expiresAt } = doctorShown;
+        const ends = new Date(expiresAt).toLocaleDateString([], { dateStyle: 'medium' });
+        const mail = `mailto:?subject=${encodeURIComponent('My glucose report')}&body=${encodeURIComponent(`Here is a live link to my glucose report (always the latest 14 days). It works until ${ends}:\n\n${url}\n`)}`;
+        out.push(
+          state(h, `Link for ${name} is ready. Copy it now: for your privacy su94r keeps only a fingerprint of it and cannot show it again. It works until ${ends}.`, 'on'),
+          copyable(h, url),
+          h('div', { class: 'qr-row' }, qrImage(h, url, 'Scan to open the report')),
+          h('div', { class: 'actions' },
+            h('button', { type: 'button', class: 'ghost', onclick: () => openTab(url) }, 'Open it'),
+            h('button', { type: 'button', class: 'ghost', onclick: () => openTab(mail) }, 'Email it'),
+            action(ctx, msg, 'Done', 'Closing…', async () => { doctorShown = null; })),
+        );
+      } else {
+        const who = h('input', { type: 'text', placeholder: 'Dr. Lee', 'aria-label': 'Who the link is for', class: 'grow', maxlength: '40' });
+        const days = h('select', { 'aria-label': 'How long the link works' },
+          h('option', { value: '7' }, '1 week'), h('option', { value: '30', selected: true }, '30 days'), h('option', { value: '90' }, '90 days'));
+        out.push(
+          h('div', { class: 'actions' }, who, days,
+            action(ctx, msg, 'Make the link', 'Making the link…', async () => {
+              const name = who.value.trim() || 'Doctor';
+              const r = await doctorNew(settings.screenLink, name, Number(days.value));
+              if (!r.ok) return r;
+              doctorShown = { url: doctorUrl(settings.screenLink, r.token), name, expiresAt: r.expiresAt };
+            }, 'primary')),
+        );
+      }
+      out.push(msg);
+      // The links already made: who for, when they end, and Remove.
+      let links = [];
+      try { links = ((await listScreens(settings.screenLink)).screens || []).filter((s) => s.kind === 'doctor' && Date.parse(s.expires_at) > Date.now()); } catch { /* the list is optional */ }
+      if (links.length) {
+        out.push(h('ul', { class: 'chats' }, links.map((s) => h('li', {},
+          h('span', {}, `${s.name || 'Doctor'} · ends ${new Date(s.expires_at).toLocaleDateString([], { dateStyle: 'medium' })}`),
+          action(ctx, msg, 'Remove', 'Removing…', () => removeScreen(settings.screenLink, s.id))))));
+      }
+      out.push(state(h, 'The report is built from the readings your su94r server keeps (up to 90 days). It fills in over the first two weeks.'));
+      return out;
     },
   },
   {
@@ -223,6 +275,33 @@ export const CONNECTORS = [
             action(ctx, msg, v.soonEnabled ? 'Turn off Low soon' : 'Turn on Low soon', 'Saving…', () => nightSave(settings.screenLink, { soonEnabled: !v.soonEnabled })),
             action(ctx, msg, v.watchEnabled ? 'Turn off sensor and signal' : 'Turn on sensor and signal', 'Saving…', () => nightSave(settings.screenLink, { watchEnabled: !v.watchEnabled })),
             action(ctx, msg, v.sensorDays === 15 ? 'My sensors last 14 days' : 'My sensors last 15 days', 'Saving…', () => nightSave(settings.screenLink, { sensorDays: v.sensorDays === 15 ? 14 : 15 })))),
+        (() => {
+          const lowLink = h('input', { type: 'password', class: 'grow', autocomplete: 'off', placeholder: 'https://www.virtualsmarthome.xyz/url_routine_trigger/…', 'aria-label': 'Trigger link for lows' });
+          const soonLink = h('input', { type: 'password', class: 'grow', autocomplete: 'off', placeholder: 'optional: a second trigger for Low soon', 'aria-label': 'Trigger link for Low soon' });
+          return h('details', {},
+            h('summary', {}, 'Echo says it out loud'),
+            state(h, `At night (and for a severe low at any hour) your Echo announces it in the room, again with every reminder. ${v.echoLow ? 'Low trigger: saved.' : 'No trigger saved yet.'}${v.echoSoon ? ' Low-soon trigger: saved.' : ''}${v.echoAlways ? ' Announces at any hour.' : ''}`, v.echoLow ? 'on' : ''),
+            steps(h, [
+              'In the Alexa app, enable the "Virtual Smart Home" skill and link your Amazon account (check its price on virtualsmarthome.xyz first; it also sells paid plans).',
+              'On virtualsmarthome.xyz → URL Routine Trigger, create a trigger named "su94r low" and copy its trigger link.',
+              'In the Alexa app: Routines → + → When: Smart Home → "su94r low" → Add action: Alexa Says → Announcement, for example "Glucose is low. Check now." → From: your bedroom Echo. Save.',
+              'Paste the link below and press Save, then Test. (Optional: a second trigger and routine for "Low soon".)',
+            ]),
+            h('div', { class: 'actions' }, lowLink), h('div', { class: 'actions' }, soonLink),
+            h('div', { class: 'actions' },
+              action(ctx, msg, 'Save', 'Saving…', async () => {
+                const patch = {};
+                if (lowLink.value.trim()) patch.echoLowUrl = lowLink.value.trim();
+                if (soonLink.value.trim()) patch.echoSoonUrl = soonLink.value.trim();
+                if (!Object.keys(patch).length) return { ok: false, message: 'Paste a trigger link first.' };
+                const r = await nightSave(settings.screenLink, patch);
+                lowLink.value = ''; soonLink.value = '';
+                return r;
+              }, 'primary'),
+              v.echoLow ? action(ctx, msg, 'Test the Echo', 'Ringing…', () => nightEchoTest(settings.screenLink)) : null,
+              v.echoLow ? action(ctx, msg, v.echoAlways ? 'Only at night' : 'At any hour', 'Saving…', () => nightSave(settings.screenLink, { echoAlways: !v.echoAlways })) : null,
+              v.echoLow ? action(ctx, msg, 'Remove the triggers', 'Removing…', () => nightSave(settings.screenLink, { echoLowUrl: '', echoSoonUrl: '' })) : null));
+        })(),
         h('details', {},
           h('summary', {}, 'Sunday summary'),
           state(h, `Every Sunday from 6 PM this computer sends your phone (ntfy and Telegram) a plain-language summary of the week against the week before: time in range, lows and when, average, GMI and steadiness. It is ${settings.weeklySummary === false ? 'off' : 'on'}.`),

@@ -96,7 +96,12 @@ export const newNsLink = (link, name) => call(link, 'ns/new', { method: 'POST', 
 // Sharing to another phone (server: workers/screens.js): a one-time invite shown as a QR code;
 // the phone that opens it links itself. The invite rides after the #, never sent to a server.
 export const shareNew = (link, role, name) => call(link, 'share/new', { method: 'POST', body: { role, name } });
-export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/tv#join=${invite}`;
+export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/app/#join=${invite}`;
+
+// A live report link for the doctor (server: workers/doctor.js): always the latest 14 days,
+// read-only, expires. The token is shown once; the server keeps only its hash.
+export const doctorNew = (link, name, days) => call(link, 'doctor/new', { method: 'POST', body: { name, days } });
+export const doctorUrl = (link, token) => `${parseScreenLink(link).base}/r/${token}`;
 
 // Low alerts on Telegram (server: workers/telegram.js): one bot of the owner's, chats linked by a
 // one-time t.me link and Start. The bot token goes to the server once and never comes back.
@@ -115,3 +120,6 @@ export const nightNotify = (link, title, message) => call(link, 'night/notify', 
 export const nightSetup = (link) => call(link, 'night/setup');
 export const nightSave = (link, patch) => call(link, 'night/setup', { method: 'POST', body: patch });
 export const nightTest = (link) => call(link, 'night/test', { method: 'POST', body: {} });
+export const nightEchoTest = (link, which = 'low') => call(link, 'night/echo-test', { method: 'POST', body: { which } });
+// The server's history (history.js): su94r Mini copies what it has kept, once, in pieces.
+export const historyImport = (link, pid, points) => call(link, 'history/import', { method: 'POST', body: { pid, points } });

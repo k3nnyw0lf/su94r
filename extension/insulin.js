@@ -97,7 +97,7 @@ export function doubleDoseWarning(events, pid, candidate, settings = {}, now = D
   if (!near) return null;
   const group = BOLUS_KINDS.has(near.kind || 'rapid') ? BOLUS_KINDS : null;
   const mins = Math.round(Math.abs(candidate.t - near.t) / 60e3);
-  const gap = mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+  const gap = mins < 1 ? 'less than a minute' : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
   const isNow = Math.abs(now - candidate.t) < 2 * 60e3;
   const rel = isNow ? `${gap} ago` : near.t <= candidate.t ? `${gap} before this time` : `${gap} after this time`;
   const active = group === BOLUS_KINDS && near.t <= candidate.t ? insulinOnBoard(events, pid, settings, candidate.t) : 0;

@@ -26,6 +26,7 @@ import { acknowledge } from './night.js';
 import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal } from './tglog.js';
 import { asMarkers } from './doses.js';
 import { doubleDoseWarning } from '../extension/insulin.js';
+import { nightSummary, weekLine } from './history.js';
 
 const DEFAULT_PROXY = 'https://su94r-proxy.ken-e90.workers.dev';
 const MAX_PHOTO_BYTES = 1500 * 1024;
@@ -153,7 +154,7 @@ function sugarText(snap) {
 }
 
 /** Handles Telegram's own calls (the bot's webhook). */
-async function webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl }) {
+async function webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history }) {
   const bot = await store.bot();
   if (!bot?.token || !bot.webhook_secret) return { status: 404 };
   if (request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== bot.webhook_secret) return { status: 401 };
@@ -264,6 +265,15 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
   if (command === '/stop') {
     await store.unlink(chatId);
     await say(chatId, 'Unlinked. No more su94r alerts here. A new link from su94r Mini links again.');
+  } else if ((command === '/night' || command === '/week') && history?.ready) {
+    let text;
+    try {
+      const p = (await snapshot()).people?.[0];
+      const pts = p ? await history.range(p.pid, Date.now() - (command === '/night' ? 1 : 7) * 24 * 3600e3, Date.now() + 60e3) : [];
+      const opts = { low: p?.low ?? 70, high: p?.high ?? 180 };
+      text = command === '/night' ? nightSummary(pts, opts) : weekLine(pts, opts);
+    } catch { text = 'I could not reach the history just now.'; }
+    await say(chatId, text);
   } else if (command === '/sugar' || command === '/now') {
     let text;
     try { text = sugarText(await snapshot()); } catch { text = 'I could not reach LibreLinkUp just now.'; }
@@ -284,13 +294,13 @@ async function firstPerson(snapshot, doses) {
   try { return (await doses.recent(null))[0]?.pid || null; } catch { return null; }
 }
 
-export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi, doses = null, meal = null, fetchImpl = (...a) => fetch(...a) }) {
+export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi, doses = null, meal = null, fetchImpl = (...a) => fetch(...a), history = null }) {
   if (path !== 'tg' && !path.startsWith('tg/')) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
 
   if (path === 'tg/webhook') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
-    const r = await webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl });
+    const r = await webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history });
     return json({ ok: r.status === 200 }, r.status);
   }
 
@@ -323,7 +333,7 @@ export async function telegramRoute(path, request, url, env, { store, json, keyO
     const hook = `${String(env.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/su94r-cgm/tg/webhook`;
     try {
       await api(token, 'setWebhook', { url: hook, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true });
-      await api(token, 'setMyCommands', { commands: [{ command: 'sugar', description: 'The glucose now' }, { command: 'stop', description: 'Stop su94r alerts in this chat' }] }).catch(() => {});
+      await api(token, 'setMyCommands', { commands: [{ command: 'sugar', description: 'The glucose now' }, { command: 'night', description: 'How last night went' }, { command: 'week', description: 'This week in one line' }, { command: 'stop', description: 'Stop su94r alerts in this chat' }] }).catch(() => {});
     } catch (e) {
       return json({ error: 'webhook', message: `Telegram would not point the bot here (${e.message}).` }, 502);
     }

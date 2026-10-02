@@ -12,6 +12,7 @@ import { verifyAlexaSignature, AlexaVerifyError } from './alexa-verify.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
+import { nightSummary, weekLine } from './history.js';
 
 const MMOL = 18.0182;
 export const MAX_UNITS = 100;
@@ -109,7 +110,7 @@ function aplDirective(people) {
   };
 }
 
-export async function handleAlexa(request, env, getSnapshot, { store = null, verify, forecasts = null } = {}) {
+export async function handleAlexa(request, env, getSnapshot, { store = null, verify, forecasts = null, history = null } = {}) {
   if (!env.ALEXA_SKILL_ID) return new Response('ALEXA_SKILL_ID is not set', { status: 503 });
   const raw = await request.text();
   try {
@@ -143,13 +144,14 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
   if (type === 'SessionEndedRequest') return reply({ version: '1.0', response: {} });
   if (intent === 'AMAZON.StopIntent' || intent === 'AMAZON.CancelIntent') return say('Okay.');
   if (intent === 'AMAZON.HelpIntent') {
-    return say('Ask me how your sugar is, or where you are heading. Log a dose: say, 4 units of R insulin. Log a meal: say, I ate 40 grams. You can also ask when you last took insulin.', { end: false });
+    return say('Ask me how your sugar is, how your night was, or where you are heading. Log a dose: say, 4 units of R insulin. Log a meal: say, I ate 40 grams. You can also ask when you last took insulin.', { end: false });
   }
   if (intent === 'LogInsulinIntent' || intent === 'LastInsulinIntent') {
     return insulinIntent(body, { say, reply, store, getSnapshot });
   }
   if (intent === 'LogCarbsIntent') return carbsIntent(body, { say, reply, store, getSnapshot });
   if (intent === 'ForecastIntent') return forecastIntent(body, { say, getSnapshot, store, forecasts });
+  if (intent === 'NightIntent' || intent === 'WeekIntent') return pastIntent(body, intent, { say, getSnapshot, store, history });
 
   let snap;
   try {
@@ -344,4 +346,23 @@ async function forecastIntent(body, { say, getSnapshot, store, forecasts }) {
   let units = 'mg/dL';
   try { units = (await getSnapshot()).people.find((p) => p.pid === who.pid)?.units || units; } catch { /* keep mg/dL */ }
   return say(speakForecast(f, { units, name: who.many ? who.name : '' }));
+}
+
+// ---- "how was my night?" and "how was my week?" (the server's history, history.js) ----
+
+async function pastIntent(body, intent, { say, getSnapshot, store, history }) {
+  if (!history?.ready) return say('The history is not set up on the server yet.');
+  const who = await whoFor(body, getSnapshot, store || { recent: async () => [] });
+  if (who.missing) return say(`I don't follow anyone called ${who.missing}.`);
+  if (who.none) return say('No one is sharing their glucose with this account yet.');
+  let person = null;
+  try { person = (await getSnapshot()).people.find((p) => p.pid === who.pid) || null; } catch { /* defaults */ }
+  const mmol = person?.units === 'mmol/L';
+  const fmt = (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
+  const now = Date.now();
+  let points;
+  try { points = await history.range(who.pid, now - (intent === 'NightIntent' ? 1 : 7) * 24 * 3600e3, now + 60e3); } catch { return say('I could not reach the history just now.'); }
+  const range = { low: person?.low ?? 70, high: person?.high ?? 180, fmt, now };
+  const text = intent === 'NightIntent' ? nightSummary(points, range) : weekLine(points, range);
+  return say(who.many && who.name ? `${who.name}: ${text}` : text);
 }

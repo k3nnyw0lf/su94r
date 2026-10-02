@@ -23,6 +23,7 @@
 | **The app** | A PWA (installable on iPhone and Android) for live glucose, logging, exercise and 10 AI agents | `src/` |
 | **su94r Mini** | A Chrome extension: a small always-visible graph of your FreeStyle Libre readings on your laptop | `extension/` |
 | **Big screen and Alexa** | A page for a TV, Echo Show or spare monitor, and an Alexa skill ("Alexa, ask my sugar…") | `workers/`, `docs/tv-and-alexa.md` |
+| **Phone app and doctor link** | An installable phone app linked by a QR code from su94r Mini (live graph, history, logging with a double-dose check, the 14-day report), and a private, expiring report link for a doctor | `workers/app.js`, `workers/app/`, `workers/doctor.js` |
 | **Night monitor** | A scheduled Worker that keeps checking when every phone is asleep and can escalate to caregivers | `workers/glucose-monitor.js`, `docs/care-circle.md` |
 
 ## The app

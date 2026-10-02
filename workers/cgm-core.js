@@ -42,6 +42,9 @@ import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 import { nightStore, nightRoute } from './night.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
+import { historyStore, historyRoute } from './history.js';
+import { doctorNew, doctorData } from './doctor.js';
+import { appRoute, APP_PATHS } from './app.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
@@ -296,8 +299,8 @@ async function voiceSync(request, url, env, deps) {
   const forecasts = cleanForecasts(body?.forecasts, now);
   const fstore = deps.forecasts || forecastStore(env);
   if (forecasts.length && fstore.ready) await fstore.save(forecasts).catch(() => {});
-  // Doses that did not come from a computer: said to Alexa or logged in Telegram.
-  const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa' || d.source === 'telegram');
+  // Doses that did not come from a computer: said to Alexa, logged in Telegram or in the phone app.
+  const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa' || d.source === 'telegram' || d.source === 'phone');
   return json({ doses: asMarkers(doses), at: now });
 }
 
@@ -309,7 +312,7 @@ async function screensRoute(path, request, url, env, deps) {
   if (path === 'screen/data' || path === 'screen/glance') {
     const screen = await screenFor(request, store, url.searchParams.get('token'));
     // An AI connector's token reads through MCP only, never the screen feeds (names, sensor dates).
-    if (!screen || screen.kind === 'ai') return json({ error: 'unauthorized' }, 401);
+    if (!screen || (screen.kind !== 'screen' && screen.kind !== 'widget')) return json({ error: 'unauthorized' }, 401);
     if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
     return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
   }
@@ -320,6 +323,11 @@ async function screensRoute(path, request, url, env, deps) {
     // The phone also gets its own watch / widget link (GlucoDataHandler on a Pixel Watch).
     const ns = await makeNsLink(store, `${r.name} (watch)`).catch(() => null);
     return json({ ...r, nsToken: ns?.token || null });
+  }
+  if (path === 'doctor/data') {
+    const screen = await screenFor(request, store, '');
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), snapshot: () => snapshot(env) });
+    return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {
     // A shared phone (its own token) asks what else it can set up: its alert topic.
@@ -338,6 +346,11 @@ async function screensRoute(path, request, url, env, deps) {
   }
   // The rest manage screens and need the display key (or a connected su94r Mini's key).
   if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
+  if (path === 'doctor/new') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const r = await doctorNew(request, store, () => snapshot(env));
+    return json(r, r.ok ? 200 : 400);
+  }
   if (path === 'share/new') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     return json(await shareNew(request, store));
@@ -352,7 +365,7 @@ async function screensRoute(path, request, url, env, deps) {
   }
   return json({ error: 'not found' }, 404);
 }
-const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove', 'share/new', 'share/claim', 'share/extras']);
+const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove', 'share/new', 'share/claim', 'share/extras', 'doctor/new', 'doctor/data']);
 
 // One person, flattened for widget apps (KWGT, Scriptable): ready-made text and a colour.
 async function glance(env, n) {
@@ -388,9 +401,15 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
     if (path === 'glucose/latest') return await glucoseLatest(request, env);
     if (path === 'display/data') return await displayData(url, env, deps);
-    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env) });
+    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env), history: deps.history || historyStore(env) });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
+    if (APP_PATHS.has(path)) {
+      return await appRoute(path, request, url, env, {
+        screens: deps.screens || screenStore(env), history: deps.history || historyStore(env), doses: deps.store || doseStore(env),
+        forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
+      });
+    }
     const keyOk = (k) => displayKeyOk(env, k, deps);
     const connect = await connectRoute(path, request, url, env, {
       owner: owners(env), screens: deps.screens || screenStore(env), json, keyOk,
@@ -410,11 +429,15 @@ export async function handleCgm(path, request, env, deps = {}) {
     const night = await nightRoute(path, request, url, env, {
       store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push,
       telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
+      history: deps.history || historyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
     });
+    const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });
+    if (hist) return hist;
     if (night) return night;
     const tg = await telegramRoute(path, request, url, env, {
       store: tgStore, json, keyOk, snapshot: () => snapshot(env), night: deps.night || nightStore(env), api: deps.tgApi,
       doses: deps.store || doseStore(env), meal: deps.meal || ((bot, dataUrl) => askMeal(env, bot, dataUrl)), fetchImpl: deps.fetchImpl,
+      history: deps.history || historyStore(env),
     });
     if (tg) return tg;
     const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });

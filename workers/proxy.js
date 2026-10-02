@@ -32,6 +32,9 @@
 import { handleHealthIngest } from './health-ingest.js';
 import { handleStart, handleCallback, handleSync } from './google-health.js';
 import { displayPage } from './display.js';
+import { doctorPage, REPORT_SCRIPT } from './doctor.js';
+import { MEAL_PROMPT, parseMealAnswer } from './meal.js';
+import { APP_PAGE, APP_CLIENT, APP_SW, APP_ICON_SVG, APP_MANIFEST, APP_ICONS } from './app-assets.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -44,7 +47,8 @@ const json = (body, status = 200) =>
 
 const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
   '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove',
-  '/share/new', '/share/claim', '/share/extras']);
+  '/share/new', '/share/claim', '/share/extras', '/doctor/new', '/doctor/data',
+  '/app/me', '/app/history', '/app/report', '/app/recent', '/app/log', '/app/undo']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -60,7 +64,11 @@ async function aiMeal(request, env) {
   const check = await fetch(`${env.CGM_URL}/tg/proof`, { method: 'POST', headers: { 'x-su94r-proof': proof } }).catch(() => null);
   if (!check?.ok) return json({ error: 'unauthorized' }, 401);
   const { image, prompt } = await request.json().catch(() => ({}));
-  if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(image || ''))) return json({ error: 'bad image' }, 400);
+  if (!IMAGE.test(String(image || ''))) return json({ error: 'bad image' }, 400);
+  return json({ text: await runMeal(env, image, prompt) });
+}
+const IMAGE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+async function runMeal(env, image, prompt) {
   const r = await env.AI.run(MEAL_MODEL, {
     messages: [
       { role: 'system', content: String(prompt || '').slice(0, 2000) },
@@ -71,7 +79,41 @@ async function aiMeal(request, env) {
   });
   // The model answers JSON; Workers AI sometimes hands it over already parsed.
   const out = r?.response;
-  return json({ text: (typeof out === 'string' ? out : JSON.stringify(out ?? '')).slice(0, 4000) });
+  return (typeof out === 'string' ? out : JSON.stringify(out ?? '')).slice(0, 4000);
+}
+
+// A meal photo from the phone app: only a phone su94r-cgm says may log (the owner's own phone).
+async function appMeal(request, env) {
+  if (!env.AI || !env.CGM_URL) return json({ error: 'Photo estimates are not set up' }, 503);
+  if (Number(request.headers.get('content-length')) > MAX_BODY) return json({ error: 'That photo is too large' }, 413);
+  const auth = request.headers.get('authorization') || '';
+  if (!/^Bearer [0-9a-f]{64}$/.test(auth)) return json({ error: 'unauthorized' }, 401);
+  const me = await fetch(`${env.CGM_URL}/app/me`, { headers: { authorization: auth } }).catch(() => null);
+  const who = me?.ok ? await me.json().catch(() => null) : null;
+  if (!who) return json({ error: 'unauthorized' }, 401);
+  if (!who.canLog) return json({ error: 'Only the owner\'s own phone can log meals.' }, 403);
+  const { image } = await request.json().catch(() => ({}));
+  if (!IMAGE.test(String(image || ''))) return json({ error: 'That is not a photo this can read.' }, 400);
+  return json({ meal: parseMealAnswer(await runMeal(env, image, MEAL_PROMPT)) });
+}
+
+// The phone app's own files (built from workers/app/ by scripts/build-app.mjs).
+const APP_CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+function appFile(path) {
+  const page = { 'Content-Security-Policy': APP_CSP, 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' };
+  const files = {
+    '/app/': () => [APP_PAGE, 'text/html; charset=utf-8', 'no-cache', page],
+    '/app/app.js': () => [`${REPORT_SCRIPT}\n${APP_CLIENT}`, 'text/javascript; charset=utf-8', 'no-cache'],
+    '/app/sw.js': () => [APP_SW, 'text/javascript; charset=utf-8', 'no-cache'],
+    '/app/manifest.webmanifest': () => [APP_MANIFEST, 'application/manifest+json', 'max-age=3600'],
+    '/app/icon.svg': () => [APP_ICON_SVG, 'image/svg+xml', 'max-age=86400'],
+  };
+  const name = path.slice(5);
+  if (APP_ICONS[name]) files[path] = () => [Uint8Array.from(atob(APP_ICONS[name]), (c) => c.charCodeAt(0)), 'image/png', 'max-age=86400'];
+  const f = files[path];
+  if (!f) return null;
+  const [body, type, cache, extra = {}] = f();
+  return new Response(body, { headers: { 'Content-Type': type, 'Cache-Control': cache, 'X-Content-Type-Options': 'nosniff', ...extra } });
 }
 const HEX64 = /^[0-9a-f]{64}$/;
 
@@ -177,10 +219,19 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg|history)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (path === '/app') return Response.redirect(`${url.origin}/app/${url.search}`, 301);
+      if (path === '/app/meal' && request.method === 'POST') return await appMeal(request, env);
+      if (path.startsWith('/app/') && request.method === 'GET') { const f = appFile(path); if (f) return f; }
       if (path === '/tv' || path === '/tv/') {
         // Pairing screen: shows a code; su94r Mini enters it; the screen keeps its own token.
         return new Response(displayPage('', { pair: true }), {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' },
+        });
+      }
+      if (/^\/r\/[0-9a-f]{64}$/.test(path)) {
+        // The doctor's live report: the page holds nothing; /doctor/data checks the link.
+        return new Response(doctorPage(), {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' },
         });
       }

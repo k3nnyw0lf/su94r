@@ -173,6 +173,45 @@
             "where is {name} heading",
             "where will {name} be in an hour"
           ]
+        },
+        {
+          "name": "NightIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "how was my night",
+            "how was last night",
+            "how did my night go",
+            "how was my sugar overnight",
+            "how was my glucose overnight",
+            "how was my sugar last night",
+            "did I go low last night",
+            "how was the night",
+            "how was {name} last night",
+            "how was {name}'s night"
+          ]
+        },
+        {
+          "name": "WeekIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "how was my week",
+            "how was this week",
+            "how was my sugar this week",
+            "give me my week",
+            "what was my time in range this week",
+            "how is my week going",
+            "how was {name}'s week"
+          ]
         }
       ],
       "types": [
@@ -335,6 +374,36 @@
         },
         {
           "name": "ForecastIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "NightIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "WeekIntent",
           "delegationStrategy": "SKILL_RESPONSE",
           "confirmationRequired": false,
           "prompts": {},

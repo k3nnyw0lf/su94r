@@ -202,7 +202,7 @@ async function openOpts(first){
   const copy=(v)=>' <button data-copy="'+esc(v)+'">Copy</button>';
   const el=document.createElement('div');el.className='opts';el.id='opts';
   el.innerHTML='<div class="box"><h2>'+(first?'This phone is linked':'Phone options')+'</h2>'+
-    '<p>It shows the glucose live, even with every computer off. Keep it one tap away: Android Chrome ⋮ → <b>Add to Home screen</b>; iPhone Safari Share → <b>Add to Home Screen</b>.</p>'+
+    '<p>It shows the glucose live, even with every computer off. <a class="btn" href="/app/">Open the su94r app</a> for history, logging and the report, and install it from there.</p>'+
     (a?'<h3>Low alerts on this phone</h3><p>'+(a.role==='family'?'You are told when a low is not handled.'+(a.on?'':' The owner has not switched family alerts on yet.'):'The same alerts as the owner: every low, repeated until “I’m OK”.')+
       ' Install <b>ntfy</b> (free): <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Play Store</a> · <a href="https://apps.apple.com/app/ntfy/id1625396347">App Store</a>, then:</p>'+
       '<p><a class="btn" href="ntfy://'+esc(a.url.replace('https://','').replace('http://',''))+'">Subscribe in ntfy</a> <a class="btn ghost" href="'+esc(a.url)+'">Open in the browser</a></p>'+

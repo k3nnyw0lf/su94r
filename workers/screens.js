@@ -46,7 +46,7 @@ export function screenStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     update: (id, patch) => call(`?id=eq.${q(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
     /** Claims a row only if nobody has yet; true when this call won. */
     claimIfOpen: async (id, patch) => (await call(`?id=eq.${q(id)}&claimed_at=is.null&revoked=is.false`, { method: 'PATCH', body: JSON.stringify(patch) })).length > 0,
-    list: () => call('?select=id,name,kind,created_at,claimed_at,last_seen&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
+    list: () => call('?select=id,name,kind,created_at,claimed_at,last_seen,expires_at&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
     sweep: () => call(`?claimed_at=is.null&expires_at=lt.${q(new Date().toISOString())}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
   };
 }
