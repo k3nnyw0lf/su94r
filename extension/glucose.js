@@ -30,6 +30,27 @@ export const DEFAULT_SETTINGS = {
   rapidInsulin: 'novorapid',
   meds: [],
   alerts: DEFAULT_ALERTS,
+  // Computers (by device id) that should NOT sound the urgent-low alarm. Empty means every
+  // computer sounds it, so a new computer is never silent by accident.
+  quietDevices: {},
+  // Your su94r server's big-screen link (https://…/d/<key>): Alexa doses and paired screens.
+  screenLink: '',
+  // Whose health data the vault holds (a followed person's id); empty means the first person.
+  vaultOwner: '',
+  // Keep a copy in this person's own Google Drive (this computer; each signs in to Google).
+  driveBackup: false,
+  // Your own Google Cloud OAuth client, instead of the one built in (google.js).
+  googleClientId: '',
+  // Pens, vials and spare sensors (supplies.js).
+  supplies: { pens: [], sensorsLeft: null, reorderAt: 1 },
+  // Calendar heads-up: the calendar's private iCal link (this computer only).
+  calendarUrl: '',
+  // Where you are, for heat notes and the learner: { name, lat, lon } (weather.js).
+  place: null,
+  heatNote: true,
+  // Suggest a short walk after a long stretch at this computer while running high.
+  sitNudge: true,
+  sitMinutes: 60,
 };
 
 export function withDefaults(s = {}) {

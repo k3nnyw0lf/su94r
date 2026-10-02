@@ -43,17 +43,43 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
 const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
-  '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screens', '/screens/remove']);
+  '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove']);
+
+const MAX_BODY = 2 * 1024 * 1024;
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/**
+ * Secrets that arrive in a link (an inbox address, the AI connector, ?token= on a widget or
+ * Nightscout link) are moved into headers before the request goes on, so the edge function's
+ * request logs never hold them. Returns the path and query to forward.
+ */
+export function moveSecrets(url, headers) {
+  let path = url.pathname;
+  const params = new URLSearchParams(url.search);
+  const inbox = path.match(/^\/inbox\/([0-9a-f]{64})(\/.*)?$/);
+  if (inbox) { if (!headers.has('x-api-key')) headers.set('x-api-key', inbox[1]); path = `/inbox${inbox[2] || ''}`; }
+  const mcp = path.match(/^\/mcp\/([0-9a-f]{64})\/?$/);
+  if (mcp) { headers.set('authorization', `Bearer ${mcp[1]}`); path = '/mcp'; }
+  const token = params.get('token');
+  if (token && HEX64.test(token)) {
+    if (path === '/ns' || path.startsWith('/ns/')) { headers.set('x-ns-token', token); params.delete('token'); }
+    else if (path === '/screen/glance' || path === '/screen/data') { headers.set('authorization', `Bearer ${token}`); params.delete('token'); }
+  }
+  const search = params.toString();
+  return `${path}${search ? `?${search}` : ''}`;
+}
 
 async function forward(request, url, env) {
   if (!env.CGM_URL) return json({ error: 'CGM_URL is not set' }, 503);
+  if (Number(request.headers.get('content-length')) > MAX_BODY) return json({ error: 'too large' }, 413);
   const headers = new Headers();
   // Alexa's signature headers must arrive untouched, with the body byte for byte.
-  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256']) {
+  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256', 'x-api-key', 'x-collector-key', 'x-ns-token', 'api-secret', 'accept', 'mcp-protocol-version', 'mcp-session-id']) {
     const v = request.headers.get(h);
     if (v) headers.set(h, v);
   }
-  const res = await fetch(`${env.CGM_URL}${url.pathname}${url.search}`, {
+  const target = moveSecrets(url, headers);
+  const res = await fetch(`${env.CGM_URL}${target}`, {
     method: request.method,
     headers,
     body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer(),
@@ -124,7 +150,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns)(\/|$)/.test(path)) return await forward(request, url, env);
       if (path === '/tv' || path === '/tv/') {
         // Pairing screen: shows a code; su94r Mini enters it; the screen keeps its own token.
         return new Response(displayPage('', { pair: true }), {

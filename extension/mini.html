@@ -100,9 +100,12 @@
           <option value="60">1 h ago</option>
           <option value="120">2 h ago</option>
         </select>
+        <button type="button" id="addPhoto" class="icon-btn" title="Photo: estimate the carbs, or read the pen's dose window (you can also paste a picture)" hidden>📷</button>
+        <input type="file" id="addPhotoFile" accept="image/*" capture="environment" hidden>
         <button type="submit" class="chip save">Add</button>
         <button type="button" class="icon-btn close" data-close title="Cancel">✕</button>
       </div>
+      <div id="addInfo" class="add-info" hidden></div>
       <div id="markRow" class="add-row" hidden>
         <span id="markText" class="mark-text"></span>
         <button type="button" id="markDelete" class="chip">Delete</button>

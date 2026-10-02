@@ -100,10 +100,14 @@ export async function pairClaim(request, store) {
   return { ok: true, name: clean(name) || row.name || 'Screen' };
 }
 
-/** The screen behind a bearer token, or null. Updates last_seen at most once a minute. */
-export async function screenFor(request, store) {
+/**
+ * The screen behind a token, or null. The token comes in the Authorization header, or, for
+ * widget apps that cannot set headers (KWGT on Android), as ?token= in the link.
+ * Updates last_seen at most once a minute.
+ */
+export async function screenFor(request, store, queryToken = '') {
   const auth = request.headers.get('Authorization') || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : String(queryToken || '').trim();
   if (!/^[0-9a-f]{64}$/.test(token)) return null;
   const row = await store.byToken(await sha256(token));
   if (!row) return null;

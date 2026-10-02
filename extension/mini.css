@@ -242,6 +242,12 @@ button:focus-visible { outline: 2px solid var(--in); outline-offset: 1px; }
 .graph .proj-end.high { stroke: var(--high); }
 .graph .proj-end.low { stroke: var(--low); }
 .graph .proj-label { font-weight: 600; }
+.graph .est-band { fill: var(--in); fill-opacity: 0.22; stroke: none; }
+.graph .est-band.high { fill: var(--high); }
+.graph .est-band.low { fill: var(--low); fill-opacity: 0.28; }
+.graph .proj.est { stroke-dasharray: 4 3; }
+.graph .compress { fill: var(--muted); font-size: 11px; font-weight: 700; cursor: help; }
+.add-info { font-size: 11px; line-height: 1.35; padding: 4px 8px; color: var(--fg); background: var(--faint); border-radius: 6px; }
 .graph .marker-line { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 1 3; opacity: 0.7; }
 .graph .marker { font-size: 11px; }
 .card.long .graph .seg { stroke-width: 1.4; }
@@ -279,7 +285,7 @@ button:focus-visible { outline: 2px solid var(--in); outline-offset: 1px; }
   color: var(--fg);
   font-size: 13px;
 }
-.add-row select option:checked { background: var(--in); color: #ffffff; }
+.add-row select option:checked { background: var(--in); color: var(--bg); }   /* dark text on green: about 7:1 */
 .add-row input::placeholder { color: var(--muted); opacity: 1; }
 .add-row input { width: 64px; }
 .status button {
@@ -308,7 +314,7 @@ button:focus-visible { outline: 2px solid var(--in); outline-offset: 1px; }
 .graph { cursor: crosshair; }
 .add-row { flex-wrap: wrap; }
 .add-at { font-size: 11px; font-weight: 600; color: var(--fg); white-space: nowrap; }
-.mark-text { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; }
+.mark-text { font-size: 11px; overflow: hidden; min-width: 0; flex: 1; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 
 .dose { font-size: 11px; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dose .iob { font-weight: 650; }

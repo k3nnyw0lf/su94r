@@ -5,8 +5,11 @@
 //   settings         global settings (glucose.js DEFAULT_SETTINGS)
 //   events           [{ id, p: patientId, t, type, amount?, note? }]
 //   alertState       { [patientId]: { [alertType]: { active, lastAt, snoozeUntil } }, sensor: {...} }
+//   learned:<pid>    the learner's model for that person (learner.js), refreshed every few hours
 
 export const ptKey = (pid) => `pt:${pid}`;
+/** learned:<patientId> holds what the learner worked out for that person (learner.js). */
+export const learnedKey = (pid) => `learned:${pid}`;
 export const isDemo = (pid) => String(pid).startsWith('demo-');
 
 export async function allPatients(settings) {

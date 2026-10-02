@@ -28,7 +28,8 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     kind: d.kind,
     amount: d.amount ?? null,
     source: d.source,
-    deleted: Boolean(d.deleted),
+    // No "deleted" here: new rows default to false, and an update never clears a deletion,
+    // so a computer that has not heard about it yet cannot bring a deleted dose back.
     updated_at: new Date().toISOString(),
   });
   const fromRow = (r) => ({ id: r.id, pid: r.pid, t: Date.parse(r.t), kind: r.kind, amount: r.amount == null ? null : Number(r.amount), source: r.source, deleted: r.deleted });

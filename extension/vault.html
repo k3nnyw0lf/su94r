@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>su94r Mini · Health vault</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="stylesheet" href="vault.css">
+</head>
+<body>
+  <main class="page wide">
+    <header class="head">
+      <img src="icons/icon48.png" width="40" height="40" alt="">
+      <div>
+        <h1>Health vault</h1>
+        <p class="sub">Everything your watch, scale, cuff and apps measure, next to your glucose. It stays on this computer, and in your own Google Drive if you turn that on.</p>
+      </div>
+    </header>
+
+    <section class="panel" id="owner-panel">
+      <h2>Whose health data is this?</h2>
+      <p class="hint">Your watch, scale and phone measure <em>you</em>. Choose which person you follow is you, the one using this computer. Their learner uses the vault, and pens, calendar and walk heads-ups follow their glucose. Until you choose, the vault counts for nobody.</p>
+      <select id="vault-owner" aria-label="Whose health data"></select>
+    </section>
+
+    <section class="panel" id="learned-panel">
+      <div class="row">
+        <h2>What su94r learned</h2>
+        <select id="learn-person" aria-label="Person"></select>
+      </div>
+      <p class="hint">From your own readings and markers, and the vault: how much and when each insulin lowers you, what carbs, exercise, walking and sleep do, and how you drift through the day. These are estimates from your past, never a dosing instruction.</p>
+      <div id="learn-check" class="check-line"></div>
+      <ul id="findings" class="findings"></ul>
+      <div id="dose-curves" class="curves" aria-label="How each insulin works over time"></div>
+      <h3 class="sub-h">Your lows</h3>
+      <ul id="lows" class="findings"></ul>
+      <div class="row-left wrap">
+        <button id="learn-now" type="button" class="ghost">Learn again now</button>
+        <span id="learn-msg" class="msg"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Connections</h2>
+      <p class="hint">Bring in what your devices measure. Each connection says what it needs; the vault keeps one copy of each reading however many ways it arrives.</p>
+      <ul id="connectors" class="connectors"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>Add a reading by hand</h2>
+      <div class="add-grid">
+        <label class="field">What
+          <select id="m-type"></select>
+        </label>
+        <label class="field" id="m-value-wrap">Value
+          <span class="unit-input"><input id="m-value" type="number" step="any" inputmode="decimal" aria-label="Value"><span id="m-unit" class="unit"></span></span>
+        </label>
+        <label class="field" id="m-value2-wrap" hidden>Bottom number
+          <span class="unit-input"><input id="m-value2" type="number" step="any" inputmode="decimal" aria-label="Bottom number"><span class="unit">mmHg</span></span>
+        </label>
+        <label class="field">When
+          <input id="m-when" type="datetime-local">
+        </label>
+      </div>
+      <div class="row-left wrap">
+        <input id="m-note" type="text" class="grow" placeholder="Note (optional)" aria-label="Note">
+        <button id="m-add" type="button" class="primary">Add</button>
+      </div>
+      <p id="m-msg" class="msg"></p>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <h2>In the vault</h2>
+        <select id="range" aria-label="Period">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last year</option>
+        </select>
+      </div>
+      <div id="tiles" class="tiles"></div>
+      <p id="empty" class="hint" hidden>Nothing yet. Add a reading by hand, import a file, or connect a device above.</p>
+      <details>
+        <summary>Every reading</summary>
+        <table class="samples">
+          <thead><tr><th>When</th><th>What</th><th>Value</th><th>From</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>Import a file</h2>
+      <p class="hint">A CSV with columns <code>type,time,value,unit</code> (the type names are listed below), a JSON export from Health Auto Export or Health Connect apps, or a su94r Drive file. Nothing leaves this computer.</p>
+      <div class="row-left wrap">
+        <label class="file-btn ghost">Choose a file<input id="import-file" type="file" accept=".csv,.json,.txt" hidden></label>
+        <span id="import-msg" class="msg"></span>
+      </div>
+      <details>
+        <summary>Type names</summary>
+        <p id="type-names" class="hint small"></p>
+      </details>
+    </section>
+
+    <footer class="foot">
+      <a href="options.html">Settings</a> · <a href="report.html">Doctor report</a>
+    </footer>
+  </main>
+  <script type="module" src="vault-page.js"></script>
+</body>
+</html>

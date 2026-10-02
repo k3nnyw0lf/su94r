@@ -19,5 +19,9 @@ compatibility_date = "2026-01-15"
 [observability]
 enabled = true
 
+# Request logs would hold inbox and connector secrets from link paths; only console logs are kept.
+[observability.logs]
+invocation_logs = false
+
 [vars]
 CGM_URL = "https://sfelhasepvaoianyuvxe.supabase.co/functions/v1/su94r-cgm"

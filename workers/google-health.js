@@ -82,7 +82,8 @@ const SYNC_MAP = [
   {
     dataType: 'weight', field: 'weight', type: 'bodyMass', unit: 'kg',
     at: p => p.sampleTime?.physicalTime,
-    value: p => Number(p.weightKilograms ?? p.kilograms),
+    // The Google Health API sends grams (weightGrams).
+    value: p => (p.weightGrams != null ? Number(p.weightGrams) / 1000 : Number(p.weightKilograms ?? p.kilograms)),
   },
   {
     dataType: 'blood-glucose', field: 'bloodGlucose', type: 'bloodGlucose', unit: 'mg/dL',

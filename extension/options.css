@@ -19,7 +19,7 @@
     --muted: #8b949e;
     --line: #30363d;
     --accent: #2ea043;
-    --accent-fg: #ffffff;
+    --accent-fg: #0d1117;   /* dark text on the green: about 5.6:1 */
     --warn: #f0883e;
     --ok: #3fb950;
   }
@@ -61,7 +61,7 @@ h2 { font-size: 15px; margin: 0 0 10px; }
 }
 .panel > h2 { margin-bottom: -2px; }
 .panel.notice { border-color: var(--accent); border-width: 2px; }
-#sync-status.bad { color: var(--warn); }
+#sync-status.bad, #voice-status.bad { color: var(--warn); }
 
 .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .label { color: var(--muted); font-size: 12px; }
@@ -168,3 +168,7 @@ h3 { font-size: 13px; margin: 6px 0 -4px; }
 .choice input[type="radio"] { accent-color: var(--accent); }
 .sub-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-left: 22px; }
 .sub-row input[type="text"], .sub-row input[type="password"], .sub-row input[type="url"], .sub-row select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+
+.alarm-switch { margin-left: auto; white-space: nowrap; font-size: 12px; }
+#pair-code { width: 9em; text-transform: uppercase; letter-spacing: 0.08em; font-family: ui-monospace, monospace; }
+input[type="url"], input[type="text"] { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }

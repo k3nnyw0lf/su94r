@@ -9,6 +9,7 @@ import { parseLibreViewCsv } from './libreview-csv.js';
 import { allPatients, ptKey } from './store.js';
 import { addEvents, removeEvents } from './events.js';
 import { isLegacy, NEW_ID } from './handover.js';
+import { parseScreenLink, claimScreen, listScreens, removeScreen } from './voice.js';
 import { insulinTiming } from './insights.js';
 import { searchMedication, defaultUnit, MED_UNITS } from './meds.js';
 import { listDevices, forgetDevice, deviceId, heartbeat } from './sync.js';
@@ -90,12 +91,14 @@ async function refresh() {
   $('projection').checked = s.projection;
   $('badge').checked = s.badge;
   $('startup').checked = s.openOnStartup;
+  $('desktopWidget').checked = s.desktopWidget !== false;
   $('demo').checked = s.demo;
   $('demo').disabled = Boolean(state.accounts?.length) && !s.demo;
 
   $('rapidInsulin').value = s.rapidInsulin;
   renderMeds(s);
   renderDevices(s);
+  renderVoice(s);
   renderHandover();
   renderAi();
   renderMarkers(s);
@@ -221,6 +224,22 @@ async function renderDevices(s) {
     const seen = ago < 2 ? 'active now' : ago < 120 ? `seen ${ago} min ago` : `seen ${new Date(d.lastSeen).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}`;
     text.textContent = `${d.id === me ? '★ ' : ''}${d.name} · ${d.browser} · v${d.version} · ${seen}${d.id === me ? ' (this computer)' : ''}`;
     li.append(text);
+    // Which computers sound the urgent-low alarm. Shared, so any computer can set all of them.
+    const alarm = document.createElement('label');
+    alarm.className = 'check alarm-switch';
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = !s.quietDevices?.[d.id];
+    box.onchange = async () => {
+      const cur = await settings();
+      const quiet = { ...(cur.quietDevices || {}) };
+      if (box.checked) delete quiet[d.id]; else quiet[d.id] = true;
+      await saveSetting({ quietDevices: quiet });
+      say(box.checked ? `${d.name} will sound the urgent-low alarm.` : `${d.name} will show urgent lows quietly, without the alarm.`, box.checked ? 'ok' : undefined);
+    };
+    alarm.append(box, ' Urgent-low alarm');
+    alarm.title = 'Sound the loud, sticky urgent-low alarm on this computer';
+    li.append(alarm);
     if (d.id !== me) {
       const rm = document.createElement('button');
       rm.type = 'button';
@@ -501,6 +520,8 @@ $('login').addEventListener('submit', async (e) => {
 });
 
 $('open-board').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'openBoard' }));
+$('open-vault').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('vault.html') }));
+$('open-report').addEventListener('click', () => chrome.tabs.create({ url: chrome.runtime.getURL('report.html') }));
 $('who').addEventListener('change', (e) => { selected = e.target.value; refresh(); });
 
 // ---- settings ----
@@ -531,6 +552,10 @@ $('units').addEventListener('change', (e) => saveSetting({ units: e.target.value
 $('projection').addEventListener('change', (e) => saveSetting({ projection: e.target.checked }));
 $('badge').addEventListener('change', (e) => saveSetting({ badge: e.target.checked }));
 $('startup').addEventListener('change', (e) => saveSetting({ openOnStartup: e.target.checked }));
+$('desktopWidget').addEventListener('change', async (e) => {
+  await saveSetting({ desktopWidget: e.target.checked });
+  chrome.runtime.sendMessage({ type: 'refresh' }).catch(() => {});
+});
 $('demo').addEventListener('change', async (e) => {
   await saveSetting({ demo: e.target.checked });
   if (e.target.checked) {
@@ -575,6 +600,8 @@ $('import').addEventListener('change', async (e) => {
     say('Importing…');
     const { readings, events } = parseLibreViewCsv(await file.text());
     const added = await saveReadings(pid, readings, 'import');
+    // Those months go to Google Drive with the next save.
+    if (added) chrome.runtime.sendMessage({ type: 'driveDirty', times: [...new Set(readings.map((r) => new Date(r.t).toISOString().slice(0, 7)))].map((m) => Date.parse(`${m}-01T00:00:00Z`)) }).catch(() => {});
     let newMarkers = 0;
     if (events.length) {
       const { events: stored = [] } = await local.get('events');
@@ -647,6 +674,85 @@ $('clear-markers').addEventListener('click', async () => {
   refresh();
 });
 
+// ---- Alexa and screens ----
+
+async function renderVoice(s) {
+  if (document.activeElement !== $('screen-link')) $('screen-link').value = s.screenLink || '';
+  const { voiceError } = await local.get('voiceError');
+  $('voice-status').classList.toggle('bad', Boolean(voiceError));
+  $('voice-status').textContent = !s.screenLink
+    ? 'Not connected yet.'
+    : voiceError
+      ? `Could not reach the su94r server: ${voiceError.message}`
+      : 'Connected. Doses said to Alexa appear here within a minute, and Alexa sees the doses logged here.';
+  $('screens-box').hidden = !s.screenLink;
+}
+
+$('save-screen-link').addEventListener('click', async () => {
+  const link = $('screen-link').value.trim();
+  if (!link) {
+    await saveSetting({ screenLink: '' });
+    say('Alexa and screens disconnected.');
+    return;
+  }
+  const p = parseScreenLink(link);
+  if (!p) { say('That does not look like a big-screen link. It starts with https:// and has /d/ in it.', 'error'); return; }
+  const granted = await chrome.permissions.request({ origins: [`${p.base}/*`] });
+  if (!granted) { say('su94r Mini needs permission to reach that address.', 'error'); return; }
+  await saveSetting({ screenLink: link });
+  try {
+    await listScreens(link);
+    say('Connected to your su94r server.', 'ok');
+    chrome.runtime.sendMessage({ type: 'refresh' }).catch(() => {});
+  } catch (err) {
+    say(`Saved, but the server did not answer: ${err.message}`, 'error');
+  }
+  refreshScreens();
+});
+
+async function refreshScreens() {
+  const s = await settings();
+  const list = $('screens');
+  if (!s.screenLink) { list.replaceChildren(); return; }
+  let screens = [];
+  try { screens = (await listScreens(s.screenLink)).screens || []; } catch (err) {
+    list.replaceChildren(Object.assign(document.createElement('li'), { textContent: err.message }));
+    return;
+  }
+  if (!screens.length) {
+    list.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'No screens yet.' }));
+    return;
+  }
+  list.replaceChildren(...screens.map((sc) => {
+    const li = document.createElement('li');
+    const seen = sc.last_seen ? `seen ${new Date(sc.last_seen).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}` : 'not seen yet';
+    li.append(Object.assign(document.createElement('span'), { textContent: `${sc.kind === 'widget' ? '🔲' : sc.kind === 'ai' ? '✳️' : '🖥️'} ${sc.name || 'Screen'} · ${seen}` }));
+    const rm = Object.assign(document.createElement('button'), { type: 'button', className: 'ghost', textContent: 'Remove' });
+    rm.onclick = async () => {
+      if (!confirm(`Remove ${sc.name || 'this screen'}? It stops showing your glucose at once.`)) return;
+      try { await removeScreen(s.screenLink, sc.id); say('Screen removed.'); } catch (err) { say(err.message, 'error'); }
+      refreshScreens();
+    };
+    li.append(rm);
+    return li;
+  }));
+}
+$('screens-box').addEventListener('toggle', () => { if ($('screens-box').open) refreshScreens(); });
+
+$('pair-screen').addEventListener('click', async () => {
+  const s = await settings();
+  try {
+    const r = await claimScreen(s.screenLink, $('pair-code').value, $('pair-name').value.trim());
+    if (!r.ok) { say(r.error || 'That code did not work.', 'error'); return; }
+    $('pair-code').value = '';
+    $('pair-name').value = '';
+    say(`${r.name} is paired. It shows your glucose within a few seconds.`, 'ok');
+    refreshScreens();
+  } catch (err) {
+    say(err.message, 'error');
+  }
+});
+
 // The old "Libre Mini Graph" copy, or su94r Mini waiting to take over from it.
 async function renderHandover() {
   const { retired, migratedFrom, handoverOffer } = await local.get(['retired', 'migratedFrom', 'handoverOffer']);
@@ -688,7 +794,7 @@ $('bring-over').addEventListener('click', async () => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (Object.keys(changes).some((k) => ['accounts', 'events', 'settings', 'syncError', 'syncQueue', 'retired', 'migratedFrom'].includes(k) || k.startsWith('pt:'))) refresh();
+  if (Object.keys(changes).some((k) => ['accounts', 'events', 'settings', 'syncError', 'syncQueue', 'retired', 'migratedFrom', 'handoverOffer', 'voiceError'].includes(k) || k.startsWith('pt:'))) refresh();
 });
 
 watchContext();

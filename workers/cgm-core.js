@@ -22,6 +22,9 @@
 //   POST pair/claim                    su94r Mini enters a screen's code (DISPLAY_KEY)
 //   GET  screen/data                   a paired screen's data (its own bearer token)
 //   GET  screens, POST screens/remove  list and remove paired screens (DISPLAY_KEY)
+//   inbox/*, inboxes                   health inbox for phone apps (inbox.js)
+//   mcp/new, mcp/<token>               the AI connector, MCP over HTTP (mcp.js)
+//   ns/new, ns/*                       Nightscout-style feed for watch faces and widgets (nightscout.js)
 // Server-side routes also need LLU_EMAIL and LLU_PASSWORD. Anything unset → 503.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -29,11 +32,14 @@ import { login as lluLogin, getConnections, getGraph, toPoint, sensorOf, LibreEr
 import { handleAlexa } from './alexa.js';
 import { doseStore, asMarkers, WINDOW_MS } from './doses.js';
 import { screenStore, pairStart, pairPoll, pairClaim, screenFor } from './screens.js';
+import { inboxStore, inboxRoute } from './inbox.js';
+import { mcpRoute } from './mcp.js';
+import { nightscoutRoute } from './nightscout.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Api-Key, Mcp-Session-Id, Mcp-Protocol-Version',
 };
 
 const json = (body, status = 200, extra = {}) =>
@@ -252,9 +258,11 @@ async function screensRoute(path, request, url, env, deps) {
   if (!store.ready) return json({ error: 'Screens are not configured' }, 503);
   if (path === 'pair/start') return json(await pairStart(request, store));
   if (path === 'pair/poll') return json(await pairPoll(request, store));
-  if (path === 'screen/data') {
-    const screen = await screenFor(request, store);
-    if (!screen) return json({ error: 'unauthorized' }, 401);
+  if (path === 'screen/data' || path === 'screen/glance') {
+    const screen = await screenFor(request, store, url.searchParams.get('token'));
+    // An AI connector's token reads through MCP only, never the screen feeds (names, sensor dates).
+    if (!screen || screen.kind === 'ai') return json({ error: 'unauthorized' }, 401);
+    if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
     return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
   }
   // The rest manage screens and need the display key.
@@ -270,7 +278,33 @@ async function screensRoute(path, request, url, env, deps) {
   }
   return json({ error: 'not found' }, 404);
 }
-const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screens', 'screens/remove']);
+const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove']);
+
+// One person, flattened for widget apps (KWGT, Scriptable): ready-made text and a colour.
+async function glance(env, n) {
+  try {
+    const snap = await snapshot(env);
+    const p = snap.people[Math.max(0, Math.min(n, snap.people.length - 1))];
+    if (!p || !p.latest) return json({ error: 'no reading yet' }, 404);
+    const l = p.latest;
+    const mins = Math.max(0, Math.round((Date.now() - l.t) / 60e3));
+    const stale = mins > 10;
+    const mmol = p.units === 'mmol/L';
+    const fmt = (mg) => (mg < 40 ? 'LO' : mg > 400 ? 'HI' : mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
+    const ref = p.history.find((q) => Math.abs(q.t - (l.t - 15 * 60e3)) <= 4 * 60e3);
+    const d = ref ? l.mg - ref.mg : null;
+    const delta = d == null ? '' : `${d < 0 ? '\u2212' : '+'}${mmol ? Math.abs(d / 18.0182).toFixed(1) : Math.abs(Math.round(d))}`;
+    const state = stale ? 'stale' : l.mg < 55 ? 'urgent' : l.mg < p.low ? 'low' : l.mg > p.high ? 'high' : 'in';
+    const color = { stale: '#6e7681', urgent: '#ff5d55', low: '#ff5d55', high: '#e3a33b', in: '#3fb950' }[state];
+    return json({
+      name: p.firstName || p.name, value: fmt(l.mg), units: p.units, mg: l.mg, trend: l.trend,
+      arrow: ['', '\u2193', '\u2198', '\u2192', '\u2197', '\u2191'][l.trend] || '',
+      delta, minutes: mins, ago: mins < 1 ? 'just now' : `${mins} min ago`, state, color, t: l.t,
+    });
+  } catch (e) {
+    return json({ error: e.message, code: e.code }, e.code === 'config' ? 503 : 502);
+  }
+}
 
 export async function handleCgm(path, request, env, deps = {}) {
   if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
@@ -283,6 +317,17 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
+    const keyOk = (k) => displayKeyOk(env, k);
+    const inbox = await inboxRoute(path, request, url, env, { store: deps.inbox || inboxStore(env), json, keyOk });
+    if (inbox) return inbox;
+    const mcp = await mcpRoute(path, request, url, env, {
+      screens: deps.screens || screenStore(env), json, keyOk,
+      snapshot: () => snapshot(env),
+      doses: () => (deps.store || doseStore(env)).recent(null),
+    });
+    if (mcp) return mcp;
+    const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });
+    if (ns) return ns;
     return json({ error: 'not found' }, 404);
   } catch (err) {
     return json({ error: String(err?.message || err).slice(0, 300) }, 500);

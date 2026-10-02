@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "su94r Mini, works with FreeStyle Libre",
   "short_name": "su94r Mini",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "description": "Live FreeStyle Libre glucose for one person or a whole ward: small always-on-top graphs, a board, alerts and full history, via LibreLinkUp. Not affiliated with Abbott.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1um8XZHTuhSvD2AXUnqDxTAtuv7+q6kevpsvYcdpCF135RyKdylwyLT7kjE99TxwlMt/gDe1TcJW1ZQm8R5UthVOTdcVjBm2JkkY1dl3yVMXSpKPIz4W8B02LWX3Z2YdJ/c0AhA36qd2We17Z++O6vDhgFWKvHJkovCas8870m3YQffrhqSlDXAN6hiziE+Yzw8bJ0ZyHkNkqzbnY/XukKvdSkcJPiYTXaCxEfcNXk5wXiVuEU2zDnq+iTzBKBreEHKsO84ehh1gbuWLILzcWtsZDsl0BoRlC+8UM2mz/jzKzmSZ5dTB56VMUBGKYBJ3LzXMZUM4KiTw6rhozKKthwIDAQAB",
   "minimum_chrome_version": "116",
@@ -12,7 +12,8 @@
     "alarms",
     "notifications",
     "offscreen",
-    "identity"
+    "identity",
+    "idle"
   ],
   "host_permissions": [
     "https://*.libreview.io/*",

@@ -31,6 +31,12 @@ Live FreeStyle Libre glucose on a laptop or a ward screen, as a Chrome / Edge ex
 - **Alerts:** urgent low, low, high, falling fast, rising fast and no data, with an alarm sound and snooze. A low stays raised while readings are late, and a signed-out LibreLinkUp account raises its own sticky alert (no readings means no alarms).
 - **Full history:** every reading kept in the browser. Gaps of up to 12 hours fill themselves; older gaps fill from a LibreView CSV import. Export to CSV at any time.
 
+**Health vault and the learner** (Settings → Health vault and what it learned; see docs/health-vault.md)
+- **Everything else you measure, next to your glucose:** weight, blood pressure, heart rate, steps, workouts, sleep, fingersticks, ketones, A1c, temperature, water, food and body composition. Typed in, imported from a file, or brought in from your Pixel Watch (Google Health), your Android phone's Health Connect (Samsung Health, Withings, Omron, Oura, Garmin, MyFitnessPal…) or Apple Health. When a watch reports through two routes, each day counts it once.
+- **The learner:** from your own data it works out how much and when each insulin lowers you, what carbs, exercise, walking and short sleep do, and how you drift through the day, each with a likely range. When its 1-hour estimates beat plain guesses on days it did not learn from, the graph shows its **estimate line with a shaded range**; click an insulin marker to see what that dose does: how much, strongest when, done when, and how much is still to come. It describes your past; it never suggests a dose.
+- **Your own Google Drive:** sign in with Google and a copy of everything goes to a "su94r" folder in your Drive, one file per month, which other computers can bring back. su94r Mini can see only the files it made.
+- **Claude:** a read-only connector so Claude can answer questions about your glucose and doses.
+
 **Many people, many computers**
 - Add any number of LibreLinkUp follower accounts; each can follow many people.
 - Markers, doses, medicines and alert settings sync across every Chrome signed in to the same Google account (the last 30 days of markers; alert on/off and sound stay per computer). Settings → Your computers lists each computer, its version and when it was last seen, and shows any sync problem.
@@ -87,6 +93,7 @@ Bump `version` in `manifest.json` whenever you change the code: running copies c
 
 - LibreLinkUp passwords go only to Abbott's server (`libreview.io`) and are never saved; only the sign-in token is kept, on the device.
 - Readings and history stay in the browser. Markers and settings travel only through Chrome sync. AI summaries go only to the AI you chose.
+- The health vault and the learner stay in the browser. With "Save to Google Drive" on, a copy goes to your own Drive (drive.file: su94r Mini sees only its own files). Google Health is read, never written. The phone inbox on your own su94r server holds what your phone sends only until this computer collects it (at most 14 days).
 
 ## Not a medical device
 
@@ -106,6 +113,11 @@ Not made by or affiliated with Abbott. FreeStyle Libre, LibreLinkUp and LibreVie
 | `ai.js`, `ai-page.js`, `ai.html` | AI providers, data summary, the AI look page |
 | `sync.js` | Chrome sync of markers, settings and the device list |
 | `archive.js` | Permanent reading history in IndexedDB |
+| `learner.js` | The learner: insulin, carbs, exercise, sleep and drift from your own data; the estimate line |
+| `vault.js`, `vault-import.js`, `vault.*`, `vault-page.js`, `connectors.js` | Health vault store, file formats, page and connection cards |
+| `google.js`, `drive-month.js`, `ghealth.js` | Google sign-in, the Drive month files, Google Health (Pixel Watch) |
+| `voice.js` | Your su94r server: Alexa doses, screens, the phone inbox, the Claude connector |
+| `report.*`, `vision.js` | Doctor report (AGP), photo estimates |
 | `libreview-csv.js` | Reads LibreView's "Download glucose data" CSV (US and EU formats) |
 | `store.js` | Storage layout shared by all pages |
 | `mini.*`, `board.*`, `options.*` | The per-person window, the board, settings |

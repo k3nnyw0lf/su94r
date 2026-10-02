@@ -1,12 +1,21 @@
 import { login, getConnections, getGraph, toPoint, unitsOf, sensorOf, LibreError } from './libre.js';
 import { withDefaults, displayUnits, fmtGlucose, fmtDelta, TREND_ARROWS, mergeSeries, sensorStatus, fmtDuration } from './glucose.js';
-import { saveReadings } from './archive.js';
-import { ptKey, allPatients, firstName, isDemo } from './store.js';
+import { saveReadings, loadReadings, wholeSeries, putRecords, archivedPatients, firstReading } from './archive.js';
+import { ptKey, learnedKey, allPatients, firstName, isDemo } from './store.js';
+import { learn, LEARN_DAYS } from './learner.js';
+import { getSamples, putSamples, preferOneSource, firstSample } from './vault.js';
+import { getToken, saveMonth, readAllMonths, monthOf, monthRange, DRIVE_SCOPES } from './google.js';
+import { RAPID_PROFILES } from './insulin.js';
 import {
-  heartbeat, pushEvents, mergeDays, changedDays, syncedDays, pruneOld, tombstoned, utcDay, KEEP_DAYS,
+  deviceId, heartbeat, pushEvents, mergeDays, changedDays, syncedDays, pruneOld, tombstoned, utcDay, KEEP_DAYS,
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
+import { exchangeDoses, inboxItems, ackInbox } from './voice.js';
+import { parseBody } from './vault-import.js';
+import { pullGoogleHealth } from './ghealth.js';
+import { careTick, careRefresh, careClicked } from './care-bg.js';
+import { tempSamples } from './weather.js';
 
 const NAME = 'su94r Mini';
 const KEEP_MS = 24 * 3600e3;
@@ -130,6 +139,9 @@ chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'poll') poll();
   if (a.name === 'update') {
     checkForUpdate();
+    if (!LEGACY) driveSave().catch(() => {});
+    if (!LEGACY) healthSync().catch(() => {});
+    if (!LEGACY) careTick().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -295,6 +307,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     addEvents: () => addEvents(msg.events),
     removeEvents: () => removeEvents(msg.ids),
     bringOver: () => (LEGACY ? { ok: false } : takeOverOldCopy(msg.id ? [msg.id] : KNOWN_OLD_IDS)),
+    learnNow: async () => ({ done: await learnAll(await getSettings(), true) }),
+    driveSave: () => driveSave(true),
+    driveRestore: () => driveRestore(),
+    importDriveFile: () => importMonths([msg.file]),
+    driveDirty: () => markDirty(Array.isArray(msg.times) ? msg.times : []),
+    healthSync: () => healthSync(true),
+    careNow: () => careTick(),
+    calendarNow: () => careRefresh('calendar'),
+    weatherNow: () => careRefresh('weather'),
   };
   const handler = handlers[msg?.type];
   if (!handler) return false;
@@ -326,6 +347,7 @@ function addEvents(list) {
     for (const e of valid) byId.set(e.id, e);
     await local.set({ events: [...byId.values()].sort((a, b) => a.t - b.t) });
     await sendOut({ upsert: valid });
+    await markDirty(valid.map((e) => e.t));
     return { added: valid.length };
   });
 }
@@ -337,6 +359,13 @@ function removeEvents(ids) {
     const gone = events.filter((e) => drop.has(e.id));
     if (!gone.length) return { removed: 0 };
     await local.set({ events: events.filter((e) => !drop.has(e.id)) });
+    await rememberDeleted(gone.map((e) => ({ id: e.id, t: e.t })));
+    // Tell the su94r server too, so Alexa forgets a deleted dose.
+    const insulinGone = gone.filter((e) => e.type === 'insulin').map((e) => e.id);
+    if (insulinGone.length) {
+      const { voiceRemoved = [] } = await local.get('voiceRemoved');
+      await local.set({ voiceRemoved: [...new Set([...voiceRemoved, ...insulinGone])].slice(-500) });
+    }
     await sendOut({ remove: gone });
     return { removed: gone.length };
   });
@@ -373,7 +402,20 @@ function pullDays(days) {
       remove: new Set((syncQueue?.remove || []).map((e) => e.id)),
     };
     const { events: next, missing } = await mergeDays(days, events, pending);
-    if (next) await local.set({ events: next });
+    if (next) {
+      await local.set({ events: next });
+      // Insulin deleted on another computer: tell the su94r server too, so Alexa forgets it
+      // even if the computer that deleted it is offline.
+      const kept = new Set(next.map((e) => e.id));
+      await rememberDeleted(events.filter((e) => !kept.has(e.id)).map((e) => ({ id: e.id, t: e.t })));
+      const had = new Set(events.map((e) => e.id));
+      await markDirty(next.filter((e) => !had.has(e.id)).map((e) => e.t));
+      const goneInsulin = events.filter((e) => e.type === 'insulin' && !kept.has(e.id)).map((e) => e.id);
+      if (goneInsulin.length) {
+        const { voiceRemoved = [] } = await local.get('voiceRemoved');
+        await local.set({ voiceRemoved: [...new Set([...voiceRemoved, ...goneInsulin])].slice(-500) });
+      }
+    }
     // Markers that dropped out of sync (two computers wrote the same day at once): send again.
     if (missing.length) await sendOut({ upsert: missing });
   });
@@ -522,7 +564,386 @@ async function doPoll() {
   const orphans = (await allPatients({ ...settings, demo: false })).filter((p) => !followed.has(p.accountId));
   if (orphans.length) await local.remove(orphans.map((p) => ptKey(p.pid)));
   await checkAlerts();
-  return paintBadge();
+  await syncVoice(settings);
+  await paintBadge();
+  learnAll(settings).catch(() => {});
+  return pushWidget(settings);
+}
+
+// ---- a copy in the person's own Google Drive (google.js) ----
+
+const DRIVE_EVERY_MS = 60 * 60e3;
+let driving = null;
+
+/**
+ * Markers deleted here or on another computer ({ id, t }). Kept with their time, so the Drive file
+ * of the marker's own month drops them, and forever in `deletedIds`, so no import brings them back.
+ */
+async function rememberDeleted(list) {
+  if (!list.length) return;
+  const { driveDeleted = [], deletedIds = [] } = await local.get(['driveDeleted', 'deletedIds']);
+  const known = new Set(driveDeleted.map((d) => d.id ?? d));
+  await local.set({
+    driveDeleted: [...driveDeleted, ...list.filter((d) => !known.has(d.id))].slice(-3000),
+    deletedIds: [...new Set([...deletedIds, ...list.map((d) => d.id)])].slice(-20000),
+  });
+  await markDirty(list.map((d) => d.t));
+}
+
+/** Months whose Drive file must be saved again because something in them changed here. */
+async function markDirty(times) {
+  const months = [...new Set((times || []).map((t) => (typeof t === 'number' ? t : Date.parse(t))).filter(Number.isFinite).map(monthOf))];
+  if (!months.length) return;
+  const { driveDirty = [] } = await local.get('driveDirty');
+  const next = [...new Set([...driveDirty, ...months])];
+  if (next.length !== driveDirty.length) await local.set({ driveDirty: next });
+}
+
+/** This computer's month in the Drive file's shape. */
+async function localMonth(month, settings) {
+  const [from, to] = monthRange(month);
+  const people = await allPatients({ ...settings, demo: false });
+  const names = Object.fromEntries(people.map((p) => [p.pid, p.name || '']));
+  const pids = [...new Set([...people.map((p) => p.pid), ...(await archivedPatients())])].filter((p) => !isDemo(p));
+  const readings = {};
+  for (const pid of pids) {
+    const recs = await loadReadings(pid, from, to - 1);
+    if (recs.length) readings[pid] = recs.map((r) => [r.t, r.mg, r.src]);
+  }
+  const { events = [], driveDeleted = [] } = await local.get(['events', 'driveDeleted']);
+  const thisMonth = monthOf(Date.now()) === month;
+  return {
+    app: 'su94r', version: 1, month, people: names, readings,
+    markers: events.filter((e) => e.t >= from && e.t < to && !isDemo(e.p)),
+    // Deletions go in the file of the deleted marker's own month (older entries have no time:
+    // they go in this month's).
+    deleted: driveDeleted.filter((d) => (typeof d === 'string' ? thisMonth : d.t >= from && d.t < to)).map((d) => d.id ?? d),
+    health: await getSamples({ from, to: to - 1 }).catch(() => []),
+  };
+}
+
+/** Saves to Drive at most hourly (or now with `force`). The first save sends every month there is. */
+function driveSave(force = false) {
+  driving ??= doDriveSave(force).finally(() => { driving = null; });
+  return driving;
+}
+
+async function doDriveSave(force) {
+  const settings = await getSettings();
+  if (!settings.driveBackup) return { skipped: 'off' };
+  const { driveState = {} } = await local.get('driveState');
+  if (!force && driveState.at && Date.now() - driveState.at < DRIVE_EVERY_MS) return { skipped: 'recent' };
+  // After a failure, wait longer each time (5 min, 10, 20 … up to 2 hours) before trying again.
+  if (!force && driveState.failures && Date.now() - (driveState.tried || 0) < Math.min(2 * 3600e3, 5 * 60e3 * 2 ** (driveState.failures - 1))) return { skipped: 'backoff' };
+  const failed = (e) => ({ ...driveState, error: e.message, code: e.code, tried: Date.now(), failures: (driveState.failures || 0) + 1 });
+  let token;
+  try {
+    token = await getToken(DRIVE_SCOPES, { interactive: false });
+  } catch (e) {
+    await local.set({ driveState: failed(e) });
+    return { ok: false, error: e.message, code: e.code };
+  }
+  const now = Date.now();
+  // This month (and last month in its first days), every month changed here since the last
+  // save, and, until the first full save is done, every month there is anything for.
+  const { driveDirty = [] } = await local.get('driveDirty');
+  const months = new Set([monthOf(now), ...driveDirty]);
+  if (new Date(now).getUTCDate() <= 2) months.add(monthOf(now - 3 * 864e5));
+  if (!driveState.full) {
+    let first = now;
+    for (const pid of await archivedPatients()) first = Math.min(first, (await firstReading(pid))?.t ?? now);
+    const { events = [] } = await local.get('events');
+    for (const e of events) first = Math.min(first, e.t);
+    first = Math.min(first, (await firstSample().catch(() => null))?.t ?? now);
+    const done = new Set(driveState.doneMonths || []);
+    for (let t = Date.UTC(new Date(first).getUTCFullYear(), new Date(first).getUTCMonth(), 1); t <= now; t = Date.UTC(new Date(t).getUTCFullYear(), new Date(t).getUTCMonth() + 1, 1)) {
+      if (!done.has(monthOf(t))) months.add(monthOf(t));
+    }
+  }
+  const order = [...months].sort();
+  const saved = [];
+  try {
+    for (const m of order) {
+      await saveMonth(token, await localMonth(m, settings));
+      saved.push(m);
+      // Progress is kept as it goes, so an interrupted first save resumes where it stopped.
+      if (!driveState.full) await local.set({ driveState: { ...driveState, doneMonths: [...new Set([...(driveState.doneMonths || []), ...saved])] } });
+    }
+  } catch (e) {
+    await afterSave(saved);
+    await local.set({ driveState: { ...failed(e), doneMonths: [...new Set([...(driveState.doneMonths || []), ...saved])] } });
+    return { ok: false, error: e.message, code: e.code };
+  }
+  await afterSave(saved);
+  await local.set({ driveState: { at: now, full: true, months: order, error: null, failures: 0 } });
+  return { ok: true, months: order };
+}
+
+/** After months were saved: they are no longer changed, and their deletions are in Drive. */
+async function afterSave(saved) {
+  if (!saved.length) return;
+  const done = new Set(saved);
+  const thisMonth = monthOf(Date.now());
+  const { driveDirty = [], driveDeleted = [] } = await local.get(['driveDirty', 'driveDeleted']);
+  await local.set({
+    driveDirty: driveDirty.filter((m) => !done.has(m)),
+    driveDeleted: driveDeleted.filter((d) => !done.has(typeof d === 'string' ? thisMonth : monthOf(d.t))),
+  });
+}
+
+/** Brings everything in Drive onto this computer: readings, markers (not deleted ones) and health. */
+async function driveRestore() {
+  const token = await getToken(DRIVE_SCOPES, { interactive: false });
+  return importMonths(await readAllMonths(token));
+}
+
+/** Adds su94r month files (from Drive or a file the person chose) to this computer. */
+async function importMonths(files) {
+  files = (files || []).filter((f) => f?.app === 'su94r');
+  let readings = 0, health = 0;
+  const markers = [];
+  const deleted = new Set();
+  // Whatever came in is saved to Drive again with the next save (a file chosen by hand may hold
+  // things Drive does not have yet).
+  await markDirty(files.map((f) => (/^\d{4}-\d{2}$/.test(f.month || '') ? monthRange(f.month)[0] : null)).filter(Boolean));
+  for (const f of files) {
+    for (const [pid, rows] of Object.entries(f.readings || {})) readings += await putRecords(rows.map(([t, mg, src]) => ({ p: pid, t, mg, src })));
+    health += (await putSamples(f.health || [])).added;
+    for (const id of f.deleted || []) deleted.add(id);
+    markers.push(...(f.markers || []));
+  }
+  const added = await serial(async () => {
+    const fresh = markers.filter((e) => validEvent(e) && !deleted.has(e.id));
+    const gone = await tombstoned(fresh).catch(() => new Set());
+    const { events = [], driveDeleted = [], deletedIds = [] } = await local.get(['events', 'driveDeleted', 'deletedIds']);
+    const have = new Set(events.map((e) => e.id));
+    const mine = new Set([...driveDeleted.map((d) => d.id ?? d), ...deletedIds]);
+    const add = [...new Map(fresh.filter((e) => !gone.has(e.id) && !have.has(e.id) && !mine.has(e.id)).map((e) => [e.id, e])).values()];
+    if (add.length) {
+      await local.set({ events: [...events, ...add].sort((a, b) => a.t - b.t) });
+      await sendOut({ upsert: add.filter((e) => e.t >= Date.now() - KEEP_DAYS * 864e5) });
+    }
+    return add.length;
+  });
+  return { months: files.length, readings, markers: added, health };
+}
+
+// ---- health connections: the phone inbox and Google Health (connectors.js) ----
+
+const GH_EVERY_MS = 30 * 60e3;
+let healthing = null;
+
+/**
+ * Collects from the phone inbox (every 5 minutes) and Google Health (every 30). One run at a
+ * time; "Read now" asked for during a run gets its own run right after.
+ */
+function healthSync(force = false) {
+  if (healthing && force) {
+    const after = healthing.then(() => doHealthSync(true), () => doHealthSync(true));
+    healthing = after.finally(() => { if (healthing === after) healthing = null; });
+    return after;
+  }
+  healthing ??= doHealthSync(force).finally(() => { healthing = null; });
+  return healthing;
+}
+
+async function doHealthSync(force) {
+  const settings = await getSettings();
+  const { connectors = {} } = await local.get('connectors');
+  const out = {};
+  const box = connectors.inbox;
+  if (box?.secret && box.key && settings.screenLink) {
+    let added = 0, skipped = 0, error = null;
+    try {
+      for (let round = 0; round < 40; round++) {
+        const r = await inboxItems(settings.screenLink, box.secret, box.key);
+        if (!r.items?.length) break;
+        const stored = [];
+        let stop = false;
+        for (const item of r.items) {
+          // A body no format matches is skipped (and acknowledged, so it cannot block the rest);
+          // a failure to store stops here, and nothing from it on is acknowledged.
+          let samples;
+          try { samples = parseBody(item.body).samples; } catch { skipped++; stored.push(item.id); continue; }
+          try {
+            added += (await putSamples(samples)).added;
+            await markDirty(samples.map((s) => s.t));
+            stored.push(item.id);
+          } catch (e) { error = `Could not store a reading here: ${e.message}`; stop = true; break; }
+        }
+        if (stored.length) await ackInbox(settings.screenLink, box.secret, box.key, stored);
+        if (stop || !r.more) break;
+      }
+    } catch (e) { error = e.message; }
+    out.inbox = { at: Date.now(), added: (box.added || 0) + added, skipped: (box.skipped || 0) + skipped, error };
+  }
+  const gh = connectors.googleHealth;
+  if (gh?.on && (force || !gh.at || Date.now() - gh.at >= GH_EVERY_MS)) {
+    const started = Date.now();
+    try {
+      const r = await pullGoogleHealth(gh.cursors || {});
+      const stored = await putSamples(r.samples);
+      await markDirty(r.samples.map((s) => s.t));
+      out.googleHealth = { at: started, cursors: r.cursors, added: (gh.added || 0) + stored.added, errors: r.errors, error: null, code: null };
+    } catch (e) {
+      out.googleHealth = { error: e.message, code: e.code, tried: started };
+    }
+  }
+  if (!Object.keys(out).length) return { ok: true, nothing: true };
+  // Apply to the connections as they are now: one removed meanwhile stays removed.
+  const { connectors: now = {} } = await local.get('connectors');
+  if (out.inbox && now.inbox?.secret === box.secret) now.inbox = { ...now.inbox, ...out.inbox };
+  if (out.googleHealth && now.googleHealth?.on) now.googleHealth = { ...now.googleHealth, ...out.googleHealth };
+  await local.set({ connectors: now });
+  return { ok: true, inbox: out.inbox?.error || null, googleHealth: out.googleHealth?.error || null };
+}
+
+// ---- the learner (learner.js): what insulin, food, exercise, sleep and the time of day do ----
+
+const LEARN_EVERY_MS = 6 * 3600e3;
+let learning = null;
+
+/**
+ * Re-learns each person's model when it is older than 6 hours. One run at a time; a forced run
+ * asked for while one is going ("Learn again now") runs right after it, so it really relearns.
+ */
+function learnAll(settings, force = false) {
+  if (learning && force) {
+    const after = learning.then(() => doLearn(settings, true), () => doLearn(settings, true));
+    learning = after.finally(() => { if (learning === after) learning = null; });
+    return after;
+  }
+  learning ??= doLearn(settings, force).finally(() => { learning = null; });
+  return learning;
+}
+
+async function doLearn(settings, force) {
+  const people = (await allPatients({ ...settings, demo: false })).filter((p) => !isDemo(p.pid));
+  if (!people.length) return [];
+  const now = Date.now();
+  const { events = [] } = await local.get('events');
+  // The vault holds the computer owner's own health data (and their local weather). It counts
+  // only for the person chosen on the vault page; until someone is chosen, for nobody.
+  const owner = settings.vaultOwner && people.some((p) => p.pid === settings.vaultOwner) ? settings.vaultOwner : null;
+  // Outdoor temperature (Settings → Heads-ups → Heat), so the learner can check what heat does.
+  const { weather } = await local.get('weather');
+  const heat = weather?.temps ? tempSamples(weather.temps) : [];
+  const done = [];
+  for (const p of people) {
+    const key = learnedKey(p.pid);
+    const old = (await local.get(key))[key];
+    if (!force && old?.fittedAt && now - old.fittedAt < LEARN_EVERY_MS) continue;
+    const points = wholeSeries(await loadReadings(p.pid, now - LEARN_DAYS * 864e5));
+    // One source per type and day, so a watch that reports through two routes is not counted twice.
+    const health = p.pid === owner ? preferOneSource(await getSamples({ from: now - LEARN_DAYS * 864e5, types: ['workout', 'steps', 'heartRate', 'sleepAnalysis'] }).catch(() => [])) : [];
+    const rapidPeak = (RAPID_PROFILES[settings.rapidInsulin] || RAPID_PROFILES.novorapid).peakMin;
+    const mine = p.pid === owner;
+    const model = await learn(points, events, p.pid, { now, health: mine ? [...health, ...heat] : [], rapidPeak });
+    if (!model) {
+      await local.set({ [key]: { fittedAt: now, empty: true, readings: points.length } });
+      continue;
+    }
+    // Last night's sleep rides along, so the estimate line knows about a short night.
+    model.recentHealth = mine ? [...health.filter((h) => h.type === 'sleepAnalysis' && h.t > now - 36 * 3600e3), ...heat.filter((h) => h.t > now - 3 * 3600e3 && h.t < now + 4 * 3600e3)] : [];
+    model.pid = p.pid;
+    await local.set({ [key]: model });
+    done.push(p.pid);
+  }
+  return done;
+}
+
+// ---- Windows desktop widget, drawn by the pin helper (pin-helper/pin-helper.ps1) ----
+
+const HELPER = 'http://127.0.0.1:47923';
+
+async function pushWidget(settings) {
+  if (LEGACY) return;
+  let ping;
+  try {
+    ping = await (await fetch(`${HELPER}/ping`, { cache: 'no-store', signal: AbortSignal.timeout(1500) })).json();
+  } catch { return; }   // no helper on this computer
+  if (!ping?.widget || !ping.code) return;
+  const { accounts = [] } = await local.get('accounts');
+  const demo = settings.demo && !accounts.length;
+  const people = (await allPatients({ ...settings, demo })).filter((p) => p.latest);
+  const now = Date.now();
+  const payload = {
+    code: ping.code,
+    // Which browser is sending: several browsers may feed one widget without overwriting each other.
+    sender: await deviceId(),
+    show: settings.desktopWidget !== false && !(await retired()),
+    people: people.slice(0, 6).map((p) => {
+      const series = mergeSeries(p.hist, p.live).filter((q) => q.t >= now - 3 * 3600e3);
+      // The reading closest to exactly 15 minutes before, as the mini window measures it.
+      const target = p.latest.t - 15 * 60e3;
+      const ref = series.filter((q) => Math.abs(q.t - target) <= 4 * 60e3).sort((a, b) => Math.abs(a.t - target) - Math.abs(b.t - target))[0];
+      const u = displayUnits(settings, p);
+      const step = Math.max(1, Math.ceil(series.length / 60));
+      return {
+        name: firstName(p.name),
+        mg: p.latest.mg,
+        trend: p.latest.trend ?? 0,
+        t: p.latest.t,
+        low: p.low ?? 70,
+        high: p.high ?? 180,
+        units: u,
+        delta: ref ? `${fmtDelta(p.latest.mg - ref.mg, u)} / 15 min` : '',
+        // Same urgent rule as the alarm and the board, so the red frame agrees with them.
+        urgent: p.latest.mg < 54 || p.latest.mg <= (settings.alerts?.urgentLow ?? 55),
+        spark: series.filter((_, i) => i % step === 0 || i === series.length - 1).map((q) => [q.t, q.mg]),
+      };
+    }),
+  };
+  try {
+    await fetch(`${HELPER}/widget`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: AbortSignal.timeout(2000) });
+  } catch { /* the helper is busy; next minute */ }
+}
+
+// ---- Alexa: doses said to Alexa come in, doses logged here go out (once a minute) ----
+
+async function syncVoice(settings) {
+  if (LEGACY || !settings.screenLink) return;
+  const { voiceAt = 0 } = await chrome.storage.session.get('voiceAt');
+  if (Date.now() - voiceAt < 55e3) return;
+  await chrome.storage.session.set({ voiceAt: Date.now() });
+  try {
+    // What to send is read inside the marker queue, and a deleted dose is never sent: not one
+    // deleted here, not one deleted on another computer (a tombstone in sync), not one whose
+    // deletion is still waiting to reach sync. Every one of those goes out as a deletion.
+    const out = await serial(async () => {
+      const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
+      const since = Date.now() - 48 * 3600e3;
+      const recent = events.filter((e) => e.type === 'insulin' && e.t >= since && !isDemo(e.p));
+      const tomb = await tombstoned(recent).catch(() => new Set());
+      const gone = new Set([...voiceRemoved, ...(syncQueue?.remove || []).map((e) => e.id), ...recent.filter((e) => tomb.has(e.id)).map((e) => e.id)]);
+      return {
+        markers: recent.filter((e) => !gone.has(e.id)).map(({ id, p, t, type, kind, amount, source }) => ({ id, p, t, type, kind, amount, source })),
+        removed: [...gone],
+      };
+    });
+    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed);
+    await serial(async () => {
+      const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
+      const sent = new Set(out.removed);
+      const have = new Set(events.map((e) => e.id));
+      const offered = (r.doses || []).filter((d) => validEvent(d) && d.type === 'insulin' && !have.has(d.id));
+      // A dose said to Alexa that another computer has already deleted stays deleted here,
+      // and the server is told on the next exchange.
+      const tomb = offered.length ? await tombstoned(offered).catch(() => new Set()) : new Set();
+      const waiting = new Set([...voiceRemoved.filter((id) => !sent.has(id)), ...(syncQueue?.remove || []).map((e) => e.id)]);
+      const fresh = offered.filter((d) => !tomb.has(d.id) && !waiting.has(d.id)).map((d) => ({ ...d, source: 'alexa' }));
+      const stillToTell = [...voiceRemoved.filter((id) => !sent.has(id)), ...offered.filter((d) => tomb.has(d.id)).map((d) => d.id)];
+      await local.set({ voiceRemoved: [...new Set(stillToTell)].slice(-500) });
+      if (fresh.length) {
+        // Inline (already inside the queue): add, then send to the other computers.
+        await local.set({ events: [...events, ...fresh].sort((a, b) => a.t - b.t) });
+        await sendOut({ upsert: fresh });
+      }
+    });
+    await local.remove('voiceError');
+  } catch (e) {
+    await local.set({ voiceError: { message: e.message, at: Date.now() } });
+  }
 }
 
 function plausible(v) {
@@ -687,6 +1108,7 @@ async function checkAlerts() {
   const { alertState = {}, accounts = [], accountAlerts = {} } = await local.get(['alertState', 'accounts', 'accountAlerts']);
   if (settings.demo && !accounts.length) return;
   const a = settings.alerts;
+  const quiet = Boolean(settings.quietDevices?.[await deviceId()]);
   const patients = await allPatients({ ...settings, demo: false });
   const now = Date.now();
   const many = patients.length > 1;
@@ -746,7 +1168,10 @@ async function checkAlerts() {
       if (hit) {
         const due = !s.active || now - (s.lastAt || 0) >= REPEAT_MIN[type] * 60e3;
         if (due && now >= (s.snoozeUntil || 0)) {
-          await notify(id, hit, { urgent: type === 'urgentLow', pid: p.pid });
+          // The urgent-low alarm (sticky, loud) only on the computers chosen for it; the
+          // others still show the notification, quietly.
+          const loud = type === 'urgentLow' && !quiet;
+          await notify(id, hit, { urgent: loud, sticky: loud, quietSound: type === 'urgentLow' && quiet, pid: p.pid });
           st[type] = { ...s, active: true, lastAt: now };
           changed = true;
         } else if (!s.active) {
@@ -775,7 +1200,7 @@ async function checkAlerts() {
   if (changed) await local.set({ alertState });
 }
 
-async function notify(id, { title, message }, { urgent = false, snooze = true, sticky = urgent } = {}) {
+async function notify(id, { title, message }, { urgent = false, snooze = true, sticky = urgent, quietSound = false } = {}) {
   const { alerts } = await getSettings();
   await chrome.notifications.create(`glucose|${id}`, {
     type: 'basic',
@@ -784,9 +1209,10 @@ async function notify(id, { title, message }, { urgent = false, snooze = true, s
     message,
     priority: urgent ? 2 : 1,
     requireInteraction: sticky,
-    ...(snooze ? { buttons: [{ title: urgent ? 'Snooze 15 min' : 'Snooze 1 hour' }] } : {}),
+    // The label follows the alert type (an urgent low snoozes 15 min even on a quiet computer).
+    ...(snooze ? { buttons: [{ title: urgent || id.endsWith('|urgentLow') ? 'Snooze 15 min' : 'Snooze 1 hour' }] } : {}),
   });
-  if (alerts.sound === 'all' || (alerts.sound === 'urgent' && urgent)) beep(urgent);
+  if (!quietSound && (alerts.sound === 'all' || (alerts.sound === 'urgent' && urgent))) beep(urgent);
 }
 
 async function testAlert() {
@@ -825,6 +1251,7 @@ chrome.notifications.onButtonClicked.addListener(async (nid) => {
 });
 
 chrome.notifications.onClicked.addListener((nid) => {
+  if (careClicked(nid)) return;
   if (!nid.startsWith('glucose|')) return;
   chrome.notifications.clear(nid);
   const [, pid] = nid.split('|');
@@ -885,5 +1312,6 @@ async function demoPoll() {
     };
   }
   await local.set(writes);
-  return paintBadge();
+  await paintBadge();
+  return pushWidget(await getSettings());
 }

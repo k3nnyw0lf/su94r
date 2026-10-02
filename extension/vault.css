@@ -1,0 +1,54 @@
+/* Health vault page: builds on options.css. */
+.page.wide { max-width: 760px; }
+
+.findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.findings li { padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; line-height: 1.45; }
+.findings li .tag { font-size: 11px; color: var(--muted); margin-left: 6px; }
+.check-line { font-size: 13px; color: var(--muted); }
+.check-line strong { color: var(--fg); }
+.check-line.good strong { color: var(--ok); }
+
+.curves svg { width: 100%; height: 150px; display: block; }
+.curves .axis { stroke: var(--line); stroke-width: 1; }
+.curves text { fill: var(--muted); font-size: 10px; }
+.curves .curve { fill: none; stroke-width: 2.2; }
+.curves .c-rapid { stroke: #2f81f7; }
+.curves .c-short { stroke: #a371f7; }
+.curves .c-intermediate { stroke: #d29922; }
+.curves .legend { font-size: 11px; }
+
+.connectors { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.connector { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.connector .name { font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.connector .name .icon { font-size: 18px; }
+.connector .what { font-size: 12px; color: var(--muted); flex: 1; }
+.connector .state { font-size: 12px; }
+.connector .state.on { color: var(--ok); }
+.connector .state.warn { color: var(--warn); }
+.connector .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.connector .actions button { font-size: 12px; padding: 4px 10px; }
+.connector details { font-size: 12px; }
+.connector details ol { margin: 6px 0 0; padding-left: 18px; }
+.connector code, .connector .copy { font-size: 11px; word-break: break-all; }
+
+.add-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+.add-grid .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.unit-input { display: flex; align-items: center; gap: 6px; }
+.unit-input input { flex: 1; min-width: 0; }
+.unit { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; }
+.tile .label { font-size: 12px; color: var(--muted); }
+.tile .value { font-size: 20px; font-weight: 650; }
+.tile .when { font-size: 11px; color: var(--muted); }
+.tile svg { width: 100%; height: 28px; margin-top: 4px; }
+.tile svg path { fill: none; stroke: var(--accent); stroke-width: 1.6; }
+
+.samples { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+.samples th, .samples td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); }
+.samples td:last-child { text-align: right; }
+.samples button { font-size: 11px; padding: 2px 8px; }
+
+.foot a { color: var(--muted); }
+.sub-h { font-size: 13px; margin: 6px 0 0; }

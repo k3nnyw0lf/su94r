@@ -3,11 +3,14 @@ import {
   sensorStatus, fmtDuration, EVENT_TYPES, markerLabel, INJECTION_SITES,
 } from './glucose.js';
 import { loadReadings, wholeSeries } from './archive.js';
-import { ptKey, allPatients, VIEW_DEFAULTS, firstName } from './store.js';
+import { ptKey, learnedKey, allPatients, VIEW_DEFAULTS, firstName } from './store.js';
 import { insulinOnBoard, lastDose, doubleDoseWarning, medDuplicateWarning, kindWord, BOLUS_KINDS } from './insulin.js';
 import { insulinKindFromName } from './meds.js';
 import { watchContext, contextAlive, isInvalidated, stashPending, takePending, reloadIntoCurrentVersion } from './lifecycle.js';
 import { addEvents, removeEvents } from './events.js';
+import { forecast, trustworthy, doseEffect, trustedHorizon } from './learner.js';
+import { compressionLows } from './recovery.js';
+import { preparePhoto, estimateCarbs, readPen } from './vision.js';
 import { isLegacy } from './handover.js';
 
 const STALE_MS = 10 * 60e3;
@@ -20,7 +23,8 @@ const ext = globalThis.chrome?.storage ? chrome : null;
 const ui = Object.fromEntries(
   ['card', 'graph', 'value', 'arrow', 'units', 'delta', 'ago', 'stats', 'sensor', 'overlay', 'bar', 'status',
     'add', 'tiny', 'pin', 'addPanel', 'addTypes', 'addDetail', 'addIcon', 'addAmount', 'addWhen',
-    'dose', 'addWarn', 'addAt', 'addKind', 'addSite', 'addMed', 'addAtLabel', 'markRow', 'markText', 'markDelete']
+    'dose', 'addWarn', 'addAt', 'addKind', 'addSite', 'addMed', 'addAtLabel', 'markRow', 'markText', 'markDelete',
+    'addPhoto', 'addPhotoFile', 'addInfo']
     .map((id) => [id, document.getElementById(id)]),
 );
 const $ = (id) => ui[id];
@@ -30,6 +34,7 @@ const rangeButtons = [...card.querySelectorAll('.ranges button')];
 
 let data = {
   hist: [], live: [], latest: null, patient: null, state: null, sensor: null, events: [],
+  learned: null,   // what the learner worked out for this person (learner.js)
   settings: withDefaults(),
 };
 let pid = new URLSearchParams(location.search).get('p');
@@ -105,8 +110,16 @@ function renderGraph() {
   const now = Date.now();
   const hours = data.settings.hours;
   const series = isLong() ? (longSeries || recent()) : recent();
-  const proj = data.settings.projection && !isLong() && fresh() ? project(series, data.latest) : null;
-  const to = proj ? proj.t : now;
+  // The learned estimate line when the learner has earned trust (it beat plain guesses on data
+  // it did not learn from); otherwise the plain 20-minute straight line.
+  const model = data.learned;
+  const showAhead = data.settings.projection && !isLong() && fresh();
+  const est = showAhead && trustworthy(model)
+    ? forecast(series.filter((p) => p.t > data.latest.t - 40 * 60e3), data.events, owner(), model,
+      { latest: data.latest, horizonMin: Math.round(Math.min(trustedHorizon(model), Math.max(30, hours * 20))), stepMin: 5, health: model.recentHealth || [] })
+    : null;
+  const proj = showAhead && !est ? project(series, data.latest) : null;
+  const to = est ? est.points[est.points.length - 1].t : proj ? proj.t : now;
   const from = now - hours * 3600e3;
   const pts = series.filter((p) => p.t >= from - 10 * 60e3);
   const shown = pts.filter((p) => p.t >= from);
@@ -114,7 +127,7 @@ function renderGraph() {
   const padL = 2, padR = 28, padT = 6, padB = 14;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
-  const values = [...shown.map((p) => p.mg), ...(proj ? [proj.mg] : [])];
+  const values = [...shown.map((p) => p.mg), ...(proj ? [proj.mg] : []), ...(est ? est.points.map((p) => p.mg) : [])];
   const maxV = Math.max(...values, high() + 30, 220);
   const minV = Math.min(...values, 50);
   const yMin = Math.max(20, Math.floor((minV - 10) / 10) * 10);
@@ -123,7 +136,7 @@ function renderGraph() {
   const y = (v) => padT + (1 - (v - yMin) / (yMax - yMin)) * plotH;
 
   graph.append(el('rect', { class: 'band', x: padL, y: y(high()), width: plotW, height: y(low()) - y(high()) }));
-  if (proj) graph.append(el('rect', { class: 'future', x: x(now), y: padT, width: x(to) - x(now), height: plotH }));
+  if (proj || est) graph.append(el('rect', { class: 'future', x: x(now), y: padT, width: x(to) - x(now), height: plotH }));
   for (const v of [low(), high()]) {
     graph.append(el('line', { class: 'grid', x1: padL, x2: padL + plotW, y1: y(v), y2: y(v) }));
     graph.append(el('text', { x: W - padR + 4, y: y(v) + 3.5 }, fmt(v)));
@@ -180,6 +193,16 @@ function renderGraph() {
     g.append(el('path', { class: `seg ${s.c}`, d }));
   }
 
+  // Likely compression lows (an overnight dip that bounced back with nothing eaten): marked
+  // with a ? so a pressure dip is not mistaken for a real low later. Alarms still fire on every low.
+  for (const c of compressionLows(pts, data.events, owner(), { low: low() })) {
+    if (c.end < from) continue;
+    const cx = x((c.start + c.end) / 2);
+    const mark = el('text', { class: 'compress', x: cx, y: Math.min(padT + plotH - 2, y(c.nadir) + 14), 'text-anchor': 'middle' }, '?');
+    mark.append(el('title', {}, 'Likely pressure on the sensor (a compression low): a sudden overnight dip that bounced back by itself, with nothing eaten. Alarms still sound for every low.'));
+    graph.append(mark);
+  }
+
   const last = data.latest;
   if (proj) {
     const c = cat(proj.mg);
@@ -187,6 +210,21 @@ function renderGraph() {
     graph.append(el('circle', { class: `proj-end ${c}`, cx: x(proj.t), cy: y(proj.mg), r: 3.5 }));
     const ly = y(proj.mg) + (proj.mg > last.mg ? -7 : 13);
     graph.append(el('text', { class: 'proj-label', x: x(proj.t), y: ly, 'text-anchor': 'end' }, `~${fmt(proj.mg)}`));
+  }
+  if (est) {
+    // Shaded: where it will likely be (8 times in 10). Dashed: the learner's best estimate.
+    const line = [{ t: last.t, mg: last.mg, lo: last.mg, hi: last.mg }, ...est.points];
+    const xy = (t, v) => `${x(t).toFixed(1)},${y(Math.min(yMax, Math.max(yMin, v))).toFixed(1)}`;
+    const band = el('polygon', { class: `est-band ${cat(est.points[est.points.length - 1].mg)}`, points: [...line.map((p) => xy(p.t, p.hi)), ...[...line].reverse().map((p) => xy(p.t, p.lo))].join(' ') });
+    const end = est.points[est.points.length - 1];
+    const mins = Math.round((end.t - last.t) / 60e3);
+    band.append(el('title', {}, `Learned from your own data: about ${fmt(end.mg)} in ${mins} min (likely ${fmt(end.lo)}–${fmt(end.hi)}). An estimate, not a dosing instruction.`));
+    graph.append(band);
+    const c = cat(end.mg);
+    graph.append(el('path', { class: `proj est ${c}`, d: line.map((p, i) => `${i ? 'L' : 'M'}${xy(p.t, p.mg)}`).join('') }));
+    graph.append(el('circle', { class: `proj-end ${c}`, cx: x(end.t), cy: y(end.mg), r: 3.5 }));
+    const ly = y(end.mg) + (end.mg > last.mg ? -7 : 13);
+    graph.append(el('text', { class: 'proj-label', x: x(end.t), y: ly, 'text-anchor': 'end' }, `~${fmt(end.mg)}`));
   }
   if (last && last.t >= from) {
     graph.append(el('circle', { class: `dot now ${cat(last.mg)}`, cx: x(last.t), cy: y(last.mg), r: 4.5 }));
@@ -395,7 +433,7 @@ function render() {
 
 // ---- data plumbing ----
 
-const keys = () => [ptKey(pid), 'settings', 'views', 'events'];
+const keys = () => [ptKey(pid), learnedKey(pid), 'settings', 'views', 'events'];
 
 // One patient record (pt:<id>) plus global settings and this window's own view choices.
 function absorb(got) {
@@ -411,6 +449,7 @@ function absorb(got) {
   if ('settings' in got) globalSettings = withDefaults(got.settings);
   if ('views' in got) view = { ...VIEW_DEFAULTS, ...((got.views || {})[pid] || {}) };
   if ('events' in got) data.events = got.events || [];
+  if (learnedKey(pid) in got) data.learned = got[learnedKey(pid)] || null;
   data.settings = { ...globalSettings, ...view };
 }
 
@@ -526,6 +565,7 @@ function openAdd(open, at = null) {
   confirmBig = false;
   confirmDup = false;
   $('addWarn').hidden = true;
+  $('addInfo').hidden = true;
   $('addAmount').disabled = false;
   $('addAt').hidden = addAt == null;
   if (addAt != null) $('addAt').textContent = `At ${whenLabel(addAt)}:`;
@@ -552,7 +592,13 @@ function showMark(ev) {
   shownMark = ev;
   $('addTypes').hidden = true;
   $('markRow').hidden = false;
-  $('markText').textContent = `${EVENT_TYPES[ev.type]?.icon || '•'} ${markerLabel(ev)} · ${whenLabel(ev.t)}`;
+  // For insulin, what the learner says this dose does: how much, when strongest, when done.
+  const eff = ev.type === 'insulin' && data.learned ? doseEffect(ev, data.learned) : null;
+  const effText = eff?.learned && trustworthy(data.learned)
+    ? ` · lowers about ${fmt(eff.total)} (likely ${fmt(eff.low)}–${fmt(eff.high)}), strongest ${clockLabel(eff.peakAt, true)}, done ${clockLabel(eff.endAt, true)}${eff.toCome >= 5 ? `, ${fmt(eff.toCome)} still to come` : ''}`
+    : '';
+  $('markText').textContent = `${EVENT_TYPES[ev.type]?.icon || '•'} ${markerLabel(ev)} · ${whenLabel(ev.t)}${effText}`;
+  $('markText').title = $('markText').textContent;
 }
 
 $('markDelete').addEventListener('click', async () => {
@@ -589,6 +635,8 @@ for (const b of $('addPanel').querySelectorAll('[data-type]')) {
     const lastSite = data.events.filter((x) => x.p === owner() && x.type === 'insulin' && x.site).sort((a, b) => b.t - a.t)[0];
     $('addSite').options[0].text = lastSite ? `Site (last: ${$('addSite').querySelector(`option[value="${lastSite.site}"]`)?.text || lastSite.site})` : 'Site';
     $('addSite').title = lastSite ? `Last site: ${INJECTION_SITES[lastSite.site] || lastSite.site}, ${whenLabel(lastSite.t)}` : 'Injection site (optional)';
+    $('addPhoto').hidden = addType !== 'meal' && addType !== 'insulin';
+    $('addInfo').hidden = true;
     $('addWhen').value = '0';
     $('addWhen').hidden = addAt != null;
     $('addAtLabel').hidden = addAt == null;
@@ -603,6 +651,41 @@ for (const id of ['addAmount', 'addKind', 'addWhen']) {
   }
 }
 $('addPanel').addEventListener('keydown', (e) => { if (e.key === 'Escape') openAdd(false); });
+
+// Photo: a meal → an estimated carb range; a pen's dose window → the units it shows. The number
+// only fills the field to check; nothing is saved until Add, and nothing suggests a dose.
+async function fromPhoto(file) {
+  if (!file || !ext || (addType !== 'meal' && addType !== 'insulin')) return;
+  const kind = addType;
+  const info = $('addInfo');
+  info.hidden = false;
+  info.textContent = kind === 'meal' ? 'Looking at the meal…' : 'Reading the pen…';
+  try {
+    const { ai: cfg = {} } = await chrome.storage.local.get('ai');
+    if (!cfg.provider) throw new Error('Connect an AI in Settings (AI analysis) to use photos.');
+    const photo = await preparePhoto(file);
+    if (addType !== kind) return;
+    if (kind === 'meal') {
+      const r = await estimateCarbs(cfg, photo);
+      $('addAmount').value = String(r.best);
+      info.textContent = `Photo estimate: about ${r.best} g carbs (likely ${r.low}–${r.high} g, ${r.confidence} confidence)${r.items.length ? `: ${r.items.slice(0, 4).map((i) => i.name).join(', ')}` : ''}. Check it before adding.`;
+    } else {
+      const r = await readPen(cfg, photo);
+      if (r.units == null) throw new Error(`Could not read the pen${r.note ? `: ${r.note}` : ''}. Type the units instead.`);
+      $('addAmount').value = String(r.units);
+      info.textContent = `The pen shows ${r.units} units (${r.confidence} confidence). Check it before adding.`;
+    }
+    $('addAmount').dispatchEvent(new Event('input'));
+  } catch (err) {
+    info.textContent = err.message;
+  }
+}
+$('addPhoto').addEventListener('click', () => $('addPhotoFile').click());
+$('addPhotoFile').addEventListener('change', (e) => { fromPhoto(e.target.files?.[0]); e.target.value = ''; });
+$('addPanel').addEventListener('paste', (e) => {
+  const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+  if (item) { e.preventDefault(); fromPhoto(item.getAsFile()); }
+});
 $('addPanel').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (!addType) return;

@@ -19,7 +19,8 @@ function memStore() {
     async recent(pid, now = Date.now()) {
       return [...rows.values()].filter((d) => !d.deleted && now - d.t < 48 * 3600e3 && (!pid || d.pid === pid)).sort((a, b) => b.t - a.t);
     },
-    async upsert(list) { for (const d of list) rows.set(d.id, { ...rows.get(d.id), ...d, t: new Date(d.t).getTime(), deleted: false }); return list.length; },
+    // Like the real store: an update never clears a deletion.
+    async upsert(list) { for (const d of list) rows.set(d.id, { ...rows.get(d.id), ...d, t: new Date(d.t).getTime(), deleted: rows.get(d.id)?.deleted || false }); return list.length; },
     async markDeleted(ids) { for (const id of ids) if (rows.has(id)) rows.get(id).deleted = true; },
   };
 }
@@ -139,6 +140,14 @@ describe('dose exchange with su94r Mini', () => {
     expect(r.doses).toEqual([]);
     expect(store.rows.get('v1').deleted).toBe(true);
     expect(store.rows.get('other-pc').deleted).toBe(false);   // not in this computer's list, but not deleted
+  });
+  it('a computer that has not heard about a deletion cannot undo it', async () => {
+    await store.upsert([{ id: 'v1', pid: 'p1', t: Date.now() - 10 * 60e3, kind: 'short', amount: 4, source: 'alexa' }]);
+    await sync({ markers: [], removed: ['v1'] });
+    // Another computer still has it and sends it again.
+    const r = await (await sync({ markers: [{ id: 'v1', p: 'p1', t: Date.now() - 10 * 60e3, type: 'insulin', kind: 'short', amount: 4, source: 'alexa' }] })).json();
+    expect(store.rows.get('v1').deleted).toBe(true);
+    expect(r.doses).toEqual([]);
   });
   it('needs the display key', async () => {
     expect((await sync({ markers: [] }, 'wrong')).status).toBe(401);

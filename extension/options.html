@@ -30,6 +30,8 @@
       <ul id="people" class="people"></ul>
       <div class="row-left wrap">
         <button id="open-board" type="button" class="primary">Open the board (everyone)</button>
+        <button id="open-vault" type="button" class="ghost">Health vault and what it learned</button>
+        <button id="open-report" type="button" class="ghost">Doctor report</button>
       </div>
     </section>
 
@@ -157,6 +159,49 @@
       <label class="check"><input id="sensorReminder" type="checkbox"> Remind me 24 hours before it ends</label>
     </section>
 
+    <section class="panel" id="supplies-panel">
+      <h2>Pens, vials and sensors</h2>
+      <p class="hint">Add the pen or vial you are using and the day you opened it. su94r counts the units you log (plus priming) and tells you before it runs out or reaches its days-after-opening limit. Check your own leaflet: you can change the units and days.</p>
+      <p id="owner-needed" class="hint warn" hidden>First choose who uses this computer, on the <a href="vault.html">health vault</a> page. Pens, calendar and walk heads-ups follow that person's glucose.</p>
+      <ul id="pens" class="markers"></ul>
+      <div class="row-left wrap">
+        <select id="pen-preset" aria-label="Pen or vial"></select>
+        <select id="pen-kind" aria-label="Insulin type" hidden><option value="rapid">Rapid</option><option value="short">Regular (R)</option><option value="intermediate">NPH</option><option value="basal">Long-acting</option><option value="mix">Pre-mixed</option></select>
+        <label class="field inline"><span>Opened</span><input id="pen-opened" type="date"></label>
+      </div>
+      <div class="row-left wrap">
+        <label class="field inline"><span>Units in it</span><input id="pen-units" type="number" min="10" max="3000" step="1" class="num"></label>
+        <label class="field inline"><span>Days once opened</span><input id="pen-days" type="number" min="1" max="120" step="1" class="num"></label>
+        <button id="pen-add" type="button" class="primary">Add</button>
+      </div>
+      <div class="row-left wrap">
+        <label class="field inline"><span>Spare sensors at home</span><input id="sensors-left" type="number" min="0" max="99" step="1" class="num" placeholder="?"></label>
+        <label class="field inline"><span>Remind me to reorder at</span><input id="reorder-at" type="number" min="0" max="10" step="1" class="num"></label>
+      </div>
+      <p id="supplies-msg" class="hint"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Heads-ups</h2>
+      <p class="hint"><strong>Calendar:</strong> paste your calendar's private iCal link (Google Calendar → Settings → your calendar → "Secret address in iCal format"). Before a meeting, a drive or the gym, su94r tells you if you're low, falling toward low, or high. The link stays on this computer.</p>
+      <div class="row-left wrap">
+        <input id="calendar-url" type="url" class="grow" placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" aria-label="Calendar iCal link">
+        <button id="save-calendar" type="button" class="primary">Save</button>
+      </div>
+      <p id="calendar-msg" class="hint"></p>
+      <p class="hint"><strong>Heat:</strong> where you are, for hot-day notes about insulin and so the learner can check what heat does to you (Open-Meteo, free, no sign-up).</p>
+      <div class="row-left wrap">
+        <input id="place" type="text" class="grow" placeholder="Naples, FL" aria-label="City">
+        <button id="save-place" type="button" class="primary">Find</button>
+      </div>
+      <p id="place-msg" class="hint"></p>
+      <label class="check"><input id="heatNote" type="checkbox"> Tell me on hot days</label>
+      <label class="check"><input id="sitNudge" type="checkbox"> When I've been at this computer a long time and I'm running high, suggest a short walk</label>
+      <label class="field inline"><span>After</span>
+        <select id="sitMinutes"><option value="45">45 minutes</option><option value="60">1 hour</option><option value="90">1½ hours</option><option value="120">2 hours</option></select>
+      </label>
+    </section>
+
     <section class="panel">
       <h2>Window</h2>
       <label class="field">
@@ -177,11 +222,33 @@
     <section class="panel">
       <h2>Keep it on top</h2>
       <p id="helper-status" class="hint">Checking for the pin helper…</p>
+      <label class="check"><input id="desktopWidget" type="checkbox"> Show the <strong>desktop widget</strong>: a small rounded square, always on top, with the reading, trend and a 3-hour line. Drag it anywhere; right-click to resize or hide it for an hour. (Windows, with the pin helper.)</label>
       <p class="hint">On Windows, the optional <strong>pin helper</strong> keeps the mini window above every other app for good, even after a restart. Without it, the pin button uses Chrome's float, which needs one click each time. To install it, run <code>pin-helper\install.ps1</code> from the extension folder (right-click → Run with PowerShell).</p>
     </section>
 
     <section class="panel">
+      <h2>Alexa and screens</h2>
+      <p class="hint">Your own su94r server lets Alexa log and read doses ("Alexa, tell my sugar 4 units of R insulin") and puts your graph on a fridge, TV, tablet or widget. Paste its big-screen link once (it looks like <code>https://…/d/…</code>; see docs/tv-and-alexa.md).</p>
+      <div class="row-left wrap">
+        <input id="screen-link" type="url" class="grow" placeholder="https://su94r-proxy.example.workers.dev/d/your-key" aria-label="Big-screen link">
+        <button id="save-screen-link" type="button" class="primary">Save</button>
+      </div>
+      <p id="voice-status" class="hint"></p>
+      <details id="screens-box">
+        <summary>Screens and widgets</summary>
+        <p class="hint">On the fridge, TV or tablet, open <strong>su94r.com/tv</strong> in its web browser. It shows a 6-character code: type it here and give the screen a name.</p>
+        <div class="row-left wrap">
+          <input id="pair-code" type="text" maxlength="8" placeholder="Code, e.g. K7Q-4MD" aria-label="Screen code" autocomplete="off">
+          <input id="pair-name" type="text" class="grow" placeholder="Name, e.g. Kitchen fridge" aria-label="Screen name">
+          <button id="pair-screen" type="button" class="primary">Add screen</button>
+        </div>
+        <ul id="screens" class="markers"></ul>
+      </details>
+    </section>
+
+    <section class="panel">
       <h2>Your computers</h2>
+      <p class="hint"><strong>Urgent-low alarm:</strong> tick the computers that should sound the loud alarm for an urgent low. The others still show it, quietly. New computers start ticked.</p>
       <p class="hint">Markers, doses, your medicine list and alert settings sync between every Chrome browser signed in to the same Google account with Chrome sync on, so a dose logged on one computer counts on the others. Each computer signs in to LibreLinkUp once (sign-ins stay on the device). Edge syncs with other Edge browsers, not with Chrome.</p>
       <label class="field inline"><span>This computer</span><input id="deviceName" type="text" class="grow" placeholder="Name it, e.g. Office laptop"></label>
       <p id="sync-status" class="hint"></p>
@@ -244,5 +311,6 @@
     </footer>
   </main>
   <script type="module" src="options.js"></script>
+  <script type="module" src="options-care.js"></script>
 </body>
 </html>

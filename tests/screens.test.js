@@ -111,3 +111,19 @@ describe('pairing a screen with a code', () => {
     expect(normalCode('K7Q-0MD')).toBeNull();
   });
 });
+
+describe('glance feed for widget apps', () => {
+  const pair = async () => {
+    const start = await json(call('pair/start', { body: { kind: 'widget' } }));
+    await call('pair/claim', { key: 'tv-key-123', body: { code: start.code, name: 'Phone' } });
+    return (await json(call('pair/poll', { body: { secret: start.secret } }))).token;
+  };
+  it('reads with the token in the link (KWGT cannot send headers)', async () => {
+    const token = await pair();
+    const res = await handleCgm('screen/glance', new Request(`https://cgm.test/screen/glance?token=${token}`), ENV, { screens });
+    // The fake LibreLinkUp here has no current reading, so the feed says so instead of inventing one.
+    expect(res.status).toBe(404);
+    expect((await res.json()).error).toMatch(/no reading/);
+    expect((await handleCgm('screen/glance', new Request('https://cgm.test/screen/glance?token=bad'), ENV, { screens })).status).toBe(401);
+  });
+});

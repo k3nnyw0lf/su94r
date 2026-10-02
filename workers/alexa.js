@@ -54,16 +54,36 @@ export function describePerson(p, { many, now = Date.now() } = {}) {
   return `${lead} ${spokenValue(l.mg, p.units)}${trend ? ` and ${trend}` : ''}, ${minutesAgo(l.t)}.`;
 }
 
+/** The last 3 hours as an APL vector graphic: the target band and the line (800 × 200). */
+export function sparkGraphic(p, now = Date.now()) {
+  const pts = (p.history || []).filter((q) => q.t >= now - 3 * 3600e3).sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return null;
+  const W = 800, H = 200, lo = 40, hi = Math.max(300, ...pts.map((q) => q.mg));
+  const x = (t) => ((t - (now - 3 * 3600e3)) / (3 * 3600e3)) * W;
+  const y = (v) => H - ((Math.min(hi, Math.max(lo, v)) - lo) / (hi - lo)) * H;
+  const line = pts.map((q, i) => `${i ? 'L' : 'M'}${x(q.t).toFixed(0)},${y(q.mg).toFixed(0)}`).join(' ');
+  const band = `M0,${y(p.high).toFixed(0)} L${W},${y(p.high).toFixed(0)} L${W},${y(p.low).toFixed(0)} L0,${y(p.low).toFixed(0)} Z`;
+  return {
+    type: 'AVG', version: '1.2', width: W, height: H,
+    items: [
+      { type: 'path', pathData: band, fill: '#3fb95026' },
+      { type: 'path', pathData: line, stroke: '#f2f5f8', strokeWidth: 6, fill: 'transparent', strokeLineCap: 'round', strokeLineJoin: 'round' },
+    ],
+  };
+}
+
 function aplDirective(people) {
   const p = people[0];
   const l = p.latest;
   const color = !l || Date.now() - l.t > STALE_MS ? '#8b949e' : l.mg < p.low ? '#ff5d55' : l.mg > p.high ? '#e3a33b' : '#3fb950';
+  const spark = sparkGraphic(p);
   return {
     type: 'Alexa.Presentation.APL.RenderDocument',
     token: 'glucose',
     document: {
       type: 'APL',
       version: '2023.3',
+      ...(spark ? { graphics: { spark } } : {}),
       mainTemplate: {
         items: [{
           type: 'Container',
@@ -75,6 +95,7 @@ function aplDirective(people) {
             { type: 'Text', text: people.length > 1 ? p.name : 'Glucose', fontSize: '36dp', color: '#8b949e' },
             { type: 'Text', text: l ? shownValue(l.mg, p.units) : '—', fontSize: '200dp', fontWeight: 'bold', color },
             { type: 'Text', text: l ? `${p.units} · ${TREND_WORDS[l.trend] || ''} · ${minutesAgo(l.t)}` : '', fontSize: '32dp', color: '#f2f5f8' },
+            ...(spark ? [{ type: 'VectorGraphic', source: 'spark', width: '80vw', height: '22vh', scale: 'fill', paddingTop: '16dp' }] : []),
             ...(people.length > 1 ? [{
               type: 'Text',
               text: people.slice(1).map((q) => `${q.firstName || q.name} ${q.latest ? shownValue(q.latest.mg, q.units) : '—'}`).join('   ·   '),
