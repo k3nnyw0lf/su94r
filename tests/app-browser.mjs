@@ -7,7 +7,9 @@
 import http from 'node:http';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
-import { handleCgm } from '../workers/cgm-core.js';
+import { handleCgm, resetCaches } from '../workers/cgm-core.js';
+import { sha256 } from '../workers/screens.js';
+import { NIGHT_DEFAULTS } from '../workers/night.js';
 import { valid } from '../workers/doses.js';
 import proxy from '../workers/proxy.js';
 
@@ -18,6 +20,7 @@ const now = Date.now(), MIN = 60e3, DAY = 864e5;
 const fmt = (t) => { const d = new Date(t); let h = d.getUTCHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12; return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${h}:${String(d.getUTCMinutes()).padStart(2, '0')}:00 ${ap}`; };
 const curve = (t) => { const h = new Date(t).getHours() + new Date(t).getMinutes() / 60; return Math.round(115 + [8, 13, 19.5].reduce((s, m) => s + 70 * Math.exp(-(((h - m - 1) / 1.1) ** 2)), 0) - 30 * Math.exp(-(((h - 4) / 1.5) ** 2)) + 12 * Math.sin(t / 7e5)); };
 
+let forceLow = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   const u = new URL(url);
@@ -25,7 +28,7 @@ globalThis.fetch = async (url, init) => {
   const res = (b) => new Response(JSON.stringify(b), { headers: { 'Content-Type': 'application/json' } });
   if (u.pathname === '/llu/auth/login') return res({ status: 0, data: { user: { id: 'user-1' }, authTicket: { token: 'a.eyJpZCI6InVzZXItMSJ9.c', expires: 1900000000 } } });
   const m = (t, mg, trend = 4) => ({ FactoryTimestamp: fmt(t), ValueInMgPerDl: mg, GlucoseUnits: 1, TrendArrow: trend });
-  const conn = { patientId: 'p1', firstName: 'Alex', lastName: 'T', targetLow: 70, targetHigh: 180, glucoseMeasurement: m(now - 2 * MIN, curve(now - 2 * MIN)), sensor: { sn: 'X', a: Math.round((now - 6 * DAY) / 1000) } };
+  const conn = { patientId: 'p1', firstName: 'Alex', lastName: 'T', targetLow: 70, targetHigh: 180, glucoseMeasurement: forceLow ? m(Date.now() - MIN, 62, 2) : m(now - 2 * MIN, curve(now - 2 * MIN)), sensor: { sn: 'X', a: Math.round((now - 6 * DAY) / 1000) } };
   if (u.pathname === '/llu/connections') return res({ status: 0, data: [conn] });
   const graphData = [];
   for (let t = now - 12 * 3600e3; t < now - 5 * MIN; t += 15 * MIN) graphData.push(m(t, curve(t)));
@@ -56,7 +59,9 @@ const screens = {
   async allowLog(id, canLog) { const r = rows.get(id); if (!r || r.kind !== 'screen' || r.role !== 'family') return false; r.can_log = canLog === true; return true; },
   async sweep() {},
 };
-const deps = { screens, history, store: doses, forecasts, night: { ready: false }, telegram: { ready: false } };
+let nightRow = { id: 1, ...NIGHT_DEFAULTS, self_topic: 's-topic', care_topic: 'c-topic', treat_plan: '4 glucose tabs, then recheck', state: {} };
+const night = { ready: true, async get() { return structuredClone(nightRow); }, async patch(p) { nightRow = { ...nightRow, ...structuredClone(p) }; }, async claimTick() { return false; } };
+const deps = { screens, history, store: doses, forecasts, night, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -174,6 +179,31 @@ checks.familyLogsWhenAllowed = doseRows.some((d) => d.source === 'phone' && d.ki
 await p2.waitForSelector('.list .src >> text=phone · Mom');
 checks.listSaysWho = true;
 await p2.screenshot({ path: path.join(OUT, 'app-14-family-logs.png'), fullPage: true });
+
+// A low: an alert's "I'm OK" carried in from a notification, then "I treated it".
+forceLow = true;
+resetCaches();
+const ackToken = 'f'.repeat(32);
+nightRow.state = { p1: { since: Date.now() - 10 * MIN, notified: Date.now() - 2 * MIN, count: 1, ackHash: await sha256(ackToken) } };
+await page.goto(`http://localhost:${PORT}/app/?ack=${ackToken}`);
+await page.waitForSelector('#ackBtn');
+checks.ackQueryCleared = !(await page.evaluate(() => location.search));
+await shot('15-alert-waiting');
+await page.click('#ackBtn');
+await page.waitForSelector('text=Got it. Reminders for this low stop.');
+checks.ackFromNotification = Boolean(nightRow.state.p1.ackAt);
+await page.waitForSelector('#treatBtn');
+checks.planShown = (await page.textContent('#main')).includes('Your plan: 4 glucose tabs, then recheck');
+await shot('16-treat-card');
+await page.click('#treatBtn');
+await page.waitForSelector('#sheet');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('text=Treating: 15 g');
+checks.treated = Boolean(nightRow.state._treat && nightRow.state._treat.p1) && doseRows.some((d) => d.kind === 'carbs' && d.amount === 15 && !d.deleted);
+checks.treatFits = await noSideScroll();
+await shot('17-treating');
+forceLow = false;
+resetCaches();
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

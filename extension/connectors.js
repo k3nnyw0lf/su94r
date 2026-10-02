@@ -252,7 +252,7 @@ export const CONNECTORS = [
     id: 'night',
     icon: '🚨',
     name: 'Low alerts on your phone',
-    what: 'Your su94r server checks every 5 minutes, even with every computer off, and pushes a low to your phone through the free ntfy app. It repeats until you tap "I\'m OK" or you are back up: every 20 minutes by day, every 10 at night, every 5 when severe. It also warns before a low ("Low soon"), when readings stop, and the day before a sensor ends. The Libre app\'s own alarms stay your first line.',
+    what: 'Your su94r server checks every 5 minutes, even with every computer off, and pushes a low to your phone: in the su94r phone app (More → Low alerts in this app), through the free ntfy app, or Telegram. It repeats until you tap "I\'m OK" or you are back up: every 20 minutes by day, every 10 at night, every 5 when severe. It also warns before a low ("Low soon"), when readings stop, and the day before a sensor ends. The Libre app\'s own alarms stay your first line.',
     async render(ctx) {
       const { h, settings } = ctx;
       if (!parseScreenLink(settings.screenLink)) return needServer(h);
@@ -319,6 +319,17 @@ export const CONNECTORS = [
               v.echoLow ? action(ctx, msg, 'Test the Echo', 'Ringing…', () => nightEchoTest(settings.screenLink)) : null,
               v.echoLow ? action(ctx, msg, v.echoAlways ? 'Only at night' : 'At any hour', 'Saving…', () => nightSave(settings.screenLink, { echoAlways: !v.echoAlways })) : null,
               v.echoLow ? action(ctx, msg, 'Remove the triggers', 'Removing…', () => nightSave(settings.screenLink, { echoLowUrl: '', echoSoonUrl: '' })) : null));
+        })(),
+        (() => {
+          const grams = h('input', { type: 'number', min: '5', max: '60', value: String(v.treatGrams || 15), 'aria-label': 'Grams to treat a low', class: 'num' });
+          const minutes = h('input', { type: 'number', min: '5', max: '30', value: String(v.treatMinutes || 15), 'aria-label': 'Minutes until the recheck', class: 'num' });
+          const plan = h('input', { type: 'text', class: 'grow', maxlength: '200', value: v.treatPlan || '', placeholder: 'for example: 4 glucose tabs or 1/2 cup juice, then recheck', 'aria-label': 'My low plan' });
+          return h('details', {},
+            h('summary', {}, 'My low plan'),
+            state(h, `In the su94r phone app, a low shows "I treated it": one tap logs ${v.treatGrams || 15} g, stops the reminders, and su94r rechecks after ${v.treatMinutes || 15} minutes (still low: the reminders start again). Your plan's words appear in the app and in every low alert. Use the plan your doctor gave you.`),
+            h('div', { class: 'actions' }, 'Log ', grams, ' g, recheck after ', minutes, ' min'),
+            h('div', { class: 'actions' }, plan),
+            h('div', { class: 'actions' }, action(ctx, msg, 'Save my plan', 'Saving…', () => nightSave(settings.screenLink, { treatGrams: Number(grams.value), treatMinutes: Number(minutes.value), treatPlan: plan.value.trim() }), 'primary')));
         })(),
         h('details', {},
           h('summary', {}, 'Sunday summary'),

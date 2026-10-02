@@ -40,7 +40,8 @@ import { inboxStore, inboxRoute } from './inbox.js';
 import { mcpRoute } from './mcp.js';
 import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
-import { nightStore, nightRoute } from './night.js';
+import { nightStore, nightRoute, alertFanOut } from './night.js';
+import { pushStore, pushToPhones } from './webpush.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
 import { historyStore, historyRoute } from './history.js';
 import { doctorNew, doctorData } from './doctor.js';
@@ -411,9 +412,16 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
     if (APP_PATHS.has(path)) {
+      const pstore = deps.pushStore || pushStore(env);
+      const tg = deps.telegram || telegramStore(env);
       return await appRoute(path, request, url, env, {
         screens: deps.screens || screenStore(env), history: deps.history || historyStore(env), doses: deps.store || doseStore(env),
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
+        night: deps.night || nightStore(env), push: pstore,
+        notify: (row, role, msg) => alertFanOut(env, row, {
+          push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
+          webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),
+        })(role, msg),
       });
     }
     const keyOk = (k) => displayKeyOk(env, k, deps);
@@ -435,6 +443,7 @@ export async function handleCgm(path, request, env, deps = {}) {
     const night = await nightRoute(path, request, url, env, {
       store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push,
       telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
+      webpush: deps.webpush || ((role, msg) => pushToPhones(deps.pushStore || pushStore(env), role, msg)),
       history: deps.history || historyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });

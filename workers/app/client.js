@@ -26,6 +26,7 @@
     tab: store.get(K.tab) || 'now', pid: store.get(K.pid), range: Number(store.get(K.range)) || 6,
     days: Number(store.get(K.days)) || 14, hist: {}, report: {}, extras: null, dayView: null,
     log: { kind: 'rapid', amount: 0, ago: 0, meal: null }, installEvt: null, justLinked: false,
+    pendingAck: null, treatGrams: null,
   };
 
   // ---------- helpers ----------
@@ -49,6 +50,12 @@
   const short = (e) => (e.type === 'meal' ? (e.amount ? e.amount + ' g carbs' : 'meal') : (e.amount ? e.amount + ' u ' : '') + (KIND[e.kind] || e.kind || 'insulin'));
   const card = (inner, cls) => '<section class="card' + (cls ? ' ' + cls : '') + '">' + inner + '</section>';
   const main = (html) => { $('main').innerHTML = html; };
+
+  function fromB64u(s) {
+    const str = String(s).replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(str + '='.repeat((4 - (str.length % 4)) % 4));
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  }
 
   async function api(path, opts) {
     const o = opts || {};
@@ -227,6 +234,20 @@
     const to = est ? now + 65 * MIN : now + 5 * MIN;
     let html = '';
     if (!S.online) html += '<div class="banner off">Offline · showing the last reading this phone saw</div>';
+    if (S.pendingAck) html += card('<h2>A low alert is waiting</h2><p>Tap once it is handled; the reminders stop.</p><button class="btn wide" id="ackBtn">I\'m OK</button>');
+    const lowNow = l && !stale && l.mg < L.low;
+    const ep = S.recent && S.recent.lows ? S.recent.lows[c.pid] : null;
+    const tr = S.recent && S.recent.treating ? S.recent.treating[c.pid] : null;
+    const plan = (S.recent && S.recent.plan) || { grams: 15, minutes: 15, text: '' };
+    if (tr && !tr.done) {
+      const left = Math.max(0, Math.round((tr.recheckAt - now) / MIN));
+      html += card('<h2>Treating: ' + tr.grams + ' g at ' + esc(clock(tr.t)) + '</h2><p>' + (left ? 'Recheck at ' + esc(clock(tr.recheckAt)) + ', in ' + left + ' min.' : 'Time to recheck.') + (tr.by ? ' <span class="muted">Logged on ' + esc(tr.by) + '.</span>' : '') + '</p><p class="note">su94r tells you at the recheck where it went. Still low, the reminders start again.</p>');
+    } else if ((lowNow || (ep && !ep.acked)) && S.me && S.me.canLog) {
+      const g = S.treatGrams || plan.grams;
+      html += card('<h2>Treat the low</h2>' + (plan.text ? '<p>Your plan: ' + esc(plan.text) + '</p>' : '') +
+        '<div class="quick" style="justify-content:flex-start">' + [10, 15, 20, 30].concat([10, 15, 20, 30].indexOf(plan.grams) < 0 ? [plan.grams] : []).sort((a, b) => a - b).map((x) => '<button data-treat-g="' + x + '"' + (x === g ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + x + ' g</button>').join('') + '</div>' +
+        '<button class="btn wide" id="treatBtn" data-g="' + g + '">I treated it with ' + g + ' g</button><p class="note">Logs the carbs, stops the reminders, and rechecks in ' + plan.minutes + ' min.</p>');
+    }
     let top = '<div class="big state-' + state + '"><span class="v">' + (l ? fmt(l.mg, units) : '—') + '</span>' +
       (l && !stale ? '<span class="a" aria-label="' + ARROW_WORD[l.trend] + '">' + (ARROW[l.trend] || '') + '</span>' : '') + '<span class="u">' + esc(units) + '</span></div>';
     top += '<div class="sub">' + (people().length > 1 || (c.info && c.info.name) ? esc(c.info ? c.info.name : '') + ' · ' : '') +
@@ -444,6 +465,59 @@
     if (S.tab === 'log') renderLog();
   }
 
+  // ---------- low alerts in this app (web push) ----------
+  async function swReady() {
+    return Promise.race([navigator.serviceWorker.ready, new Promise((ok, no) => setTimeout(() => no(new Error('The app is still installing its helper. Try again in a moment.')), 8000))]);
+  }
+  async function pushState() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+    if (Notification.permission === 'denied') return 'denied';
+    try { const reg = await swReady(); return (await reg.pushManager.getSubscription()) && Notification.permission === 'granted' ? 'on' : 'off'; } catch (e) { return 'off'; }
+  }
+  async function pushOn() {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('Notifications were not allowed. Allow them for su94r in the phone\'s settings, then try again.');
+    const { key } = await api('app/push/key');
+    const reg = await swReady();
+    let sub = await reg.pushManager.getSubscription();
+    const opts = { userVisibleOnly: true, applicationServerKey: fromB64u(key) };
+    try { if (!sub) sub = await reg.pushManager.subscribe(opts); }
+    catch (e) { if (sub) await sub.unsubscribe(); sub = await reg.pushManager.subscribe(opts); }
+    const j = sub.toJSON();
+    await api('app/push/subscribe', { method: 'POST', body: { endpoint: j.endpoint, keys: j.keys } });
+  }
+  async function pushOff() {
+    const reg = await swReady();
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await api('app/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {});
+    await sub.unsubscribe();
+  }
+
+  // ---------- treating a low ----------
+  function askToTreat(grams) {
+    const plan = (S.recent && S.recent.plan) || { minutes: 15 };
+    sheet('<h3>Log ' + grams + ' g to treat the low?</h3><p class="muted">The reminders stop, and su94r rechecks in ' + plan.minutes + ' minutes.</p>',
+      [['Log it', 'btn', async () => {
+        document.querySelectorAll('#sheet button').forEach((b) => { b.disabled = true; });
+        try {
+          const r = await api('app/treat', { method: 'POST', body: { grams, pid: cur().pid } });
+          closeSheet(); S.treatGrams = null; S.pendingAck = null;
+          toast(r.text, 'Undo', () => undo(r.id));
+        } catch (e) { sheet('<h3>Not logged</h3><p>' + esc(e.message) + '</p>', [['Close', 'btn ghost', closeSheet]]); return; }
+        await refreshRecent();
+      }], ['Cancel', 'btn ghost', closeSheet]]);
+  }
+  async function sendAck() {
+    const a = S.pendingAck; if (!a) return;
+    try {
+      const r = await fetch(a, { method: 'POST', cache: 'no-store' });
+      toast(r.ok ? 'Got it. Reminders for this low stop.' : 'That alert was already answered.');
+    } catch (e) { toast('Could not reach the server. Try again.'); return; }
+    S.pendingAck = null;
+    renderNow();
+  }
+
   // ---------- Report ----------
   async function renderReport() {
     const c = cur();
@@ -469,13 +543,22 @@
       : S.installEvt ? '<p>Put su94r on the home screen like any app.</p><button class="btn" id="install">Install su94r</button>'
         : ios ? '<p>In Safari tap <b>Share</b>, then <b>Add to Home Screen</b>.</p>' : '<p>In Chrome tap <b>⋮</b>, then <b>Install app</b> or <b>Add to Home screen</b>.</p>';
     let html = '';
-    if (S.justLinked) html += '<div class="banner stale" style="margin:0 0 12px">This phone is linked. Set up its low alerts below, and install the app.</div>';
+    if (S.justLinked) html += '<div class="banner stale" style="margin:0 0 12px">This phone is linked. Turn on its low alerts below, and install the app.</div>';
+    const ps = await pushState();
+    if (S.tab !== 'more') return;
+    let pc = '<h2>Low alerts in this app</h2>';
+    if (ps === 'unsupported') pc += ios && !standalone ? '<p>On iPhone, install the app first (Safari: Share → <b>Add to Home Screen</b>), open it from the home screen, then turn alerts on here.</p>' : '<p>This browser cannot show alerts from the app. Use ntfy or Telegram below.</p>';
+    else if (ps === 'denied') pc += '<p>Notifications are blocked for su94r on this phone. Allow them in the phone\'s settings, then come back here.</p>';
+    else if (ps === 'on') pc += '<p>On. ' + (role === 'family' ? 'This phone rings when a low is not handled (once the owner switches on “Tell caregivers too”).' : 'This phone rings for every low until “I\'m OK”, for Low soon and for sensor warnings.') + '</p><div class="row"><button class="btn ghost" id="pushTest">Send a test</button><button class="btn ghost" id="pushOff">Turn off</button></div>';
+    else pc += '<p>' + (role === 'family' ? 'Ring this phone when a low is not handled.' : 'Ring this phone for lows, with an “I\'m OK” button. No other app needed.') + '</p><button class="btn" id="pushOn">Ring for lows on this phone</button>';
+    pc += '<p class="note">Your phone\'s silent and Do Not Disturb settings still apply; for nights, let su94r (or Chrome) through.</p>';
+    html += card(pc);
     html += card('<h2>Install</h2>' + install);
     if (!S.extras) { try { S.extras = await api('share/extras'); } catch (e) { S.extras = {}; } }
     const x = S.extras || {}, a = x.alerts;
-    let alerts = '<h2>Low alerts on this phone</h2>';
+    let alerts = '<h2>Also on ntfy or Telegram</h2>';
     if (a) {
-      alerts += '<p>' + (a.role === 'family' ? 'You are told when a low is not handled.' + (a.on ? '' : ' The owner has not switched family alerts on yet.') : 'The same alerts as the owner: every low, repeated until “I\'m OK”.') + ' This app shows the glucose; alerts come through <b>ntfy</b> (free) or Telegram, so they ring even when the app is closed.</p>' +
+      alerts += '<p>' + (a.role === 'family' ? 'You are told when a low is not handled.' + (a.on ? '' : ' The owner has not switched family alerts on yet.') : 'The same alerts as the owner: every low, repeated until “I\'m OK”.') + ' The same alerts can also come through <b>ntfy</b> (free) or Telegram.</p>' +
         '<p><a class="btn" href="ntfy://' + esc(a.url.replace(/^https?:\/\//, '')) + '">Subscribe in ntfy</a> <a class="btn ghost" href="' + esc(a.url) + '">Open in the browser</a></p>' +
         '<p class="muted small">Get ntfy: <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Play Store</a> · <a href="https://apps.apple.com/app/ntfy/id1625396347">App Store</a>. Or in ntfy tap + and paste <code>' + esc(a.topic) + '</code>' + copy(a.topic) + '</p>';
     } else alerts += '<p class="muted">Low alerts are not set up on the server yet: su94r Mini → Health vault → Low alerts.</p>';
@@ -529,6 +612,12 @@
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (t.id === 'logBtn') askToLog();
     else if (d.undo) undo(d.undo);
+    else if (d.treatG) { S.treatGrams = Number(d.treatG); renderNow(); }
+    else if (t.id === 'treatBtn') askToTreat(Number(d.g));
+    else if (t.id === 'ackBtn') sendAck();
+    else if (t.id === 'pushOn') { t.disabled = true; pushOn().then(() => toast('Alerts are on. Send a test to hear one.')).catch((e) => toast(e.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
+    else if (t.id === 'pushOff') { t.disabled = true; pushOff().then(() => toast('App alerts are off on this phone.')).catch((e) => toast(e.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
+    else if (t.id === 'pushTest') { t.disabled = true; api('app/push/test', { method: 'POST', body: {} }).then(() => toast('Test sent. It should ring in a few seconds.')).catch((e) => toast(e.message)).then(() => { t.disabled = false; }); }
     else if (d.allow) {
       t.disabled = true;
       api('app/phones/allow', { method: 'POST', body: { id: d.allow, canLog: d.on === '1' } })
@@ -550,6 +639,12 @@
   window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); S.installEvt = e; if (S.tab === 'more') renderMore(); });
 
   async function boot() {
+    const ackParam = /[?&]ack=([0-9a-f]{32})/.exec(location.search || '');
+    if (ackParam) { S.pendingAck = '/night/ack?t=' + ackParam[1]; S.tab = 'now'; try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* fine */ } }
+    if ('serviceWorker' in navigator) navigator.serviceWorker.addEventListener('message', (e) => {
+      const ack = e.data && e.data.ack;
+      if (ack && /^\/night\/ack\?t=[0-9a-f]{32}$/.test(ack)) { S.pendingAck = ack; show('now'); }
+    });
     try { await join(); } catch (e) { welcome(e.message); return; }
     if (!store.get(K.token)) { welcome(); return; }
     $('tabs').hidden = false;

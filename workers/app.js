@@ -10,6 +10,12 @@
 //   POST app/undo                   { id } → removes a dose this phone logged in the last 30 minutes
 //   GET  app/phones                 (owner's phone) the family phones and whether each may log
 //   POST app/phones/allow           (owner's phone) { id, canLog }
+//   GET  app/push/key               the server's public key for app alerts (webpush.js)
+//   POST app/push/subscribe         { endpoint, keys: { p256dh, auth } } this phone's alerts on
+//   POST app/push/unsubscribe       { endpoint }
+//   POST app/push/test              a test alert to this phone
+//   POST app/treat                  { grams, pid } a low treated: logs the carbs, stops the reminders,
+//                                   rechecks after the owner's plan's minutes (night.js)
 //
 // The owner's own phone ('me') logs. A family member's phone reads, and logs too once the owner
 // allows it (su94r_screens.can_log: su94r Mini, or the owner's phone here). Paired TVs and widgets
@@ -19,8 +25,11 @@ import { screenFor } from './screens.js';
 import { asMarkers } from './doses.js';
 import { reportFor } from './doctor.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
+import { pushTo, pushEndpointOk } from './webpush.js';
+import { startTreatment, NIGHT_DEFAULTS } from './night.js';
 
-export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow']);
+export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
+  'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -28,7 +37,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -87,7 +96,19 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const names = {};
     try { for (const s of await screens.list()) if (s.kind === 'screen' && s.role) names[`app-${String(s.id).slice(0, 8)}-`] = s.name || ''; } catch { /* without names */ }
     const by = (id) => (id.startsWith('app-') ? names[id.slice(0, 13)] || '' : '');
-    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, at: now });
+    // The low treatment plan, an open low per person, and a treatment waiting for its recheck.
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* without */ }
+    const st = row?.state || {};
+    const lows = {}, treating = {};
+    for (const p of l) {
+      const ep = st[p.pid];
+      if (ep && ep.since) lows[p.pid] = { since: ep.since, acked: Boolean(ep.ackAt), lastMg: ep.lastMg ?? null };
+      const tr = (st._treat || {})[p.pid];
+      if (tr && now - tr.t < 3 * 60 * MIN) treating[p.pid] = { t: tr.t, grams: tr.grams, by: tr.by || '', recheckAt: tr.recheckAt, done: Boolean(tr.done) };
+    }
+    const plan = { grams: row?.treat_grams ?? NIGHT_DEFAULTS.treat_grams, minutes: row?.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, text: row?.treat_plan || '' };
+    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, at: now });
   }
 
   // The owner's phone decides which family phones may log.
@@ -102,6 +123,28 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const b = await request.json().catch(() => ({}));
     if (!b.id) return json({ error: 'id needed' }, 400);
     return (await screens.allowLog(String(b.id), b.canLog === true)) ? json({ ok: true, canLog: b.canLog === true }) : json({ ok: false, error: 'Only a family member\'s phone can be allowed to log.' }, 404);
+  }
+
+  // App alerts: any linked phone (family phones get what the care ladder sends them).
+  if (path.startsWith('app/push/')) {
+    if (!push?.ready) return json({ error: 'App alerts are not set up on the server.' }, 503);
+    if (path === 'app/push/key') return json({ key: await push.publicKey() });
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const b = await request.json().catch(() => ({}));
+    if (path === 'app/push/subscribe') {
+      const endpoint = String(b.endpoint || ''), p256dh = String(b.keys?.p256dh || ''), auth = String(b.keys?.auth || '');
+      if (!pushEndpointOk(endpoint) || !/^[A-Za-z0-9_-]{80,100}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,32}$/.test(auth)) {
+        return json({ ok: false, error: 'This browser gave an alert address su94r does not send to.' }, 400);
+      }
+      await push.add(screen.id, { endpoint, p256dh, auth });
+      return json({ ok: true });
+    }
+    if (path === 'app/push/unsubscribe') { await push.remove(screen.id, String(b.endpoint || '')); return json({ ok: true }); }
+    const sent = await pushTo(push, await push.forScreen(screen.id), {
+      title: 'su94r test alert', priority: 4,
+      message: owner ? 'Lows ring on this phone, with an "I\'m OK" button.' : 'This phone rings when a low is not handled.',
+    });
+    return sent ? json({ ok: true }) : json({ ok: false, error: 'The test did not go out. Turn app alerts off and on again.' }, 502);
   }
 
   // Logging: the owner's own phone, and family phones the owner allowed.
@@ -133,6 +176,26 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     await doses.upsert([{ id, pid, t, kind, amount, source: 'phone' }]);
     const what = carbs ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`;
     return json({ ok: true, id, t, text: `Logged ${what}${minutesAgo ? `, ${minutesAgo} min ago` : ''}.` });
+  }
+
+  if (path === 'app/treat') {
+    const grams = Math.round(Number(body.grams));
+    if (!(grams >= 1 && grams <= 100)) return json({ ok: false, error: 'Between 1 and 100 g.' }, 400);
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    const pid = await pidFor(String(body.pid || ''));
+    if (!pid) return json({ ok: false, error: 'No one to log for yet.' }, 400);
+    const person = (await people()).find((p) => p.pid === pid) || {};
+    const row = await night.get();
+    const id = `app-${screen.id.slice(0, 8)}-${now.toString(36)}`;
+    await doses.upsert([{ id, pid, t: now, kind: 'carbs', amount: grams, source: 'phone' }]);
+    const t = startTreatment(row, pid, { now, grams, by: screen.name, mg: person.latest?.mg ?? null });
+    await night.patch({ state: t.state });
+    // Caregivers who were told about this low hear that it is being handled.
+    if (t.ep?.careRung && row.care_enabled && notify) {
+      const at = new Date(now).toLocaleTimeString('en-US', { timeZone: row.time_zone || 'America/New_York', hour: 'numeric', minute: '2-digit' });
+      await notify(row, 'family', { title: `${person.firstName || person.name || 'They'} ${person.firstName || person.name ? 'is' : 'are'} treating the low`, message: `${grams} g at ${at}${screen.name ? ` (logged on ${screen.name})` : ''}.`, priority: 3, tags: ['white_check_mark'] }).catch(() => {});
+    }
+    return json({ ok: true, id, recheckAt: t.recheckAt, text: `Logged ${grams} g. Reminders stop; recheck in ${Math.round((t.recheckAt - now) / MIN)} min.` });
   }
 
   if (path === 'app/undo') {

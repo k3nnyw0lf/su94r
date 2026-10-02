@@ -20,6 +20,10 @@
 //   POST night/setup?key=<owner>    { enabled, lowMgdl, severeMgdl, nightStart, nightEnd, timeZone, careEnabled }
 //   POST night/test?key=<owner>     a test alert to the owner's phone
 //   POST night/ack?t=<token>        the notification's "I'm OK" button
+//
+// Every alert goes to ntfy, to the linked Telegram chats and to the phones that turned on alerts
+// in the su94r app (webpush.js), each by role. A low treated from the app (app/treat in app.js)
+// stops the reminders and is rechecked after the owner's plan's minutes; still low, they resume.
 
 import { sha256, randomToken } from './screens.js';
 import { evaluateEscalation, alertPayload, RUNG } from '../src/lib/care/escalation.js';
@@ -36,6 +40,7 @@ export const NIGHT_DEFAULTS = {
   enabled: true, time_zone: 'America/New_York', low_mgdl: 70, severe_mgdl: 55,
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
+  treat_grams: 15, treat_minutes: 15, treat_plan: null,
 };
 
 export function nightStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
@@ -221,6 +226,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   }
 
   const seen = new Set();
+  const recovered = new Set();
   state._soon = state._soon || {};
   state._watch = state._watch || {};
   state._last = state._last || {};
@@ -238,6 +244,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     if (l && l.mg >= low) {
       if (ep?.notified) {
         await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: 'The low is over.', priority: 3, tags: ['white_check_mark'] }, 'recovered');
+        recovered.add(p.pid);
       }
       delete state[p.pid];
       if (cfg.soon_enabled !== false) await lowSoon(p, l, last);
@@ -264,7 +271,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         ep.count += 1;
         await send(cfg.self_topic, {
           title: `${who(p)}${severe ? 'Severe low' : 'Low'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
-          message: `${severe ? 'Treat now with fast sugar.' : 'Treat with fast sugar.'} Tap "I'm OK" once you have.${ep.count > 1 ? ` (Reminder ${ep.count})` : ''}`,
+          message: `${cfg.treat_plan ? `${severe ? 'Treat now.' : 'Treat it.'} Your plan: ${cfg.treat_plan}.` : severe ? 'Treat now with fast sugar.' : 'Treat with fast sugar.'} Tap "I'm OK" once you have.${ep.count > 1 ? ` (Reminder ${ep.count})` : ''}`,
           priority: severe || night ? 5 : 4,
           tags: [severe ? 'rotating_light' : 'warning'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
@@ -308,12 +315,62 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     }
     if (ep) state[p.pid] = ep;
   }
+  // A low treated from the app: after the plan's minutes, say where it went. Still low (or no
+  // reading), the reminders start again.
+  state._treat = state._treat || {};
+  for (const [pid, tr] of Object.entries(state._treat)) {
+    if (now - tr.t > 3 * 60 * MIN) { delete state._treat[pid]; continue; }
+    if (tr.done || now < tr.recheckAt) continue;
+    tr.done = true;
+    const p = list.find((x) => x.pid === pid);
+    if (!p || recovered.has(pid)) continue;                    // "Back up" already said it
+    const l = p.latest && now - p.latest.t <= STALE_MS ? p.latest : null;
+    const at = localTime(tr.t, cfg.time_zone);
+    if (l && l.mg >= cfg.low_mgdl) {
+      await send(cfg.self_topic, {
+        title: `${who(p)}Recheck: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
+        message: tr.mg != null ? `Up from ${fmt(p, tr.mg)} when ${tr.grams} g was logged at ${at}.` : `${tr.grams} g was logged at ${at}.`,
+        priority: 3, tags: ['white_check_mark'],
+      }, 'recheck');
+      continue;
+    }
+    const ep = state[pid] || { since: tr.t, count: 0, name: p.firstName || p.name || '', units: p.units };
+    const token = randomToken(16);
+    ep.ackHash = await sha256(token);
+    ep.ackAt = null;
+    ep.notified = now;
+    ep.count = (ep.count || 0) + 1;
+    state[pid] = ep;
+    await send(cfg.self_topic, {
+      title: l ? `${who(p)}Still low after treating: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim() : `${who(p)}Could not recheck: no reading`,
+      message: `${tr.grams} g at ${at}. ${l ? (cfg.treat_plan ? `Your plan: ${cfg.treat_plan}.` : 'Treat again with fast sugar.') : 'Check with a meter.'} Reminders start again until you are above ${fmt(p, cfg.low_mgdl)}. Tap "I'm OK" once you have.`,
+      priority: 5, tags: ['rotating_light'],
+      actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
+    }, 'recheck-low');
+    await echo('low', true);
+  }
+
   // People no longer followed: forget their episodes and warnings.
   if (!error) {
     for (const pid of Object.keys(state)) if (isLowKey(pid) && !seen.has(pid)) delete state[pid];
     for (const box of [state._soon, state._watch, state._last]) for (const pid of Object.keys(box)) if (!seen.has(pid)) delete box[pid];
   }
   return { state, sent, night };
+}
+
+/**
+ * A low treated from the app: the carbs are logged (by the caller), the reminders for the open
+ * low stop, and a recheck is due after the plan's minutes. Returns the new state, the episode
+ * as it was (caregivers who were told hear that it is handled) and when the recheck is.
+ */
+export function startTreatment(row, pid, { now = Date.now(), grams, by = '', mg = null } = {}) {
+  const state = structuredClone(row.state || {});
+  const before = state[pid] ? { ...state[pid] } : null;
+  if (state[pid]) { state[pid].ackAt = now; state[pid].ackHash = null; }
+  const minutes = Number(row.treat_minutes) || NIGHT_DEFAULTS.treat_minutes;
+  const recheckAt = now + minutes * MIN;
+  state._treat = { ...(state._treat || {}), [pid]: { t: now, grams, by: String(by || '').slice(0, 40), mg, recheckAt, done: false } };
+  return { state, ep: before, recheckAt };
 }
 
 /** Marks the episode whose "I'm OK" token this is as acknowledged. */
@@ -346,6 +403,11 @@ function settingsPatch(body, row) {
   if (typeof body.careEnabled === 'boolean') out.care_enabled = body.careEnabled;
   if (typeof body.soonEnabled === 'boolean') out.soon_enabled = body.soonEnabled;
   if (typeof body.watchEnabled === 'boolean') out.watch_enabled = body.watchEnabled;
+  const tg = int(body.treatGrams, 5, 60);
+  if (tg !== undefined) out.treat_grams = tg;
+  const tm = int(body.treatMinutes, 5, 30);
+  if (tm !== undefined) out.treat_minutes = tm;
+  if (body.treatPlan !== undefined) out.treat_plan = String(body.treatPlan || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 200) || null;
   const sd = int(body.sensorDays, 10, 15);
   if (sd !== undefined) out.sensor_days = sd;
   if (typeof body.echoAlways === 'boolean') out.echo_always = body.echoAlways;
@@ -377,6 +439,7 @@ function publicView(row, base) {
     enabled: row.enabled, lowMgdl: row.low_mgdl, severeMgdl: row.severe_mgdl,
     soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14,
     echoLow: Boolean(row.echo_low_url), echoSoon: Boolean(row.echo_soon_url), echoAlways: Boolean(row.echo_always),
+    treatGrams: row.treat_grams ?? NIGHT_DEFAULTS.treat_grams, treatMinutes: row.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, treatPlan: row.treat_plan || '',
     nightStart: row.night_start, nightEnd: row.night_end, timeZone: row.time_zone, careEnabled: row.care_enabled,
     selfTopic: row.self_topic, selfUrl: topicUrl(row.self_topic),
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
@@ -384,17 +447,31 @@ function publicView(row, base) {
   };
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, ring = defaultRing, history = null, now = () => Date.now() }) {
+/**
+ * One alert to everyone of a role ('me' or 'family'): ntfy (the role's topic), the linked Telegram
+ * chats (telegram.js) and the phones with app alerts on (webpush.js). It counts as sent when any
+ * one of them took it.
+ */
+export function alertFanOut(env, row, { push = null, telegram = null, webpush = null } = {}) {
+  const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
+  return async (role, msg) => {
+    const topic = role === 'family' ? row.care_topic : row.self_topic;
+    const [viaNtfy, viaTg, viaApp] = await Promise.allSettled([
+      topic ? ntfy(topic, msg) : Promise.reject(new Error('no topic')),
+      telegram ? telegram(role, msg) : Promise.resolve(0),
+      webpush ? webpush(role, msg) : Promise.resolve(0),
+    ]);
+    if (viaNtfy.status === 'fulfilled' || (viaTg.status === 'fulfilled' && viaTg.value > 0) || (viaApp.status === 'fulfilled' && viaApp.value > 0)) return true;
+    throw new Error(viaNtfy.reason?.message || 'not sent');
+  };
+}
+
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, ring = defaultRing, history = null, now = () => Date.now() }) {
   if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
-  const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
-  // Every alert goes to ntfy and, when set up, to the linked Telegram chats of the same role
-  // (telegram.js). It counts as sent when either one delivered it.
-  const sendFor = (row) => async (topic, msg) => {
-    const role = topic === row.care_topic ? 'family' : 'me';
-    const [viaNtfy, viaTg] = await Promise.allSettled([ntfy(topic, msg), telegram ? telegram(role, msg) : Promise.resolve(0)]);
-    if (viaNtfy.status === 'fulfilled' || (viaTg.status === 'fulfilled' && viaTg.value > 0)) return true;
-    throw new Error(viaNtfy.reason?.message || 'not sent');
+  const sendFor = (row) => {
+    const out = alertFanOut(env, row, { push, telegram, webpush });
+    return (topic, msg) => out(topic === row.care_topic ? 'family' : 'me', msg);
   };
   const ntfyBase = (env.NTFY_BASE || 'https://ntfy.sh').replace(/\/$/, '');
   const ackBase = `${String(env.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/su94r-cgm/night/ack`;
