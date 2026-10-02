@@ -11,7 +11,7 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER } from './voice.js';
 import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
 import { careTick, careRefresh, careClicked } from './care-bg.js';
@@ -121,6 +121,7 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   if (reason === 'install' && !accounts?.length) chrome.runtime.openOptionsPage();
   await bringInSynced();
   await poll();
+  if (!LEGACY) autoConnect().catch(() => {});
   if (reopenAfterUpdate?.length) {
     await local.remove('reopenAfterUpdate');
     for (const key of reopenAfterUpdate) await openWindow(key);
@@ -142,6 +143,8 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) driveSave().catch(() => {});
     if (!LEGACY) healthSync().catch(() => {});
     if (!LEGACY) careTick().catch(() => {});
+    if (!LEGACY) refreshServer().catch(() => {});
+    if (!LEGACY) autoConnect().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -726,6 +729,55 @@ async function importMonths(files) {
     return add.length;
   });
   return { months: files.length, readings, markers: added, health };
+}
+
+// ---- the su94r server's LibreLinkUp sign-in ----
+// A server connected without a stored password reads LibreLinkUp with the sign-in su94r Mini
+// handed over; every 6 hours su94r Mini hands it the newest one, so it never runs out.
+async function refreshServer() {
+  const settings = await getSettings();
+  if (!settings.screenLink) return;
+  const { serverRefreshAt = 0, accounts = [] } = await local.get(['serverRefreshAt', 'accounts']);
+  if (Date.now() - serverRefreshAt < 6 * 3600e3) return;
+  await local.set({ serverRefreshAt: Date.now() });
+  for (const a of accounts.filter((x) => x.session?.token)) {
+    try { await refreshServerSession(settings.screenLink, a.session); return; } catch (e) { if (e.status !== 403) return; }   // 403: another account; try the next
+  }
+}
+
+// ---- connecting without the button, on the owner's own computers ----
+// A connect-here.json file put by hand in the extension folder ({ "server": "https://…" };
+// never shipped) connects this copy to that su94r server by itself, the same way the Settings
+// button does, as long as nothing is connected yet. Tried at most every 4 minutes.
+async function autoConnect() {
+  const settings = await getSettings();
+  if (settings.screenLink) return;
+  let want;
+  try {
+    const res = await fetch(chrome.runtime.getURL('connect-here.json'), { cache: 'no-store' });
+    if (!res.ok) return;
+    want = await res.json();
+  } catch { return; }
+  const base = String(want?.server || DEFAULT_SERVER).replace(/\/+$/, '');
+  if (!/^https:\/\//.test(base)) return;
+  const { autoConnectAt = 0, accounts = [] } = await local.get(['autoConnectAt', 'accounts']);
+  if (Date.now() - autoConnectAt < 4 * 60e3) return;
+  await local.set({ autoConnectAt: Date.now() });
+  const done = (result) => local.set({ autoConnect: { at: Date.now(), ...result } });
+  const signedIn = accounts.filter((a) => a.session?.token && a.session?.accountId);
+  const acc = signedIn.find((a) => settings.vaultOwner && a.patientIds?.includes(settings.vaultOwner)) || signedIn[0];
+  if (!acc) return done({ ok: false, message: 'No LibreLinkUp sign-in yet.' });
+  try {
+    const r = await connectServer(base, acc.session, settings.deviceName || 'su94r Mini');
+    await local.set({ settings: withDefaults({ ...(await getSettings()), screenLink: `${base}/d/${r.key}` }) });
+    await done({ ok: true, people: r.people });
+    chrome.notifications.create('su94r-connected', {
+      type: 'basic', iconUrl: 'icons/icon128.png', title: 'Connected to your su94r server',
+      message: 'Alexa and your screens can now read your glucose. Say "Alexa, ask my sugar how I am".',
+    });
+  } catch (err) {
+    await done({ ok: false, message: err.message, code: err.code || null });
+  }
 }
 
 // ---- health connections: the phone inbox and Google Health (connectors.js) ----

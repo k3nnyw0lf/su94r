@@ -1,0 +1,90 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "My Sugar",
+          "summary": "Your glucose and insulin from your own su94r server.",
+          "description": "Private su94r skill: hear your FreeStyle Libre reading and trend, log insulin by voice (always confirmed first) and ask when you last took insulin. Not a medical device.",
+          "examplePhrases": [
+            "Alexa, ask my sugar how I am",
+            "Alexa, tell my sugar 4 units of R insulin",
+            "Alexa, ask my sugar when I last took insulin"
+          ],
+          "keywords": [
+            "glucose",
+            "diabetes",
+            "insulin"
+          ]
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": [
+        "US"
+      ],
+      "testingInstructions": "Private development skill for one household.",
+      "category": "ORGANIZERS_AND_ASSISTANTS"
+    },
+    "apis": {
+      "custom": {
+        "endpoint": {
+          "uri": "https://su94r-proxy.ken-e90.workers.dev/alexa",
+          "sslCertificateType": "Wildcard"
+        },
+        "interfaces": [
+          {
+            "type": "ALEXA_PRESENTATION_APL",
+            "supportedViewports": [
+              {
+                "mode": "HUB",
+                "shape": "ROUND",
+                "minWidth": 480,
+                "maxWidth": 480,
+                "minHeight": 480,
+                "maxHeight": 480
+              },
+              {
+                "mode": "HUB",
+                "shape": "RECTANGLE",
+                "minWidth": 960,
+                "maxWidth": 1279,
+                "minHeight": 480,
+                "maxHeight": 599
+              },
+              {
+                "mode": "HUB",
+                "shape": "RECTANGLE",
+                "minWidth": 1280,
+                "maxWidth": 1920,
+                "minHeight": 600,
+                "maxHeight": 1200
+              }
+            ]
+          }
+        ],
+        "regions": {
+          "NA": {
+            "endpoint": {
+              "uri": "https://su94r-proxy.ken-e90.workers.dev/alexa",
+              "sslCertificateType": "Wildcard"
+            }
+          }
+        }
+      }
+    },
+    "manifestVersion": "1.0",
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": false,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "en-US": {
+          "privacyPolicyUrl": "https://su94r.com/",
+          "termsOfUseUrl": "https://su94r.com/"
+        }
+      }
+    }
+  }
+}

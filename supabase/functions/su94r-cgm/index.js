@@ -16,7 +16,7 @@
 import { handleCgm } from '../../../workers/cgm-core.js';
 
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase itself (dose store).
-const NAMES = ['LLU_EMAIL', 'LLU_PASSWORD', 'HEALTH_INGEST_TOKEN', 'DISPLAY_KEY', 'ALEXA_SKILL_ID', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
+const NAMES = ['LLU_EMAIL', 'LLU_PASSWORD', 'HEALTH_INGEST_TOKEN', 'DISPLAY_KEY', 'ALEXA_SKILL_ID', 'CLAIM_OPEN_UNTIL', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
 
 function env() {
   const all = Deno.env.toObject();

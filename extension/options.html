@@ -228,12 +228,22 @@
 
     <section class="panel">
       <h2>Alexa and screens</h2>
-      <p class="hint">Your own su94r server lets Alexa log and read doses ("Alexa, tell my sugar 4 units of R insulin") and puts your graph on a fridge, TV, tablet or widget. Paste its big-screen link once (it looks like <code>https://…/d/…</code>; see docs/tv-and-alexa.md).</p>
+      <p class="hint">Your own su94r server lets Alexa log and read doses ("Alexa, tell my sugar 4 units of R insulin") and puts your graph on a fridge, TV, tablet or widget. One click connects this computer: su94r Mini shows the server your LibreLinkUp sign-in, and the server gives this computer its own key. Nothing to paste.</p>
       <div class="row-left wrap">
-        <input id="screen-link" type="url" class="grow" placeholder="https://su94r-proxy.example.workers.dev/d/your-key" aria-label="Big-screen link">
-        <button id="save-screen-link" type="button" class="primary">Save</button>
+        <button id="connect-server" type="button" class="primary">Connect to my su94r server</button>
       </div>
+      <ul id="setup-steps" class="steps"></ul>
       <p id="voice-status" class="hint"></p>
+      <details id="server-advanced">
+        <summary>Another server, or paste a big-screen link</summary>
+        <div class="row-left wrap">
+          <input id="server-base" type="url" class="grow" placeholder="https://su94r-proxy.ken-e90.workers.dev" aria-label="su94r server address">
+        </div>
+        <div class="row-left wrap">
+          <input id="screen-link" type="url" class="grow" placeholder="https://su94r-proxy.example.workers.dev/d/your-key" aria-label="Big-screen link">
+          <button id="save-screen-link" type="button" class="ghost">Save link</button>
+        </div>
+      </details>
       <details id="screens-box">
         <summary>Screens and widgets</summary>
         <p class="hint">On the fridge, TV or tablet, open <strong>su94r.com/tv</strong> in its web browser. It shows a 6-character code: type it here and give the screen a name.</p>

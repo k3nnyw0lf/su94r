@@ -62,6 +62,30 @@ export async function ackInbox(link, secret, key, ids) {
   if (!res.ok) throw new Error(`The su94r server answered ${res.status}.`);
 }
 
+// Connecting without pasting a link: su94r Mini hands its server the LibreLinkUp sign-in it
+// already has; the server checks it with LibreLinkUp and answers with this computer's own key.
+export const DEFAULT_SERVER = 'https://su94r-proxy.ken-e90.workers.dev';
+
+async function serverCall(url, { method = 'GET', body } = {}) {
+  const res = await fetch(url, {
+    method, cache: 'no-store', signal: AbortSignal.timeout(20000),
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(j.message || j.error || `The su94r server answered ${res.status}.`), { code: j.error, status: res.status });
+  return j;
+}
+/** What the server has set up: { owner, llu: 'login'|'session'|'none', alexa, open }. */
+export const serverStatus = (base) => serverCall(`${base}/connect/status`);
+/** Connects with a LibreLinkUp session; returns { key, name, people, alexa }. */
+export const connectServer = (base, session, name) => serverCall(`${base}/connect`, { method: 'POST', body: { session, name } });
+/** Hands the server a fresher LibreLinkUp session (it has no password of its own). */
+export const refreshServerSession = (link, session) => {
+  const p = parseScreenLink(link);
+  return serverCall(`${p.base}/connect/session?key=${encodeURIComponent(p.key)}`, { method: 'POST', body: { session } });
+};
+
 // AI connector: an address Claude (or another MCP app) reads glucose and doses from.
 export const newAiConnector = (link, name) => call(link, 'mcp/new', { method: 'POST', body: { name } });
 export const aiAddress = (link, token) => `${parseScreenLink(link)?.base}/mcp/${token}`;

@@ -9,7 +9,7 @@ import { parseLibreViewCsv } from './libreview-csv.js';
 import { allPatients, ptKey } from './store.js';
 import { addEvents, removeEvents } from './events.js';
 import { isLegacy, NEW_ID } from './handover.js';
-import { parseScreenLink, claimScreen, listScreens, removeScreen } from './voice.js';
+import { parseScreenLink, claimScreen, listScreens, removeScreen, DEFAULT_SERVER, serverStatus, connectServer } from './voice.js';
 import { insulinTiming } from './insights.js';
 import { searchMedication, defaultUnit, MED_UNITS } from './meds.js';
 import { listDevices, forgetDevice, deviceId, heartbeat } from './sync.js';
@@ -686,7 +686,57 @@ async function renderVoice(s) {
       ? `Could not reach the su94r server: ${voiceError.message}`
       : 'Connected. Doses said to Alexa appear here within a minute, and Alexa sees the doses logged here.';
   $('screens-box').hidden = !s.screenLink;
+  renderSetupSteps(s);
 }
+
+const serverBase = (s) => ($('server-base').value.trim().replace(/\/+$/, '') || parseScreenLink(s.screenLink)?.base || DEFAULT_SERVER);
+
+/** What is set up, step by step: server, this computer, LibreLinkUp on the server, Alexa. */
+let stepsRun = 0;
+async function renderSetupSteps(s) {
+  const run = ++stepsRun;
+  const base = serverBase(s);
+  const li = (ok, text) => Object.assign(document.createElement('li'), { className: ok === true ? 'ok' : ok === false ? 'todo' : '', textContent: `${ok === true ? '✓' : ok === false ? '○' : '…'} ${text}` });
+  let st = null, err = null;
+  try { st = await serverStatus(base); } catch (e) { err = e; }
+  if (run !== stepsRun) return;
+  const items = [];
+  if (!st) items.push(li(false, `Server ${new URL(base).host}: no answer (${err?.message || 'unknown'}).`));
+  else {
+    items.push(li(true, `Server ${new URL(base).host} is up.`));
+    items.push(li(Boolean(s.screenLink), s.screenLink ? 'This computer is connected.' : 'This computer is not connected yet: press Connect.'));
+    items.push(li(st.llu !== 'none', st.llu === 'login' ? 'The server reads LibreLinkUp with its own login.' : st.llu === 'session' ? 'The server reads LibreLinkUp with the sign-in su94r Mini handed over (kept fresh by su94r Mini).' : 'The server cannot read LibreLinkUp yet: connecting hands it your sign-in.'));
+    items.push(li(st.alexa, st.alexa ? 'Alexa skill "my sugar" is set up: say "Alexa, ask my sugar how I am".' : 'Alexa skill not set up yet: it is created once from your Amazon developer account (Claude Code can do it after you sign in to Amazon).'));
+  }
+  $('setup-steps').replaceChildren(...items);
+}
+
+$('connect-server').addEventListener('click', async () => {
+  const s = await settings();
+  const base = serverBase(s);
+  if (!/^https:\/\//.test(base)) { say('The server address has to start with https://.', 'error'); return; }
+  const granted = await chrome.permissions.request({ origins: [`${base}/*`] }).catch(() => false);
+  if (!granted) { say('su94r Mini needs permission to reach your server.', 'error'); return; }
+  // The LibreLinkUp sign-in to show the server: the account that follows the person this
+  // computer belongs to (the vault owner), else the first one signed in.
+  const { accounts = [] } = await local.get('accounts');
+  const signedIn = accounts.filter((a) => a.session?.token && a.session?.accountId);
+  const acc = signedIn.find((a) => s.vaultOwner && a.patientIds?.includes(s.vaultOwner)) || signedIn[0];
+  if (!acc) { say('Sign in to LibreLinkUp above first; connecting uses that sign-in.', 'error'); return; }
+  say('Connecting…');
+  try {
+    const r = await connectServer(base, acc.session, s.deviceName || 'su94r Mini');
+    await saveSetting({ screenLink: `${base}/d/${r.key}` });
+    say(`Connected to your su94r server (it sees ${r.people} ${r.people === 1 ? 'person' : 'people'}).`, 'ok');
+    chrome.runtime.sendMessage({ type: 'refresh' }).catch(() => {});
+  } catch (err) {
+    say(err.code === 'closed'
+      ? 'Your server is not open for its first connection. Ask Claude Code to open it for 15 minutes, then press Connect again.'
+      : err.message, 'error');
+  }
+  refresh();
+  refreshScreens();
+});
 
 $('save-screen-link').addEventListener('click', async () => {
   const link = $('screen-link').value.trim();

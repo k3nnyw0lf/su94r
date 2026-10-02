@@ -122,7 +122,8 @@ describe('display (TVs, Echo Show, tablets)', () => {
   });
   it('gives data only for the right key, and fails closed when DISPLAY_KEY is unset', async () => {
     expect((await call('/display/data?key=wrong')).status).toBe(401);
-    expect((await call('/display/data?key=x', {}, { ...ENV, DISPLAY_KEY: undefined })).status).toBe(503);
+    // No display key and no connected su94r Mini: every key is refused.
+    expect((await call('/display/data?key=x', {}, { ...ENV, DISPLAY_KEY: undefined })).status).toBe(401);
   });
   it('returns everyone with 12 hours of history', async () => {
     const r = await (await call('/display/data?key=tv-key-123')).json();

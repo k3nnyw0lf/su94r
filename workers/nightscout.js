@@ -43,8 +43,7 @@ export async function nightscoutRoute(path, request, url, env, { screens, json, 
   if (path !== 'ns' && !path.startsWith('ns/')) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   if (path === 'ns/new') {
-    if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
-    if (!keyOk(url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+    if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     const { name } = await request.json().catch(() => ({}));
     const token = randomToken();

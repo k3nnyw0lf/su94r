@@ -25,6 +25,8 @@
 //   inbox/*, inboxes                   health inbox for phone apps (inbox.js)
 //   mcp/new, mcp/<token>               the AI connector, MCP over HTTP (mcp.js)
 //   ns/new, ns/*                       Nightscout-style feed for watch faces and widgets (nightscout.js)
+//   connect, connect/status, connect/session   su94r Mini connects with its LibreLinkUp sign-in (owner.js)
+// Where DISPLAY_KEY is named, a connected su94r Mini's own key works too.
 // Server-side routes also need LLU_EMAIL and LLU_PASSWORD. Anything unset → 503.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -35,6 +37,7 @@ import { screenStore, pairStart, pairPoll, pairClaim, screenFor } from './screen
 import { inboxStore, inboxRoute } from './inbox.js';
 import { mcpRoute } from './mcp.js';
 import { nightscoutRoute } from './nightscout.js';
+import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -77,39 +80,74 @@ const iso = (t) => new Date(t).toISOString();
 
 let memSession = null;
 let memSnapshot = null;
+let memFromOwner = false;            // the session came from su94r Mini (owner.js), not a stored password
+let lastSaved = { token: null, at: 0 };
 
 /** Test hook: forget cached sessions and snapshots. */
 export function resetCaches() {
   memSession = null;
   memSnapshot = null;
+  memFromOwner = false;
+  lastSaved = { token: null, at: 0 };
 }
+
+const owners = (env) => env.OWNER_STORE || ownerStore(env);
 
 async function serverSession(env) {
   if (memSession) return memSession;
-  if (env.CACHE) {
-    const cached = await env.CACHE.get('llu-session', 'json');
-    if (cached?.token && (!cached.expires || cached.expires * 1000 > Date.now() + 3600e3)) return (memSession = cached);
+  if (env.LLU_EMAIL && env.LLU_PASSWORD) {
+    if (env.CACHE) {
+      const cached = await env.CACHE.get('llu-session', 'json');
+      if (cached?.token && (!cached.expires || cached.expires * 1000 > Date.now() + 3600e3)) return (memSession = cached);
+    }
+    memSession = await lluLogin(env.LLU_EMAIL, env.LLU_PASSWORD);
+    memFromOwner = false;
+    // Optional KV-style cache (env.CACHE): one write per sign-in, months apart.
+    if (env.CACHE) await env.CACHE.put('llu-session', JSON.stringify(memSession));
+    return memSession;
   }
-  if (!env.LLU_EMAIL || !env.LLU_PASSWORD) throw new LibreError('config', 'LLU_EMAIL and LLU_PASSWORD are not set');
-  memSession = await lluLogin(env.LLU_EMAIL, env.LLU_PASSWORD);
-  // Optional KV-style cache (env.CACHE): one write per sign-in, months apart.
-  if (env.CACHE) await env.CACHE.put('llu-session', JSON.stringify(memSession));
-  return memSession;
+  // No stored password: the LibreLinkUp sign-in su94r Mini handed over when it connected.
+  const store = owners(env);
+  const row = store.ready ? await store.get().catch(() => null) : null;
+  if (!row?.session?.token) throw new LibreError('config', 'This su94r server has no LibreLinkUp sign-in yet: connect su94r Mini to it (Settings → Alexa and screens).');
+  memFromOwner = true;
+  return (memSession = row.session);
+}
+
+/** A handed-over session is refreshed by LibreLinkUp on every call; keep the newest (at most every 10 minutes). */
+function keepFresh(env, session) {
+  if (!memFromOwner || !session?.token || session.token === lastSaved.token || Date.now() - lastSaved.at < 10 * 60e3) return;
+  lastSaved = { token: session.token, at: Date.now() };
+  owners(env).saveSession(session).catch(() => {});
 }
 
 async function withSession(env, call) {
   try {
     const r = await call(await serverSession(env));
     memSession = r.session;
+    keepFresh(env, r.session);
     return r;
   } catch (e) {
     if (e.code !== 'auth') throw e;
     memSession = null;
+    if (memFromOwner) {
+      // No password to sign in again with: su94r Mini hands over a fresh sign-in on its next visit.
+      throw new LibreError('auth', 'The LibreLinkUp sign-in su94r Mini handed over has ended. Open su94r Mini (it reconnects by itself) or connect again in Settings.');
+    }
     if (env.CACHE) await env.CACHE.delete('llu-session');
     const r = await call(await serverSession(env));
     memSession = r.session;
     return r;
   }
+}
+
+/** su94r Mini just connected or refreshed: use its session now, and show fresh data. */
+function adoptSession(env, session) {
+  if (env.LLU_EMAIL && env.LLU_PASSWORD) return;
+  memSession = session;
+  memFromOwner = true;
+  memSnapshot = null;
+  lastSaved = { token: session.token, at: Date.now() };
 }
 
 // Everyone this follower account can see, with 12 hours of history. Cached for
@@ -200,13 +238,14 @@ async function glucoseLatest(request, env) {
   }
 }
 
-function displayKeyOk(env, key) {
-  return Boolean(env.DISPLAY_KEY) && safeEqual(key, env.DISPLAY_KEY);
+/** The display key (a server secret) or a connected su94r Mini's own key. */
+async function displayKeyOk(env, key, deps = {}) {
+  if (env.DISPLAY_KEY && safeEqual(key, env.DISPLAY_KEY)) return true;
+  return isOwnerKey(deps.screens || screenStore(env), key);
 }
 
-async function displayData(url, env) {
-  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
-  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+async function displayData(url, env, deps) {
+  if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
   return displayPayload(env);
 }
 
@@ -233,8 +272,7 @@ async function displayPayload(env, extra = {}) {
 // back the doses said to Alexa. Deletions are only ever explicit: a computer that has
 // not yet received another computer's dose must not erase it.
 async function voiceSync(request, url, env, deps) {
-  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
-  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+  if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
   const store = deps.store || doseStore(env);
   if (!store.ready) return json({ error: 'The dose store is not configured' }, 503);
   let body;
@@ -265,9 +303,8 @@ async function screensRoute(path, request, url, env, deps) {
     if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
     return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
   }
-  // The rest manage screens and need the display key.
-  if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
-  if (!displayKeyOk(env, url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+  // The rest manage screens and need the display key (or a connected su94r Mini's key).
+  if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
   if (path === 'pair/claim') return json(await pairClaim(request, store));
   if (path === 'screens') return json({ screens: await store.list() });
   if (path === 'screens/remove') {
@@ -313,11 +350,17 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'libre/login' && request.method === 'POST') return await libreLogin(request);
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
     if (path === 'glucose/latest') return await glucoseLatest(request, env);
-    if (path === 'display/data') return await displayData(url, env);
+    if (path === 'display/data') return await displayData(url, env, deps);
     if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
-    const keyOk = (k) => displayKeyOk(env, k);
+    const keyOk = (k) => displayKeyOk(env, k, deps);
+    const connect = await connectRoute(path, request, url, env, {
+      owner: owners(env), screens: deps.screens || screenStore(env), json, keyOk,
+      verify: (s) => getConnections(s),
+      onSession: (s) => adoptSession(env, s),
+    });
+    if (connect) return connect;
     const inbox = await inboxRoute(path, request, url, env, { store: deps.inbox || inboxStore(env), json, keyOk });
     if (inbox) return inbox;
     const mcp = await mcpRoute(path, request, url, env, {

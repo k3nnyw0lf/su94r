@@ -82,8 +82,7 @@ export async function inboxRoute(path, request, url, env, { store, json, keyOk }
 
   // Management: needs the display key.
   if (path === 'inbox/new' || parts[0] === 'inboxes') {
-    if (!env.DISPLAY_KEY) return json({ error: 'DISPLAY_KEY is not set' }, 503);
-    if (!keyOk(url.searchParams.get('key'))) return json({ error: 'unauthorized' }, 401);
+    if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
     if (path === 'inbox/new' && request.method === 'POST') {
       const { name } = await request.json().catch(() => ({}));
       const secret = randomToken();

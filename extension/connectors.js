@@ -169,8 +169,8 @@ export const CONNECTORS = [
   {
     id: 'claude',
     icon: '✳️',
-    name: 'Claude and other AI apps',
-    what: 'Let Claude read your live glucose, the last 12 hours and your insulin doses, so you can ask about them. Read-only; ChatGPT developer mode takes the same address.',
+    name: 'Claude, Gemini and other AI apps',
+    what: 'Let Claude or Google Gemini (on the web, your Pixel or any Android phone) read your live glucose, the last 12 hours and your insulin doses, so you can ask about them. Read-only; ChatGPT developer mode takes the same address.',
     async render(ctx) {
       const { h, settings } = ctx;
       if (!parseScreenLink(settings.screenLink)) return needServer(h);
@@ -178,21 +178,28 @@ export const CONNECTORS = [
       const msg = h('div', { class: 'state' });
       if (!ai?.token) {
         const make = async () => {
-          const r = await newAiConnector(settings.screenLink, 'Claude');
+          const r = await newAiConnector(settings.screenLink, 'AI apps');
           await setConnector('ai', { id: r.id, token: r.token, at: Date.now() });
         };
-        return [msg, h('div', { class: 'actions' }, action(ctx, msg, 'Make Claude\'s address', 'Making it…', make, 'primary')),
+        return [msg, h('div', { class: 'actions' }, action(ctx, msg, 'Make the AI address', 'Making it…', make, 'primary')),
           state(h, 'On Android, the Claude app (Pro or Max) can also read Health Connect itself: Claude → Settings → Health.')];
       }
       return [
-        state(h, 'Ready. Add it in Claude once:', 'on'),
+        state(h, 'Ready. Add this address once in each AI app. Keep it private: anyone with it can read your glucose.', 'on'),
         copyable(h, aiAddress(settings.screenLink, ai.token)),
+        h('p', { class: 'sub-h' }, 'Google Gemini (then also on your Pixel and Android phone)'),
+        steps(h, [
+          'Open gemini.google.com/apps, signed in with your Google account, and go to Custom apps.',
+          'Paste the address into "Add a custom app link" and press Next.',
+          'Ask Gemini on the web, or say "Hey Google" on your phone: "@su94r what is my glucose?" or "How was my sugar overnight?"',
+        ], true),
+        h('p', { class: 'sub-h' }, 'Claude'),
         steps(h, [
           'In Claude (claude.ai or the app): Settings → Connectors → Add custom connector.',
           'Name it su94r and paste the address. Leave the rest empty.',
           'In a chat, turn su94r on from the tools menu and ask, for example: "How was my glucose overnight?"',
-          'Claude explains and answers; it is told never to give insulin dosing instructions.',
         ], true),
+        state(h, 'The AI explains and answers; it is told never to give insulin dosing instructions.'),
         msg,
         h('div', { class: 'actions' }, action(ctx, msg, 'Switch it off', 'Switching off…', async () => {
           if (ai.id) await removeScreen(settings.screenLink, ai.id);

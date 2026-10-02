@@ -63,3 +63,6 @@ vapid-keys.json
 
 # Written by extension/tools/release.mjs
 extension/build.json
+
+# Hand-placed on the owner's own computer to connect su94r Mini without the button
+extension/connect-here.json

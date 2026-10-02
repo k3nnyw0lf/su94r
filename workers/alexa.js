@@ -153,7 +153,7 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
     snap = await getSnapshot();
   } catch (e) {
     return say(e.code === 'config'
-      ? 'The glucose server is not set up yet. Add the LibreLinkUp login to the proxy.'
+      ? 'Your sugar server is not connected yet. On your computer, open su94r Mini settings and press Connect to my su94r server.'
       : 'I could not reach LibreLinkUp just now. Please check your Libre app.');
   }
 
