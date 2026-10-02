@@ -5,7 +5,12 @@
       "intents": [
         {
           "name": "GetGlucoseIntent",
-          "slots": [{ "name": "name", "type": "AMAZON.FirstName" }],
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
           "samples": [
             "how is my sugar",
             "what is my sugar",
@@ -24,10 +29,22 @@
         {
           "name": "LogInsulinIntent",
           "slots": [
-            { "name": "units", "type": "AMAZON.NUMBER" },
-            { "name": "insulin", "type": "INSULIN_TYPE" },
-            { "name": "ago", "type": "AMAZON.DURATION" },
-            { "name": "name", "type": "AMAZON.FirstName" }
+            {
+              "name": "units",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "insulin",
+              "type": "INSULIN_TYPE"
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION"
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
           ],
           "samples": [
             "{units} units of {insulin} insulin now",
@@ -53,7 +70,12 @@
         },
         {
           "name": "LastInsulinIntent",
-          "slots": [{ "name": "name", "type": "AMAZON.FirstName" }],
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
           "samples": [
             "when did I last take insulin",
             "when was my last insulin",
@@ -66,21 +88,180 @@
             "did {name} take insulin"
           ]
         },
-        { "name": "AMAZON.HelpIntent", "samples": [] },
-        { "name": "AMAZON.StopIntent", "samples": [] },
-        { "name": "AMAZON.CancelIntent", "samples": [] },
-        { "name": "AMAZON.NavigateHomeIntent", "samples": [] },
-        { "name": "AMAZON.FallbackIntent", "samples": [] }
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "LogCarbsIntent",
+          "slots": [
+            {
+              "name": "grams",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION"
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "I ate {grams} grams",
+            "I ate {grams} grams of carbs",
+            "I ate {grams} carbs",
+            "I had {grams} grams of carbs",
+            "I had {grams} carbs",
+            "I am eating {grams} grams",
+            "I am eating {grams} grams of carbs",
+            "{grams} grams of carbs",
+            "{grams} grams of carbohydrates",
+            "{grams} carbs",
+            "log {grams} grams of carbs",
+            "log {grams} carbs",
+            "log a meal of {grams} grams",
+            "add {grams} grams of carbs",
+            "I ate {grams} grams {ago} ago",
+            "I had {grams} grams of carbs {ago} ago",
+            "{grams} grams of carbs for {name}",
+            "log a meal",
+            "log carbs",
+            "log food"
+          ]
+        },
+        {
+          "name": "ForecastIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "where am I heading",
+            "where am I going",
+            "where is my sugar going",
+            "where is my sugar heading",
+            "where will I be in an hour",
+            "where will I be in half an hour",
+            "what is my forecast",
+            "what is the forecast",
+            "what will my sugar be",
+            "what will my sugar be in an hour",
+            "am I going low",
+            "am I going high",
+            "what is the estimate",
+            "give me the estimate",
+            "where is {name} heading",
+            "where will {name} be in an hour"
+          ]
+        }
       ],
       "types": [
         {
           "name": "INSULIN_TYPE",
           "values": [
-            { "id": "short", "name": { "value": "regular", "synonyms": ["R", "are", "our", "humulin R", "novolin R", "actrapid", "regular human", "short acting"] } },
-            { "id": "rapid", "name": { "value": "rapid", "synonyms": ["fast", "fast acting", "rapid acting", "quick", "humalog", "novolog", "novorapid", "fiasp", "lyumjev", "admelog", "apidra", "lispro", "aspart"] } },
-            { "id": "basal", "name": { "value": "long acting", "synonyms": ["long", "basal", "lantus", "basaglar", "toujeo", "tresiba", "levemir", "semglee", "glargine", "degludec"] } },
-            { "id": "intermediate", "name": { "value": "NPH", "synonyms": ["N", "N P H", "humulin N", "novolin N", "intermediate"] } },
-            { "id": "mix", "name": { "value": "mixed", "synonyms": ["mix", "premixed", "pre mixed", "seventy thirty", "70 30", "humalog mix", "novolog mix"] } }
+            {
+              "id": "short",
+              "name": {
+                "value": "regular",
+                "synonyms": [
+                  "R",
+                  "are",
+                  "our",
+                  "humulin R",
+                  "novolin R",
+                  "actrapid",
+                  "regular human",
+                  "short acting"
+                ]
+              }
+            },
+            {
+              "id": "rapid",
+              "name": {
+                "value": "rapid",
+                "synonyms": [
+                  "fast",
+                  "fast acting",
+                  "rapid acting",
+                  "quick",
+                  "humalog",
+                  "novolog",
+                  "novorapid",
+                  "fiasp",
+                  "lyumjev",
+                  "admelog",
+                  "apidra",
+                  "lispro",
+                  "aspart"
+                ]
+              }
+            },
+            {
+              "id": "basal",
+              "name": {
+                "value": "long acting",
+                "synonyms": [
+                  "long",
+                  "basal",
+                  "lantus",
+                  "basaglar",
+                  "toujeo",
+                  "tresiba",
+                  "levemir",
+                  "semglee",
+                  "glargine",
+                  "degludec"
+                ]
+              }
+            },
+            {
+              "id": "intermediate",
+              "name": {
+                "value": "NPH",
+                "synonyms": [
+                  "N",
+                  "N P H",
+                  "humulin N",
+                  "novolin N",
+                  "intermediate"
+                ]
+              }
+            },
+            {
+              "id": "mix",
+              "name": {
+                "value": "mixed",
+                "synonyms": [
+                  "mix",
+                  "premixed",
+                  "pre mixed",
+                  "seventy thirty",
+                  "70 30",
+                  "humalog mix",
+                  "novolog mix"
+                ]
+              }
+            }
           ]
         }
       ]
@@ -93,10 +274,78 @@
           "confirmationRequired": false,
           "prompts": {},
           "slots": [
-            { "name": "units", "type": "AMAZON.NUMBER", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
-            { "name": "insulin", "type": "INSULIN_TYPE", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
-            { "name": "ago", "type": "AMAZON.DURATION", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} },
-            { "name": "name", "type": "AMAZON.FirstName", "elicitationRequired": false, "confirmationRequired": false, "prompts": {} }
+            {
+              "name": "units",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "insulin",
+              "type": "INSULIN_TYPE",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "LogCarbsIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "grams",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "ForecastIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
           ]
         }
       ],

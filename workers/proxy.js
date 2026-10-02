@@ -43,7 +43,8 @@ const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
 const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
-  '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove']);
+  '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove',
+  '/share/new', '/share/claim', '/share/extras']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -150,7 +151,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night)(\/|$)/.test(path)) return await forward(request, url, env);
       if (path === '/tv' || path === '/tv/') {
         // Pairing screen: shows a code; su94r Mini enters it; the screen keeps its own token.
         return new Response(displayPage('', { pair: true }), {

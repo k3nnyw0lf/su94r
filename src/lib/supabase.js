@@ -5,7 +5,26 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://sfelhasepvaoianyuvxe.supabase.co';
 const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNmZWxoYXNlcHZhb2lhbnl1dnhlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzA2ODY0NDcsImV4cCI6MjA4NjI2MjQ0N30.kNzRAcdXaHoo0xQnJwNXyqcFsSiUZj9PP1fwziEQkdc';
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// PKCE: a Google or Apple sign-in comes back as a one-time ?code= that is exchanged for the
+// session, instead of the old implicit flow's #access_token=…&refresh_token=… in the address
+// bar, where the tokens stayed in browser history.
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true, autoRefreshToken: true },
+});
+
+// Once the sign-in has been read, nothing of it stays in the address bar (also cleans tabs
+// left over from the implicit flow).
+if (typeof window !== 'undefined') {
+  const leftover = (u) => /(access_token|refresh_token|provider_token)=/.test(u.hash) || u.searchParams.has('code');
+  if (leftover(new URL(window.location.href))) {
+    supabase.auth.getSession().finally(() => {
+      const u = new URL(window.location.href);
+      if (/(access_token|refresh_token|provider_token)=/.test(u.hash)) u.hash = '';
+      u.searchParams.delete('code');
+      window.history.replaceState(window.history.state, '', `${u.pathname}${u.search}${u.hash}`);
+    });
+  }
+}
 
 // Auth helpers
 export async function signInWithGoogle() {

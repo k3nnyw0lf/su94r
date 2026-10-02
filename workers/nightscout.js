@@ -38,6 +38,16 @@ function series(person) {
   });
 }
 
+/** A new token for a watch or app that reads Nightscout; stored like a paired widget. */
+export async function makeNsLink(screens, name) {
+  const token = randomToken();
+  const id = crypto.randomUUID();
+  const label = String(name || 'Watch (Nightscout link)').replace(/[^\p{L}\p{N} '.()-]/gu, '').trim().slice(0, 40) || 'Watch (Nightscout link)';
+  const now = new Date().toISOString();
+  await screens.insert({ id, secret_hash: await sha256(await sha1(token)), token_hash: await sha256(token), kind: 'widget', name: label, expires_at: now, claimed_at: now });
+  return { id, token, name: label };
+}
+
 /** Handles ns/* routes; null when the path is not one. */
 export async function nightscoutRoute(path, request, url, env, { screens, json, keyOk, snapshot }) {
   if (path !== 'ns' && !path.startsWith('ns/')) return null;
@@ -46,12 +56,7 @@ export async function nightscoutRoute(path, request, url, env, { screens, json, 
     if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     const { name } = await request.json().catch(() => ({}));
-    const token = randomToken();
-    const id = crypto.randomUUID();
-    const label = String(name || 'Watch (Nightscout link)').replace(/[^\p{L}\p{N} '.()-]/gu, '').trim().slice(0, 40) || 'Watch (Nightscout link)';
-    const now = new Date().toISOString();
-    await screens.insert({ id, secret_hash: await sha256(await sha1(token)), token_hash: await sha256(token), kind: 'widget', name: label, expires_at: now, claimed_at: now });
-    return json({ id, token, name: label });
+    return json(await makeNsLink(screens, name));
   }
 
   // Auth: the token itself (?token=), or its SHA-1 as api-secret (matched by the stored hash of the SHA-1).

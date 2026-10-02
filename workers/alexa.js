@@ -11,6 +11,7 @@
 import { verifyAlexaSignature, AlexaVerifyError } from './alexa-verify.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { asMarkers } from './doses.js';
+import { speakForecast } from './forecast.js';
 
 const MMOL = 18.0182;
 const MAX_UNITS = 100;
@@ -108,7 +109,7 @@ function aplDirective(people) {
   };
 }
 
-export async function handleAlexa(request, env, getSnapshot, { store = null, verify } = {}) {
+export async function handleAlexa(request, env, getSnapshot, { store = null, verify, forecasts = null } = {}) {
   if (!env.ALEXA_SKILL_ID) return new Response('ALEXA_SKILL_ID is not set', { status: 503 });
   const raw = await request.text();
   try {
@@ -142,11 +143,13 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
   if (type === 'SessionEndedRequest') return reply({ version: '1.0', response: {} });
   if (intent === 'AMAZON.StopIntent' || intent === 'AMAZON.CancelIntent') return say('Okay.');
   if (intent === 'AMAZON.HelpIntent') {
-    return say('Ask me how your sugar is, or log a dose: say, 4 units of R insulin. You can also ask when you last took insulin.', { end: false });
+    return say('Ask me how your sugar is, or where you are heading. Log a dose: say, 4 units of R insulin. Log a meal: say, I ate 40 grams. You can also ask when you last took insulin.', { end: false });
   }
   if (intent === 'LogInsulinIntent' || intent === 'LastInsulinIntent') {
     return insulinIntent(body, { say, reply, store, getSnapshot });
   }
+  if (intent === 'LogCarbsIntent') return carbsIntent(body, { say, reply, store, getSnapshot });
+  if (intent === 'ForecastIntent') return forecastIntent(body, { say, getSnapshot, store, forecasts });
 
   let snap;
   try {
@@ -250,7 +253,7 @@ async function insulinIntent(body, { say, reply, store, getSnapshot }) {
   try { doses = asMarkers(await store.recent(who.pid, now)); } catch { return say('I could not reach the dose log just now. Nothing was logged.'); }
 
   if (intent.name === 'LastInsulinIntent') {
-    const day = doses.filter((d) => now - d.t < 24 * 3600e3 && d.t <= now + 10 * 60e3).sort((a, b) => b.t - a.t);
+    const day = doses.filter((d) => d.type === 'insulin' && now - d.t < 24 * 3600e3 && d.t <= now + 10 * 60e3).sort((a, b) => b.t - a.t);
     if (!day.length) return card(`I have no insulin logged${forWhom} in the last 24 hours.`);
     const bolus = day.find((d) => d.kind !== 'basal');
     const basal = day.find((d) => d.kind === 'basal');
@@ -288,4 +291,57 @@ async function insulinIntent(body, { say, reply, store, getSnapshot }) {
     return say('I could not save that just now. Nothing was logged. Please log it in su94r Mini.');
   }
   return card(`Logged ${what}. It will show in su94r Mini within a minute.`);
+}
+
+// ---------- logging a meal by voice ----------
+
+const MAX_GRAMS = 300;
+const gramWord = (n) => `${n} gram${Number(n) === 1 ? '' : 's'}`;
+
+async function carbsIntent(body, { say, reply, store, getSnapshot }) {
+  const card = (text, end = true, directives = null) => reply({
+    version: '1.0',
+    response: {
+      outputSpeech: { type: 'PlainText', text },
+      card: { type: 'Simple', title: 'Meal', content: text },
+      shouldEndSession: end,
+      ...(directives ? { directives } : {}),
+    },
+  });
+  if (!store?.ready) return say('Logging meals by voice is not set up on the server yet.');
+  const now = Date.now();
+  const intent = body.request.intent;
+  const who = await whoFor(body, getSnapshot, store);
+  if (who.missing) return say(`I don't follow anyone called ${who.missing}.`);
+  if (who.none) return say('No one is sharing their glucose with this account yet, so I do not know whose meal to log.');
+  const forWhom = who.many && who.name ? ` for ${who.name}` : '';
+  const grams = Number(intent.slots?.grams?.value);
+  if (!Number.isFinite(grams) || grams <= 0) return card('How many grams of carbs?', false, [{ type: 'Dialog.ElicitSlot', slotToElicit: 'grams', updatedIntent: intent }]);
+  if (grams > MAX_GRAMS) return say(`${gramWord(grams)} is more than ${MAX_GRAMS}. I did not log it. Please check the number and say it again.`);
+  const back = durationMs(intent.slots?.ago?.value);
+  if (back != null && back > 24 * 3600e3) return say('I can log meals from the last 24 hours. Nothing was logged.');
+  const t = now - (back || 0);
+  const what = `${gramWord(Math.round(grams))} of carbs ${back ? ago(t, now) : 'now'}${forWhom}`;
+  if (intent.confirmationStatus === 'DENIED') return card('Okay, I did not log anything.');
+  if (intent.confirmationStatus !== 'CONFIRMED') return card(`Log ${what}?`, false, [{ type: 'Dialog.ConfirmIntent', updatedIntent: intent }]);
+  try {
+    await store.upsert([{ id: crypto.randomUUID(), pid: who.pid, t, kind: 'carbs', amount: Math.round(grams), source: 'alexa' }]);
+  } catch {
+    return say('I could not save that just now. Nothing was logged. Please log it in su94r Mini.');
+  }
+  return card(`Logged ${what}. It will show in su94r Mini within a minute.`);
+}
+
+// ---------- where the glucose is heading (the learner's estimate) ----------
+
+async function forecastIntent(body, { say, getSnapshot, store, forecasts }) {
+  if (!forecasts?.ready) return say('Estimates are not set up on the server yet.');
+  const who = await whoFor(body, getSnapshot, store || { recent: async () => [] });
+  if (who.missing) return say(`I don't follow anyone called ${who.missing}.`);
+  if (who.none) return say('No one is sharing their glucose with this account yet.');
+  let f = null;
+  try { f = await forecasts.get(who.pid); } catch { return say('I could not reach the estimate just now.'); }
+  let units = 'mg/dL';
+  try { units = (await getSnapshot()).people.find((p) => p.pid === who.pid)?.units || units; } catch { /* keep mg/dL */ }
+  return say(speakForecast(f, { units, name: who.many ? who.name : '' }));
 }

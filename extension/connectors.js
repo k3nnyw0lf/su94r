@@ -6,7 +6,8 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, shareNew, shareUrl } from './voice.js';
+import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
 const steps = (h, items, open = false) => h('details', open ? { open: true } : {}, h('summary', {}, 'How'), h('ol', {}, items.map((i) => h('li', {}, i))));
@@ -60,7 +61,105 @@ function geminiButton(ctx, msg, ensureAddress) {
   }, 'Set up Gemini');
 }
 
+/** A QR code (as an image) for a link the phone should open. */
+function qrImage(h, text, label) {
+  const qr = qrcode(0, 'M');
+  qr.addData(text);
+  qr.make();
+  return h('img', { class: 'qr', src: qr.createDataURL(5, 4), alt: label, title: label, width: String(qr.getModuleCount() * 5 + 40) });
+}
+
+/** The share code on screen, if any: { url, role, until }. Kept only in this page. */
+let shareShown = null;
+let shareTimer = null;
+
+const nightProblem = (code) => (code === 'auth' || code === 'config'
+  ? 'the server has no working LibreLinkUp sign-in; open su94r Mini so it reconnects'
+  : `could not read LibreLinkUp (${code})`);
+
 export const CONNECTORS = [
+  {
+    id: 'share',
+    icon: '📲',
+    name: 'Share to another phone',
+    what: 'Show a QR code, scan it with another phone, and that phone links itself: live glucose with every computer off, plus one tap for low alerts and for its watch. Nothing to type. Each code works once, for 10 minutes; linked phones are listed, and removed, in Settings → Alexa and screens.',
+    async render(ctx) {
+      const { h, settings } = ctx;
+      if (!parseScreenLink(settings.screenLink)) return needServer(h);
+      const msg = h('div', { class: 'state' });
+      if (shareShown && Date.now() < shareShown.until) {
+        const left = Math.max(1, Math.round((shareShown.until - Date.now()) / 60e3));
+        clearTimeout(shareTimer);
+        shareTimer = setTimeout(() => ctx.refresh(), shareShown.until - Date.now() + 500);
+        return [
+          state(h, `Scan this with the ${shareShown.role === 'family' ? 'family member\'s' : 'other'} phone's camera and open the link. It works once, for about ${left} more minute${left === 1 ? '' : 's'}.`, 'on'),
+          h('div', { class: 'qr-row' }, qrImage(h, shareShown.url, 'Scan with the other phone')),
+          msg,
+          h('div', { class: 'actions' }, action(ctx, msg, 'Done', 'Closing…', async () => { shareShown = null; })),
+        ];
+      }
+      shareShown = null;
+      const make = (role) => async () => {
+        const r = await shareNew(settings.screenLink, role);
+        shareShown = { url: shareUrl(settings.screenLink, r.invite), role, until: Date.now() + (r.expiresIn || 600) * 1000 };
+      };
+      return [
+        msg,
+        h('div', { class: 'actions' },
+          action(ctx, msg, 'My other phone', 'Making a code…', make('me'), 'primary'),
+          action(ctx, msg, 'A family member\'s phone', 'Making a code…', make('family'))),
+        state(h, 'My other phone gets your own low alerts. A family member\'s phone is told only when a low is not handled, once you switch on "Tell caregivers too" in Low alerts.'),
+      ];
+    },
+  },
+  {
+    id: 'night',
+    icon: '🚨',
+    name: 'Low alerts on your phone',
+    what: 'Your su94r server checks every 5 minutes, even with every computer off, and pushes a low to your phone through the free ntfy app. It repeats until you tap "I\'m OK" or you are back up: every 20 minutes by day, every 10 at night, every 5 when severe. The Libre app\'s own alarms stay your first line.',
+    async render(ctx) {
+      const { h, settings } = ctx;
+      if (!parseScreenLink(settings.screenLink)) return needServer(h);
+      const msg = h('div', { class: 'state' });
+      let v;
+      try { v = await nightSetup(settings.screenLink); } catch (e) { return state(h, `Could not reach your su94r server: ${e.message}`, 'warn'); }
+      const last = v.lastResult;
+      const status = !v.enabled
+        ? state(h, 'Paused: no alerts are sent.', 'warn')
+        : last?.error
+          ? state(h, `On, but the last check had a problem: ${nightProblem(last.error)}.`, 'warn')
+          : state(h, `On. Last check ${last?.at ? ctx.when(last.at) : 'in the next 5 minutes'}. Low below ${v.lowMgdl} mg/dL, severe below ${v.severeMgdl}.${v.openLows ? ' A low is open right now.' : ''}`, 'on');
+      const low = h('input', { type: 'number', min: '60', max: '100', value: String(v.lowMgdl), 'aria-label': 'Low level, mg/dL', class: 'num' });
+      const severe = h('input', { type: 'number', min: '40', max: '70', value: String(v.severeMgdl), 'aria-label': 'Severe level, mg/dL', class: 'num' });
+      return [
+        status,
+        h('p', { class: 'sub-h' }, 'Your phone'),
+        h('div', { class: 'qr-row' },
+          qrImage(h, v.selfUrl, 'Scan with your phone to open your alert topic'),
+          h('div', {},
+            steps(h, [
+              'On your phone, install ntfy (free) from the Play Store or App Store.',
+              'Scan this code with the phone camera. It opens your private topic; tap Subscribe, or in the ntfy app tap + and paste the topic name below.',
+              'In ntfy, allow notifications. For nights, open the topic\'s settings and let it override Do Not Disturb for urgent alerts.',
+              'Press "Send a test alert" here.',
+            ], true),
+            copyable(h, v.selfTopic))),
+        msg,
+        h('div', { class: 'actions' },
+          action(ctx, msg, 'Send a test alert', 'Sending…', () => nightTest(settings.screenLink), 'primary'),
+          action(ctx, msg, v.enabled ? 'Pause alerts' : 'Turn alerts on', 'Saving…', () => nightSave(settings.screenLink, { enabled: !v.enabled }))),
+        h('details', {},
+          h('summary', {}, 'Levels'),
+          h('div', { class: 'actions' }, 'Low below ', low, ' severe below ', severe, ' mg/dL ',
+            action(ctx, msg, 'Save', 'Saving…', () => nightSave(settings.screenLink, { lowMgdl: Number(low.value), severeMgdl: Number(severe.value) })))),
+        h('details', {},
+          h('summary', {}, 'Family and caregivers'),
+          state(h, 'Anyone you trust can get your alerts too: they install ntfy and subscribe to the care topic. They are told only when a low is not handled (the care ladder: a severe low, or no "I\'m OK" in time at night).'),
+          h('div', { class: 'qr-row' }, qrImage(h, v.careUrl, 'Care topic for family'), copyable(h, v.careTopic)),
+          h('div', { class: 'actions' }, action(ctx, msg, v.careEnabled ? 'Stop telling caregivers' : 'Tell caregivers too', 'Saving…', () => nightSave(settings.screenLink, { careEnabled: !v.careEnabled })))),
+      ];
+    },
+  },
   {
     id: 'drive',
     icon: '☁️',

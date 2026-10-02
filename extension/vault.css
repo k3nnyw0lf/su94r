@@ -52,3 +52,8 @@
 
 .foot a { color: var(--muted); }
 .sub-h { font-size: 13px; margin: 6px 0 0; }
+
+.qr-row { display: flex; gap: 14px; align-items: flex-start; flex-wrap: wrap; margin-top: 6px; }
+.qr-row > div { flex: 1 1 220px; min-width: 0; }
+.qr { background: #fff; border-radius: 6px; image-rendering: pixelated; max-width: 100%; }
+.connector input.num { width: 64px; }

@@ -48,6 +48,16 @@ https://<your-proxy>.workers.dev/d/<this computer's key>
 
 Anyone with the link can see the readings, so keep it private. Paired screens can be removed in su94r Mini Settings; a computer's own key is revoked by deleting its `owner` row in `su94r_screens` (then press Connect again).
 
+### Share to another phone (QR code, nothing to type)
+
+su94r Mini → Health vault → **Share to another phone** → **My other phone** or **A family member's phone**. It shows a QR code; scan it with that phone's camera and open the link. The phone links itself (`/tv#join=…`: the one-time invite rides after the `#`, so it never reaches a server log), keeps its own token, and shows the glucose live. The first time it opens **Phone options**:
+
+- **Add to Home screen** so it is one tap away.
+- **Low alerts on this phone**: install ntfy, tap **Subscribe in ntfy**. Your other phone gets your own alerts; a family phone gets the care topic, which only speaks when you have switched on **Tell caregivers too** and a low is not handled.
+- **Watch and widgets**: the phone gets its own Nightscout-style token for GlucoDataHandler (and the Pixel Watch); address and token have Copy buttons.
+
+Each code works once, for 10 minutes. Linked phones appear with the other screens in su94r Mini Settings, where **Remove** cuts them off at once. Code: `workers/screens.js` (shareNew, shareClaim), `share/extras` in `workers/cgm-core.js`, the page in `workers/display.js`.
+
 ## 3. Alexa skill (private, on your own Amazon account)
 
 **With the ASK CLI** (no clicking in the console): sign in once with `ask configure` (if it says there is no Vendor ID, first open <https://developer.amazon.com/alexa/console/ask> and finish the free developer profile). Then:
@@ -79,6 +89,8 @@ Every request must carry Amazon's signature (checked in `workers/alexa-verify.js
 - "Alexa, tell my sugar 4 units of R insulin." Alexa repeats it back ("Log 4 units of regular insulin now?") and logs it only after you say **yes**.
 - "Alexa, tell my sugar I took 20 units of Lantus 30 minutes ago."
 - "Alexa, ask my sugar when I last took insulin." Alexa reads the last doses from every device.
+- "Alexa, tell my sugar I ate 40 grams." Alexa repeats it back and logs the meal only after **yes**; it reaches su94r Mini as a meal marker (the learner uses it).
+- "Alexa, ask my sugar where I'm heading." Alexa reads su94r Mini's estimate for 30 and 60 minutes ahead with its range, only when the learner has passed its accuracy check and su94r Mini sent it in the last 20 minutes. If the low end is under 70 it says to keep fast sugar close. It never suggests a dose.
 
 If a dose was already logged within the double-dose window (3 hours for rapid or regular, 16 hours for long-acting, 8 hours for NPH or pre-mixed), on any computer or by voice, Alexa says so before asking for the yes. Alexa only records what you say you took; it never suggests an amount.
 
@@ -86,7 +98,17 @@ Doses live in the `su94r_doses` table (`supabase/migrations/20261001_su94r_doses
 
 To say it without "tell my sugar": in the Alexa app, create a **Routine** → *When you say* "4 units of R insulin" → *Add action* → **Customized** → "tell my sugar 4 units of R insulin". One routine per dose you take often.
 
-## 4. Night monitor
+## 4. Low alerts on the phone (night safety net)
+
+The server itself checks every 5 minutes (a database cron calls `night/tick`, see `supabase/migrations/20261002e_su94r_night_cron.sql`), with every computer off, and pushes lows to the phone through **ntfy** (free app, no account):
+
+1. su94r Mini → Health vault → **Low alerts on your phone**. Install ntfy on the phone, scan the QR code, subscribe, then **Send a test alert**.
+2. A low is pushed with an **I'm OK** button and repeats until it is tapped or the glucose is back up: every 20 minutes by day, 10 at night (22:00–07:00), 5 when severe (below 55). A low whose sensor goes silent, and a server that loses its LibreLinkUp sign-in, are pushed too.
+3. Family: they subscribe to the care topic (second QR code) and you switch on **Tell caregivers too**; the care ladder (`src/lib/care/escalation.js`) decides when they hear.
+
+In ntfy, let the topic override Do Not Disturb for urgent alerts, or night alerts stay silent. Optional secrets `SU94R_NTFY_BASE` / `SU94R_NTFY_TOKEN` point it at your own ntfy server or account. Code: `workers/night.js`, table `su94r_night`.
+
+### The older su94r-monitor Worker
 
 `su94r-monitor` already calls `/glucose/latest` every five minutes with `HEALTH_INGEST_TOKEN`. Once `SU94R_HEALTH_INGEST_TOKEN` matches it and su94r Mini is connected, check it with:
 

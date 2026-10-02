@@ -36,8 +36,12 @@ function fakeLibre(url, init = {}) {
   return res({ status: 0, data: { connection: conn, graphData: [] } });
 }
 
-let store;
-const deps = () => ({ store, verifyAlexa: async () => {} });
+let store, forecasts;
+function memForecasts() {
+  const rows = new Map();
+  return { ready: true, rows, async save(list) { for (const f of list) rows.set(f.p, f); }, async get(pid) { return rows.get(pid) || null; } };
+}
+const deps = () => ({ store, forecasts, verifyAlexa: async () => {} });
 const alexa = (intent, confirmationStatus = 'NONE') => new Request('https://cgm.test/alexa', {
   method: 'POST',
   body: JSON.stringify({
@@ -58,6 +62,7 @@ const logR = (units = '4', insulin = 'R', extra = {}) => ({
 beforeEach(() => {
   resetCaches();
   store = memStore();
+  forecasts = memForecasts();
   vi.stubGlobal('fetch', vi.fn(fakeLibre));
 });
 
@@ -151,5 +156,57 @@ describe('dose exchange with su94r Mini', () => {
   });
   it('needs the display key', async () => {
     expect((await sync({ markers: [] }, 'wrong')).status).toBe(401);
+  });
+});
+
+describe('logging a meal by voice', () => {
+  const carbs = (grams = '40', extra = {}) => ({ name: 'LogCarbsIntent', slots: { grams: { name: 'grams', value: grams }, ...extra } });
+  it('asks to confirm first, logs after a yes, and a no logs nothing', async () => {
+    expect((await say(carbs())).text).toBe('Log 40 grams of carbs now?');
+    expect(store.rows.size).toBe(0);
+    expect((await say(carbs(), 'DENIED')).text).toMatch(/did not log/);
+    expect(store.rows.size).toBe(0);
+    expect((await say(carbs(), 'CONFIRMED')).text).toMatch(/^Logged 40 grams of carbs now\./);
+    expect([...store.rows.values()][0]).toMatchObject({ pid: 'p1', kind: 'carbs', amount: 40, source: 'alexa' });
+  });
+  it('asks for the grams, takes "30 minutes ago", refuses silly amounts', async () => {
+    expect((await say(carbs(''))).directive).toBe('Dialog.ElicitSlot');
+    expect((await say(carbs('25', { ago: { name: 'ago', value: 'PT30M' } }))).text).toBe('Log 25 grams of carbs 30 minutes ago?');
+    expect((await say(carbs('900'), 'CONFIRMED')).text).toMatch(/more than 300\. I did not log it/);
+    expect(store.rows.size).toBe(0);
+  });
+  it('reaches su94r Mini as a meal, and is not counted as insulin', async () => {
+    await say(carbs('40'), 'CONFIRMED');
+    const r = await (await handleCgm('voice/sync', new Request('https://cgm.test/voice/sync?key=tv-key-123', { method: 'POST', body: JSON.stringify({ markers: [] }) }), ENV, deps())).json();
+    expect(r.doses[0]).toMatchObject({ p: 'p1', type: 'meal', amount: 40, source: 'alexa' });
+    expect(r.doses[0].kind).toBeUndefined();
+    expect((await say({ name: 'LastInsulinIntent', slots: {} })).text).toBe('I have no insulin logged in the last 24 hours.');
+    expect((await say({ name: 'LogInsulinIntent', slots: { units: { value: '4' }, insulin: { value: 'R' } } })).text).toBe('Log 4 units of regular insulin now?');
+  });
+});
+
+describe('where the glucose is heading', () => {
+  const sync = (body) => handleCgm('voice/sync', new Request('https://cgm.test/voice/sync?key=tv-key-123', { method: 'POST', body: JSON.stringify({ markers: [], ...body }) }), ENV, deps());
+  const ask = () => say({ name: 'ForecastIntent', slots: {} });
+  it('reads a trusted estimate su94r Mini sent, with its range, and never suggests a dose', async () => {
+    await sync({ forecasts: [{ p: 'p1', at: Date.now() - 60e3, mg: 120, trusted: true, horizon: 60, h30: { mg: 128, lo: 112, hi: 144 }, h60: { mg: 141, lo: 115, hi: 168 } }] });
+    const r = await ask();
+    expect(r.text).toBe('In half an hour, likely about 128, between 112 and 144. In an hour, likely about 141, between 115 and 168. This is an estimate from your own past data, not a reason to dose.');
+    expect(r.text).not.toMatch(/units|take|inject/i);
+  });
+  it('says so when the low end is under 70', async () => {
+    await sync({ forecasts: [{ p: 'p1', at: Date.now(), mg: 85, trusted: true, horizon: 60, h30: { mg: 76, lo: 64, hi: 88 }, h60: null }] });
+    expect((await ask()).text).toMatch(/The low end of that range is under 70, so keep fast sugar close\./);
+  });
+  it('an untrusted learner, an old estimate, or none: no guess', async () => {
+    expect((await ask()).text).toMatch(/^I don't have a fresh estimate/);
+    await sync({ forecasts: [{ p: 'p1', at: Date.now(), trusted: false }] });
+    expect((await ask()).text).toMatch(/has not earned trust yet/);
+    await sync({ forecasts: [{ p: 'p1', at: Date.now() - 45 * 60e3, mg: 120, trusted: true, h30: { mg: 120, lo: 110, hi: 130 } }] });
+    expect((await ask()).text).toMatch(/^I don't have a fresh estimate/);
+  });
+  it('drops estimates that are not shaped right', async () => {
+    await sync({ forecasts: [{ p: 'p1', at: Date.now(), mg: 120, trusted: true, h30: { mg: 900, lo: 1, hi: 2 } }, { p: 'p1', at: 'soon' }, 'junk'] });
+    expect(forecasts.rows.size).toBe(0);
   });
 });

@@ -44,6 +44,8 @@ export function screenStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     byCode: async (code) => (await call(`?select=*&code=eq.${q(code)}&claimed_at=is.null&revoked=is.false&expires_at=gt.${q(new Date().toISOString())}`))[0] || null,
     byToken: async (h) => (await call(`?select=*&token_hash=eq.${q(h)}&revoked=is.false`))[0] || null,
     update: (id, patch) => call(`?id=eq.${q(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+    /** Claims a row only if nobody has yet; true when this call won. */
+    claimIfOpen: async (id, patch) => (await call(`?id=eq.${q(id)}&claimed_at=is.null&revoked=is.false`, { method: 'PATCH', body: JSON.stringify(patch) })).length > 0,
     list: () => call('?select=id,name,kind,created_at,claimed_at,last_seen&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
     sweep: () => call(`?claimed_at=is.null&expires_at=lt.${q(new Date().toISOString())}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
   };
@@ -98,6 +100,44 @@ export async function pairClaim(request, store) {
     token_hash: await sha256(token), token_once: token,
   });
   return { ok: true, name: clean(name) || row.name || 'Screen' };
+}
+
+// ---- sharing to another phone: a QR code from su94r Mini, nothing to type on the phone ----
+//
+// su94r Mini (owner key) makes a one-time invite; its QR code holds <server>/tv#join=<invite>
+// (in the part after #, which browsers never send to a server). The phone opens it, the page
+// claims the invite once, before it expires, and keeps its own revocable token like a paired
+// screen. role 'me' (another phone of the owner) or 'family' decides which alert topic the
+// phone is offered (share/extras in cgm-core.js).
+
+const SHARE_TTL_MS = 10 * 60e3;
+
+/** POST share/new — a one-time invite for another phone. Returns { invite, role, expiresIn }. */
+export async function shareNew(request, store) {
+  const body = await request.json().catch(() => ({}));
+  await store.sweep().catch(() => {});
+  const invite = randomToken();
+  const role = body.role === 'family' ? 'family' : 'me';
+  await store.insert({
+    id: crypto.randomUUID(), secret_hash: await sha256(invite), kind: 'screen', role,
+    name: clean(body.name) || (role === 'family' ? 'Family phone' : 'My other phone'),
+    expires_at: new Date(Date.now() + SHARE_TTL_MS).toISOString(),
+  });
+  return { invite, role, expiresIn: SHARE_TTL_MS / 1000 };
+}
+
+/** POST share/claim — the phone that opened the invite takes its own token, once. */
+export async function shareClaim(request, store) {
+  const { invite } = await request.json().catch(() => ({}));
+  if (!/^[0-9a-f]{64}$/.test(String(invite || ''))) return { ok: false, error: 'This share link is not complete. Scan the code again.' };
+  const row = await store.bySecret(await sha256(invite));
+  // Only share invites: a waiting TV's polling secret must not turn into a token here.
+  if (!row || !row.role || row.claimed_at) return { ok: false, error: 'This share code was already used. Make a new one in su94r Mini.' };
+  if (Date.parse(row.expires_at) < Date.now()) return { ok: false, error: 'This share code has expired (they last 10 minutes). Make a new one in su94r Mini.' };
+  const token = randomToken();
+  const won = await store.claimIfOpen(row.id, { claimed_at: new Date().toISOString(), token_hash: await sha256(token), secret_hash: await sha256(randomToken()), token_once: null });
+  if (!won) return { ok: false, error: 'This share code was already used. Make a new one in su94r Mini.' };
+  return { ok: true, token, name: row.name, role: row.role };
 }
 
 /**

@@ -1,5 +1,20 @@
 # Glucose on your phone's home screen and your watch
 
+**Fastest: share by QR code.** su94r Mini → Health vault → **Share to another phone**, scan the
+code with the phone. The phone links itself and its **Phone options** hand it a watch / widget
+token with Copy buttons, so the steps below need no typing. (See docs/tv-and-alexa.md.)
+
+### Pixel Watch, step by step (about 3 minutes)
+
+1. On the phone, install **GlucoDataHandler** from the Play Store and open it.
+2. **Sources → Nightscout**: paste the address (`https://<your server>/ns`) and the token from
+   Phone options (or from the link below). Turn the source on; the reading shows in a few seconds.
+3. On the watch, open the Play Store and install **GlucoDataHandler** there too (it pairs itself).
+4. Long-press the watch face → **Customize** → tap a complication slot → **GlucoDataHandler** →
+   glucose value (or value + arrow).
+5. Optional: GlucoDataHandler → **Alarms** for watch vibration on lows. The su94r night alerts
+   (ntfy) keep working either way.
+
 All of these read your own su94r server with a private link. Make it in su94r Mini:
 **Settings → Health vault → Watch faces and phone widgets → Make a link**. You get:
 

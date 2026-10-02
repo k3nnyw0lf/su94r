@@ -26,6 +26,7 @@
 //   mcp/new, mcp/<token>               the AI connector, MCP over HTTP (mcp.js)
 //   ns/new, ns/*                       Nightscout-style feed for watch faces and widgets (nightscout.js)
 //   connect, connect/status, connect/session   su94r Mini connects with its LibreLinkUp sign-in (owner.js)
+//   night/tick, night/setup, night/test, night/ack   low alerts on the phone, every 5 min (night.js)
 // Where DISPLAY_KEY is named, a connected su94r Mini's own key works too.
 // Server-side routes also need LLU_EMAIL and LLU_PASSWORD. Anything unset → 503.
 // ═══════════════════════════════════════════════════════════════════════════
@@ -33,11 +34,13 @@
 import { login as lluLogin, getConnections, getGraph, toPoint, sensorOf, LibreError, DEFAULT_VERSION } from '../extension/libre.js';
 import { handleAlexa } from './alexa.js';
 import { doseStore, asMarkers, WINDOW_MS } from './doses.js';
-import { screenStore, pairStart, pairPoll, pairClaim, screenFor } from './screens.js';
+import { screenStore, pairStart, pairPoll, pairClaim, screenFor, shareNew, shareClaim } from './screens.js';
 import { inboxStore, inboxRoute } from './inbox.js';
 import { mcpRoute } from './mcp.js';
-import { nightscoutRoute } from './nightscout.js';
+import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
+import { nightStore, nightRoute } from './night.js';
+import { forecastStore, cleanForecasts } from './forecast.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -287,6 +290,10 @@ async function voiceSync(request, url, env, deps) {
   })));
   const removed = (Array.isArray(body?.removed) ? body.removed : []).slice(0, 500);
   if (removed.length) await store.markDeleted(removed);
+  // The learner's estimates ride along (forecast.js); a failure here never blocks the doses.
+  const forecasts = cleanForecasts(body?.forecasts, now);
+  const fstore = deps.forecasts || forecastStore(env);
+  if (forecasts.length && fstore.ready) await fstore.save(forecasts).catch(() => {});
   const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa');
   return json({ doses: asMarkers(doses), at: now });
 }
@@ -303,8 +310,33 @@ async function screensRoute(path, request, url, env, deps) {
     if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
     return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
   }
+  if (path === 'share/claim') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const r = await shareClaim(request, store);
+    if (!r.ok) return json(r, 400);
+    // The phone also gets its own watch / widget link (GlucoDataHandler on a Pixel Watch).
+    const ns = await makeNsLink(store, `${r.name} (watch)`).catch(() => null);
+    return json({ ...r, nsToken: ns?.token || null });
+  }
+  if (path === 'share/extras') {
+    // A shared phone (its own token) asks what else it can set up: its alert topic.
+    const screen = await screenFor(request, store, '');
+    if (!screen || !screen.role) return json({ error: 'unauthorized' }, 401);
+    const night = deps.night || nightStore(env);
+    let alerts = null;
+    if (night.ready) {
+      const row = await night.get().catch(() => null);
+      const topic = row && (screen.role === 'family' ? row.care_topic : row.self_topic);
+      if (topic) alerts = { topic, url: `${(env.NTFY_BASE || 'https://ntfy.sh').replace(/\/$/, '')}/${topic}`, role: screen.role, on: screen.role === 'family' ? Boolean(row.care_enabled) : Boolean(row.enabled) };
+    }
+    return json({ name: screen.name, role: screen.role, alerts });
+  }
   // The rest manage screens and need the display key (or a connected su94r Mini's key).
   if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
+  if (path === 'share/new') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    return json(await shareNew(request, store));
+  }
   if (path === 'pair/claim') return json(await pairClaim(request, store));
   if (path === 'screens') return json({ screens: await store.list() });
   if (path === 'screens/remove') {
@@ -315,7 +347,7 @@ async function screensRoute(path, request, url, env, deps) {
   }
   return json({ error: 'not found' }, 404);
 }
-const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove']);
+const SCREEN_ROUTES = new Set(['pair/start', 'pair/poll', 'pair/claim', 'screen/data', 'screen/glance', 'screens', 'screens/remove', 'share/new', 'share/claim', 'share/extras']);
 
 // One person, flattened for widget apps (KWGT, Scriptable): ready-made text and a colour.
 async function glance(env, n) {
@@ -351,7 +383,7 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
     if (path === 'glucose/latest') return await glucoseLatest(request, env);
     if (path === 'display/data') return await displayData(url, env, deps);
-    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa });
+    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env) });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
     const keyOk = (k) => displayKeyOk(env, k, deps);
@@ -369,6 +401,8 @@ export async function handleCgm(path, request, env, deps = {}) {
       doses: () => (deps.store || doseStore(env)).recent(null),
     });
     if (mcp) return mcp;
+    const night = await nightRoute(path, request, url, env, { store: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env), push: deps.push });
+    if (night) return night;
     const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (ns) return ns;
     return json({ error: 'not found' }, 404);

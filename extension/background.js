@@ -2,7 +2,7 @@ import { login, getConnections, getGraph, toPoint, unitsOf, sensorOf, LibreError
 import { withDefaults, displayUnits, fmtGlucose, fmtDelta, TREND_ARROWS, mergeSeries, sensorStatus, fmtDuration } from './glucose.js';
 import { saveReadings, loadReadings, wholeSeries, putRecords, archivedPatients, firstReading } from './archive.js';
 import { ptKey, learnedKey, allPatients, firstName, isDemo } from './store.js';
-import { learn, LEARN_DAYS } from './learner.js';
+import { learn, LEARN_DAYS, forecast, trustworthy, trustedHorizon } from './learner.js';
 import { getSamples, putSamples, preferOneSource, firstSample } from './vault.js';
 import { getToken, saveMonth, readAllMonths, monthOf, monthRange, DRIVE_SCOPES } from './google.js';
 import { RAPID_PROFILES } from './insulin.js';
@@ -341,6 +341,8 @@ function serial(fn) {
 }
 
 const validEvent = (e) => e && typeof e.id === 'string' && e.p && Number.isFinite(e.t) && typeof e.type === 'string';
+// What the su94r server shares with Alexa: every insulin dose, and meals said to Alexa.
+const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && e.source === 'alexa');
 
 function addEvents(list) {
   return serial(async () => {
@@ -364,7 +366,7 @@ function removeEvents(ids) {
     await local.set({ events: events.filter((e) => !drop.has(e.id)) });
     await rememberDeleted(gone.map((e) => ({ id: e.id, t: e.t })));
     // Tell the su94r server too, so Alexa forgets a deleted dose.
-    const insulinGone = gone.filter((e) => e.type === 'insulin').map((e) => e.id);
+    const insulinGone = gone.filter(voiced).map((e) => e.id);
     if (insulinGone.length) {
       const { voiceRemoved = [] } = await local.get('voiceRemoved');
       await local.set({ voiceRemoved: [...new Set([...voiceRemoved, ...insulinGone])].slice(-500) });
@@ -413,7 +415,7 @@ function pullDays(days) {
       await rememberDeleted(events.filter((e) => !kept.has(e.id)).map((e) => ({ id: e.id, t: e.t })));
       const had = new Set(events.map((e) => e.id));
       await markDirty(next.filter((e) => !had.has(e.id)).map((e) => e.t));
-      const goneInsulin = events.filter((e) => e.type === 'insulin' && !kept.has(e.id)).map((e) => e.id);
+      const goneInsulin = events.filter((e) => voiced(e) && !kept.has(e.id)).map((e) => e.id);
       if (goneInsulin.length) {
         const { voiceRemoved = [] } = await local.get('voiceRemoved');
         await local.set({ voiceRemoved: [...new Set([...voiceRemoved, ...goneInsulin])].slice(-500) });
@@ -965,7 +967,7 @@ async function syncVoice(settings) {
     const out = await serial(async () => {
       const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
       const since = Date.now() - 48 * 3600e3;
-      const recent = events.filter((e) => e.type === 'insulin' && e.t >= since && !isDemo(e.p));
+      const recent = events.filter((e) => voiced(e) && e.t >= since && !isDemo(e.p));
       const tomb = await tombstoned(recent).catch(() => new Set());
       const gone = new Set([...voiceRemoved, ...(syncQueue?.remove || []).map((e) => e.id), ...recent.filter((e) => tomb.has(e.id)).map((e) => e.id)]);
       return {
@@ -973,12 +975,12 @@ async function syncVoice(settings) {
         removed: [...gone],
       };
     });
-    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed);
+    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed, await currentForecasts(settings).catch(() => []));
     await serial(async () => {
       const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
       const sent = new Set(out.removed);
       const have = new Set(events.map((e) => e.id));
-      const offered = (r.doses || []).filter((d) => validEvent(d) && d.type === 'insulin' && !have.has(d.id));
+      const offered = (r.doses || []).filter((d) => validEvent(d) && (d.type === 'insulin' || d.type === 'meal') && !have.has(d.id));
       // A dose said to Alexa that another computer has already deleted stays deleted here,
       // and the server is told on the next exchange.
       const tomb = offered.length ? await tombstoned(offered).catch(() => new Set()) : new Set();
@@ -996,6 +998,30 @@ async function syncVoice(settings) {
   } catch (e) {
     await local.set({ voiceError: { message: e.message, at: Date.now() } });
   }
+}
+
+// The learner's estimate for "Alexa, ask my sugar where I'm heading": numbers only, and only
+// when the learner has earned trust (the same check as the estimate line); otherwise only that
+// it has not yet.
+async function currentForecasts(settings) {
+  const now = Date.now();
+  const { events = [] } = await local.get('events');
+  const out = [];
+  for (const p of await allPatients(settings)) {
+    if (!p.latest || now - p.latest.t > 15 * 60e3) continue;
+    const model = (await local.get(learnedKey(p.pid)))[learnedKey(p.pid)];
+    if (!trustworthy(model, now)) { out.push({ p: p.pid, at: p.latest.t, trusted: false }); continue; }
+    const pts = [...(p.hist || []), ...(p.live || [])].filter(([t]) => t > p.latest.t - 40 * 60e3).map(([t, mg]) => ({ t, mg }));
+    const horizon = Math.min(trustedHorizon(model), 60);
+    const f = forecast(pts, events, p.pid, model, { latest: p.latest, horizonMin: horizon, stepMin: 5, health: model.recentHealth || [] });
+    if (!f) continue;
+    const ahead = (min) => {
+      const q = f.points.find((x) => x.t - f.from >= min * 60e3 - 1000);
+      return q ? { mg: Math.round(q.mg), lo: Math.round(q.lo), hi: Math.round(q.hi) } : null;
+    };
+    out.push({ p: p.pid, at: p.latest.t, mg: p.latest.mg, trusted: true, horizon, h30: ahead(30), h60: horizon >= 60 ? ahead(60) : null });
+  }
+  return out;
 }
 
 function plausible(v) {

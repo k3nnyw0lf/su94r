@@ -20,7 +20,7 @@ export function parseScreenLink(link) {
 
 async function call(link, path, { method = 'GET', body } = {}) {
   const p = parseScreenLink(link);
-  if (!p) throw new Error('Paste the big-screen link first (it looks like https://…/d/…).');
+  if (!p) throw new Error('Connect su94r Mini to your su94r server first (Settings → Alexa and screens).');
   const res = await fetch(`${p.base}/${path}?key=${encodeURIComponent(p.key)}`, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
@@ -29,12 +29,12 @@ async function call(link, path, { method = 'GET', body } = {}) {
     signal: AbortSignal.timeout(15000),
   });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || `The su94r server answered ${res.status}.`);
+  if (!res.ok) throw new Error(j.message || j.error || `The su94r server answered ${res.status}.`);
   return j;
 }
 
 /** Sends recent insulin markers and deletions; returns doses said to Alexa. */
-export const exchangeDoses = (link, markers, removed) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed } });
+export const exchangeDoses = (link, markers, removed, forecasts = []) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts } });
 export const claimScreen = (link, code, name) => call(link, 'pair/claim', { method: 'POST', body: { code, name } });
 export const listScreens = (link) => call(link, 'screens');
 export const removeScreen = (link, id) => call(link, 'screens/remove', { method: 'POST', body: { id } });
@@ -53,7 +53,7 @@ const collectHeaders = (secret, key) => ({ 'X-Api-Key': secret, 'X-Collector-Key
 export async function inboxItems(link, secret, key) {
   const res = await fetch(`${inboxBase(link)}/items`, { headers: collectHeaders(secret, key), cache: 'no-store', signal: AbortSignal.timeout(30000) });
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(j.error || `The su94r server answered ${res.status}.`);
+  if (!res.ok) throw new Error(j.message || j.error || `The su94r server answered ${res.status}.`);
   return j;
 }
 /** Tells the server these items are stored here, so it deletes them. */
@@ -92,3 +92,13 @@ export const aiAddress = (link, token) => `${parseScreenLink(link)?.base}/mcp/${
 
 // Watch faces and phone widgets: a Nightscout-style read-only link (server: workers/nightscout.js).
 export const newNsLink = (link, name) => call(link, 'ns/new', { method: 'POST', body: { name } });
+
+// Sharing to another phone (server: workers/screens.js): a one-time invite shown as a QR code;
+// the phone that opens it links itself. The invite rides after the #, never sent to a server.
+export const shareNew = (link, role, name) => call(link, 'share/new', { method: 'POST', body: { role, name } });
+export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/tv#join=${invite}`;
+
+// Night safety net (server: workers/night.js): phone alerts through ntfy, checked every 5 minutes.
+export const nightSetup = (link) => call(link, 'night/setup');
+export const nightSave = (link, patch) => call(link, 'night/setup', { method: 'POST', body: patch });
+export const nightTest = (link) => call(link, 'night/test', { method: 'POST', body: {} });

@@ -5,7 +5,8 @@
 // Table public.su94r_doses (supabase/migrations/20261001_su94r_doses.sql): RLS on with no
 // policies, so only the service-role key used here can read or write it.
 
-const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix']);
+// 'carbs' is a meal said to Alexa (amount in grams); the rest are insulin kinds (amount in units).
+const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const WINDOW_MS = 48 * 3600e3;
 
 export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
@@ -68,4 +69,6 @@ export function valid(d) {
 }
 
 /** Doses in the marker shape su94r Mini and its double-dose guard use. */
-export const asMarkers = (doses) => doses.map((d) => ({ id: d.id, p: d.pid, t: d.t, type: 'insulin', kind: d.kind, ...(d.amount != null ? { amount: d.amount } : {}), source: d.source }));
+export const asMarkers = (doses) => doses.map((d) => (d.kind === 'carbs'
+  ? { id: d.id, p: d.pid, t: d.t, type: 'meal', ...(d.amount != null ? { amount: d.amount } : {}), source: d.source }
+  : { id: d.id, p: d.pid, t: d.t, type: 'insulin', kind: d.kind, ...(d.amount != null ? { amount: d.amount } : {}), source: d.source }));

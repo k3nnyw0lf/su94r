@@ -62,6 +62,15 @@ text{fill:var(--muted);font-size:max(12px,1.8vh)}
 .small .graph{margin-top:6px}
 .small .code{font-size:min(16vh,13vw)}
 .small .how{font-size:13px}
+/* A phone shared from su94r Mini (QR code): its options. */
+.optsBtn{position:fixed;right:12px;bottom:12px;z-index:5;background:rgba(255,255,255,.1);color:var(--fg);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer}
+.opts{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10;background:rgba(0,0,0,.86);overflow:auto;cursor:auto;display:flex;justify-content:center;align-items:flex-start;padding:16px}
+.opts .box{max-width:560px;width:100%;background:#0d1117;border:1px solid rgba(255,255,255,.12);border-radius:14px;padding:18px;font-size:16px;line-height:1.45}
+.opts h2{margin:0 0 8px;font-size:22px}.opts h3{margin:16px 0 4px;font-size:17px}.opts p{margin:6px 0}
+.opts a{color:#58a6ff}.opts .btn{display:inline-block;background:#238636;color:#fff;border:0;border-radius:8px;padding:9px 14px;font-size:15px;text-decoration:none;cursor:pointer;margin:2px 0}
+.opts .btn.ghost{background:transparent;border:1px solid rgba(255,255,255,.3);color:var(--fg)}
+.opts code{word-break:break-all;font-size:12px}.opts .s{font-size:13px;color:var(--muted)}
+.opts button[data-copy]{font-size:12px;padding:3px 8px;border-radius:6px;border:1px solid rgba(255,255,255,.3);background:transparent;color:var(--fg);cursor:pointer}
 </style>
 </head>
 <body>
@@ -158,7 +167,55 @@ async function load(){
   catch(e){$('status').textContent='Problem: '+e.message}
   render();
 }
-load();setInterval(load,60e3);setInterval(render,15e3);addEventListener('resize',render);
+// ---- shared from su94r Mini: its QR code opens /tv#join=<invite>, which links this phone once ----
+// Returns false when a share link was opened and could not be used (the page then says why
+// instead of falling back to the TV pairing code).
+async function join(){
+  const m=/[#&]join=([0-9a-f]{64})/.exec(location.hash||'');if(!m)return true;
+  try{history.replaceState(null,'',location.pathname)}catch(e){}
+  $('title').textContent='Linking this phone…';
+  try{
+    const r=await fetch('/share/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({invite:m[1]})});
+    const j=await r.json().catch(()=>({}));
+    if(!r.ok||!j.ok)throw new Error(j.error||('error '+r.status));
+    store.set('su94rScreenToken',j.token);store.set('su94rShared',j.role||'me');if(j.nsToken)store.set('su94rNsToken',j.nsToken);
+    store.del('su94rScreenSecret');store.del('su94rScreenCode');
+    setTimeout(()=>openOpts(true),1200);
+    return true;
+  }catch(e){
+    if(store.get('su94rScreenToken'))return true;   // already linked before: just show the glucose
+    pairing=true;$('title').textContent='Could not link this phone';$('status').textContent='';
+    const main=$('main');main.className='pair';delete main.dataset.c;
+    main.innerHTML='<div class="how">'+esc(e.message)+'</div><div class="how">On the computer: su94r Mini → Health vault → <b>Share to another phone</b> makes a new code.</div>';
+    return false;
+  }
+}
+function optsButton(){
+  if(!PAIR||!store.get('su94rShared')||!store.get('su94rScreenToken')||$('optsBtn'))return;
+  const b=document.createElement('button');b.id='optsBtn';b.className='optsBtn';b.textContent='⚙ Phone options';b.onclick=()=>openOpts(false);document.body.appendChild(b);
+}
+async function openOpts(first){
+  if($('opts'))return;
+  let x={};
+  try{const r=await fetch('/share/extras',{cache:'no-store',headers:{Authorization:'Bearer '+store.get('su94rScreenToken')}});x=await r.json().catch(()=>({}))}catch(e){}
+  const ns=store.get('su94rNsToken'),base=location.origin,a=x.alerts;
+  const copy=(v)=>' <button data-copy="'+esc(v)+'">Copy</button>';
+  const el=document.createElement('div');el.className='opts';el.id='opts';
+  el.innerHTML='<div class="box"><h2>'+(first?'This phone is linked':'Phone options')+'</h2>'+
+    '<p>It shows the glucose live, even with every computer off. Keep it one tap away: Android Chrome ⋮ → <b>Add to Home screen</b>; iPhone Safari Share → <b>Add to Home Screen</b>.</p>'+
+    (a?'<h3>Low alerts on this phone</h3><p>'+(a.role==='family'?'You are told when a low is not handled.'+(a.on?'':' The owner has not switched family alerts on yet.'):'The same alerts as the owner: every low, repeated until “I’m OK”.')+
+      ' Install <b>ntfy</b> (free): <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Play Store</a> · <a href="https://apps.apple.com/app/ntfy/id1625396347">App Store</a>, then:</p>'+
+      '<p><a class="btn" href="ntfy://'+esc(a.url.replace('https://','').replace('http://',''))+'">Subscribe in ntfy</a> <a class="btn ghost" href="'+esc(a.url)+'">Open in the browser</a></p>'+
+      '<p class="s">Or in ntfy tap + and paste the topic: <code>'+esc(a.topic)+'</code>'+copy(a.topic)+'</p>':'')+
+    (ns?'<h3>Watch and widgets</h3><p>In <b>GlucoDataHandler</b> (free, also on the Pixel Watch): Sources → Nightscout, then this address and token.</p>'+
+      '<p class="s"><code>'+esc(base)+'/ns</code>'+copy(base+'/ns')+'</p><p class="s"><code>'+esc(ns)+'</code>'+copy(ns)+'</p>':'')+
+    '<p><button id="optsClose" class="btn">Done</button> <button id="unlink" class="btn ghost">Unlink this phone</button></p></div>';
+  document.body.appendChild(el);
+  el.addEventListener('click',(e)=>{const v=e.target.getAttribute&&e.target.getAttribute('data-copy');if(v&&navigator.clipboard){navigator.clipboard.writeText(v).then(()=>{e.target.textContent='Copied'}).catch(()=>{})}});
+  $('optsClose').onclick=()=>el.remove();
+  $('unlink').onclick=()=>{if(confirm('Unlink this phone? It stops showing the glucose here.')){store.del('su94rScreenToken');store.del('su94rShared');store.del('su94rNsToken');location.reload()}};
+}
+join().then((ok)=>{if(ok)load()});setInterval(load,60e3);setInterval(render,15e3);setInterval(optsButton,2000);addEventListener('resize',render);
 setTimeout(()=>location.reload(),6*3600e3);
 if('wakeLock' in navigator){const lock=()=>navigator.wakeLock.request('screen').catch(()=>{});lock();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')lock()})}
 </script>

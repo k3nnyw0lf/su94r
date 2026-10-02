@@ -23,6 +23,7 @@ function memScreens() {
     async byCode(c) { return [...rows.values()].find((r) => r.code === c && !r.claimed_at && live(r) && Date.parse(r.expires_at) > Date.now()) || null; },
     async byToken(h) { return [...rows.values()].find((r) => r.token_hash === h && live(r)) || null; },
     async update(id, patch) { if (rows.has(id)) Object.assign(rows.get(id), patch); return []; },
+    async claimIfOpen(id, patch) { const r = rows.get(id); if (!r || r.claimed_at || r.revoked) return false; Object.assign(r, patch); return true; },
     async list() { return [...rows.values()].filter((r) => r.claimed_at && live(r)).map(({ id, name, kind, created_at, claimed_at, last_seen }) => ({ id, name, kind, created_at, claimed_at, last_seen })); },
     async sweep() { for (const [id, r] of rows) if (!r.claimed_at && Date.parse(r.expires_at) < Date.now()) rows.delete(id); },
   };
@@ -125,5 +126,66 @@ describe('glance feed for widget apps', () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error).toMatch(/no reading/);
     expect((await handleCgm('screen/glance', new Request('https://cgm.test/screen/glance?token=bad'), ENV, { screens })).status).toBe(401);
+  });
+});
+
+describe('sharing to another phone with a QR code', () => {
+  const night = {
+    ready: true,
+    async get() { return { self_topic: 'su94r-self', care_topic: 'su94r-care', enabled: true, care_enabled: false }; },
+  };
+  const callN = (path, { body, key, token, method = 'POST' } = {}) => handleCgm(path, new Request(`https://cgm.test/${path}${key ? `?key=${key}` : ''}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: method === 'GET' ? undefined : JSON.stringify(body || {}),
+  }), ENV, { screens, night });
+
+  it('only su94r Mini (owner key) makes an invite; the phone claims it once and gets its own token', async () => {
+    expect((await call('share/new', { body: { role: 'me' } })).status).toBe(401);
+    const inv = await json(call('share/new', { key: 'tv-key-123', body: { role: 'me' } }));
+    expect(inv).toMatchObject({ role: 'me', expiresIn: 600 });
+    expect(inv.invite).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify([...screens.rows.values()])).not.toContain(inv.invite);     // only its hash is kept
+    const r = await json(call('share/claim', { body: { invite: inv.invite } }));
+    expect(r).toMatchObject({ ok: true, role: 'me', name: 'My other phone' });
+    expect(r.token).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.nsToken).toMatch(/^[0-9a-f]{64}$/);
+    expect((await call('screen/data', { token: r.token, method: 'GET' })).status).toBe(200);
+    const again = await call('share/claim', { body: { invite: inv.invite } });
+    expect(again.status).toBe(400);
+    expect((await again.json()).error).toMatch(/already used/);
+  });
+
+  it('an expired invite, a made-up one, or a waiting TV\'s secret is refused', async () => {
+    const inv = await json(call('share/new', { key: 'tv-key-123', body: {} }));
+    const row = [...screens.rows.values()].find((x) => x.role);
+    row.expires_at = new Date(Date.now() - 1000).toISOString();
+    expect((await json(call('share/claim', { body: { invite: inv.invite } }))).error).toMatch(/expired/);
+    expect((await call('share/claim', { body: { invite: 'f'.repeat(64) } })).status).toBe(400);
+    const tv = await json(call('pair/start', { body: {} }));
+    expect((await call('share/claim', { body: { invite: tv.secret } })).status).toBe(400);
+    expect([...screens.rows.values()].find((x) => x.code === tv.code).token_hash).toBeNull();   // the TV got nothing
+  });
+
+  it('the phone is offered the alert topic for its role, with its own token only', async () => {
+    const me = await json(call('share/claim', { body: { invite: (await json(call('share/new', { key: 'tv-key-123', body: { role: 'me' } }))).invite } }));
+    const fam = await json(call('share/claim', { body: { invite: (await json(call('share/new', { key: 'tv-key-123', body: { role: 'family', name: 'Mom' } }))).invite } }));
+    expect(await json(callN('share/extras', { token: me.token, method: 'GET' }))).toMatchObject({ role: 'me', alerts: { topic: 'su94r-self', url: 'https://ntfy.sh/su94r-self', on: true } });
+    expect(await json(callN('share/extras', { token: fam.token, method: 'GET' }))).toMatchObject({ role: 'family', name: 'Mom', alerts: { topic: 'su94r-care', on: false } });
+    expect((await callN('share/extras', { method: 'GET' })).status).toBe(401);
+    // A TV paired with a code has no role: no topics for it.
+    const tv = await json(call('pair/start', { body: {} }));
+    await call('pair/claim', { key: 'tv-key-123', body: { code: tv.code, name: 'TV' } });
+    const tvToken = (await json(call('pair/poll', { body: { secret: tv.secret } }))).token;
+    expect((await callN('share/extras', { token: tvToken, method: 'GET' })).status).toBe(401);
+  });
+
+  it('a shared phone shows in the list and is removed like any screen', async () => {
+    const r = await json(call('share/claim', { body: { invite: (await json(call('share/new', { key: 'tv-key-123', body: { role: 'family', name: 'Mom' } }))).invite } }));
+    const list = (await json(call('screens', { key: 'tv-key-123', method: 'GET' }))).screens;
+    const mom = list.find((x) => x.name === 'Mom');
+    expect(mom).toBeTruthy();
+    await call('screens/remove', { key: 'tv-key-123', body: { id: mom.id } });
+    expect((await call('screen/data', { token: r.token, method: 'GET' })).status).toBe(401);
   });
 });
