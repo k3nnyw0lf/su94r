@@ -47,6 +47,32 @@ const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest',
   '/share/new', '/share/claim', '/share/extras']);
 
 const MAX_BODY = 2 * 1024 * 1024;
+
+// Carb estimate for a Telegram meal photo (workers/telegram.js → here, because Workers AI runs in
+// Workers). Only su94r-cgm may ask: it sends a proof derived from its bot's secret, and
+// su94r-cgm itself confirms it (tg/proof), so nobody else can spend the AI allowance.
+export const MEAL_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
+async function aiMeal(request, env) {
+  if (!env.AI || !env.CGM_URL) return json({ error: 'AI is not set up' }, 503);
+  if (Number(request.headers.get('content-length')) > MAX_BODY) return json({ error: 'too large' }, 413);
+  const proof = request.headers.get('x-su94r-proof') || '';
+  if (!HEX64.test(proof)) return json({ error: 'unauthorized' }, 401);
+  const check = await fetch(`${env.CGM_URL}/tg/proof`, { method: 'POST', headers: { 'x-su94r-proof': proof } }).catch(() => null);
+  if (!check?.ok) return json({ error: 'unauthorized' }, 401);
+  const { image, prompt } = await request.json().catch(() => ({}));
+  if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(String(image || ''))) return json({ error: 'bad image' }, 400);
+  const r = await env.AI.run(MEAL_MODEL, {
+    messages: [
+      { role: 'system', content: String(prompt || '').slice(0, 2000) },
+      { role: 'user', content: [{ type: 'text', text: 'Estimate the carbohydrates in this photo.' }, { type: 'image_url', image_url: { url: image } }] },
+    ],
+    max_tokens: 400,
+    temperature: 0.2,
+  });
+  // The model answers JSON; Workers AI sometimes hands it over already parsed.
+  const out = r?.response;
+  return json({ text: (typeof out === 'string' ? out : JSON.stringify(out ?? '')).slice(0, 4000) });
+}
 const HEX64 = /^[0-9a-f]{64}$/;
 
 /**
@@ -169,6 +195,7 @@ export default {
       if (path === '/dexcom/login' && request.method === 'POST') return await dexcomLogin(request);
       if (path === '/dexcom/readings' && request.method === 'POST') return await dexcomReadings(request);
       if (path === '/nightscout/readings' && request.method === 'POST') return await nightscoutReadings(request);
+      if (path === '/ai/meal' && request.method === 'POST') return await aiMeal(request, env);
       if (path === '/health/ingest') return await handleHealthIngest(request, env);
       if (path === '/google/start') return await handleStart(request, env);
       if (path === '/google/callback') return await handleCallback(request, env);

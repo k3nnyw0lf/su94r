@@ -105,6 +105,10 @@ The server itself checks every 5 minutes (a database cron calls `night/tick`, se
 1. su94r Mini → Health vault → **Low alerts on your phone**. Install ntfy on the phone, scan the QR code, subscribe, then **Send a test alert**.
 2. A low is pushed with an **I'm OK** button and repeats until it is tapped or the glucose is back up: every 20 minutes by day, 10 at night (22:00–07:00), 5 when severe (below 55). A low whose sensor goes silent, and a server that loses its LibreLinkUp sign-in, are pushed too.
 3. Family: they subscribe to the care topic (second QR code) and you switch on **Tell caregivers too**; the care ladder (`src/lib/care/escalation.js`) decides when they hear.
+4. **Low soon**: while still in range, a fall that projects under the low line within 20 minutes is pushed first ("Low soon: 98 ↘, likely under 70 in about 12 min"), once per fall, repeated after 15 minutes at most 3 times. **Sensor and signal**: no readings for 30 minutes (and when they are back), and the day before a sensor ends (14- or 15-day sensors). Both can be switched off under **Levels and warnings**.
+5. **Sunday summary**: every Sunday from 6 PM, su94r Mini sends a plain-language summary of the week against the week before (time in range, lows and when, average, GMI, steadiness) to ntfy and Telegram (`night/notify`). **Send this week's summary now** in the same card.
+
+**Doctor visit pack**: su94r Mini → Glucose report (the standard AGP: time in ranges, GMI, CV, percentiles by time of day, logged insulin and meals) now makes a real PDF without a print dialog: **Download PDF**, **Save PDF to Drive** (folder "su94r") or **Send PDF to Telegram** (`tg/document`, your own chats).
 
 In ntfy, let the topic override Do Not Disturb for urgent alerts, or night alerts stay silent. Optional secrets `SU94R_NTFY_BASE` / `SU94R_NTFY_TOKEN` point it at your own ntfy server or account. Code: `workers/night.js`, table `su94r_night`.
 
@@ -115,6 +119,8 @@ su94r Mini → Health vault → **Low alerts on Telegram**:
 1. Once: **Open BotFather**, send `/newbot`, pick a name and a username ending in "bot", paste the token BotFather gives you into the card and press **Save**. It goes only to your su94r server, which checks it with Telegram and points the bot at itself (with a secret header, so only Telegram can call it). No route ever returns the token.
 2. **Link my Telegram** (or a family member's): tap **Open in Telegram** or scan the QR code, then press **Start** in Telegram. The link works once, for 15 minutes. A phone you shared (above) finds the same button in its Phone options.
 3. Alerts arrive with an **I'm OK** button; `/sugar` answers with the glucose now; `/stop` unlinks. Chats that never linked get no answer at all.
+
+**Logbook in Telegram** (your own chats): write "4 units rapid", "20 Lantus 30 min ago" or "40 g", and the bot asks "Log 4 units of regular insulin now?" with **Log it** / **Cancel** (after a double-dose warning if one applies). Send a **photo of your plate** for a carb estimate ("About 48 g, likely 38–60 g") with a **Log 48 g** button; it runs on Workers AI through su94r-proxy (`/ai/meal`, Mistral Small 3.1), which only answers requests carrying a proof su94r-cgm confirms. A caption like "35g" wins over the estimate. Nothing is logged without the tap, and nothing ever suggests a dose. Family chats can only use `/sugar`.
 
 An alert counts as delivered when ntfy or Telegram took it. **Pause Telegram alerts** stops only this bot. Code: `workers/telegram.js`, tables `su94r_telegram_bot`, `su94r_telegram_chats`, `su94r_telegram_links`.
 

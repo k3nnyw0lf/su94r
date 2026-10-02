@@ -23,6 +23,46 @@
 
 import { sha256, randomToken } from './screens.js';
 import { acknowledge } from './night.js';
+import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal } from './tglog.js';
+import { asMarkers } from './doses.js';
+import { doubleDoseWarning } from '../extension/insulin.js';
+
+const DEFAULT_PROXY = 'https://su94r-proxy.ken-e90.workers.dev';
+const MAX_PHOTO_BYTES = 1500 * 1024;
+
+/** The proof su94r-cgm hands the proxy for a meal photo (the proxy asks tg/proof to check it). */
+export const mealProof = (bot) => sha256(`${bot.webhook_secret}:meal`);
+
+function base64(buf) {
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+/** Downloads a Telegram photo (the largest size under the limit) as a data: URL. */
+async function photoDataUrl(bot, photos, { api, fetchImpl }) {
+  const pick = [...photos].sort((a, b) => (b.file_size || 0) - (a.file_size || 0)).find((p) => (p.file_size || 0) <= MAX_PHOTO_BYTES);
+  if (!pick) return null;
+  const file = await api(bot.token, 'getFile', { file_id: pick.file_id });
+  const res = await fetchImpl(`https://api.telegram.org/file/bot${bot.token}/${file.file_path}`);
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > MAX_PHOTO_BYTES) return null;
+  return `data:image/jpeg;base64,${base64(buf)}`;
+}
+
+/** Asks the proxy's Workers AI for a carb estimate; returns the parsed estimate or null. */
+export async function askMeal(env, bot, dataUrl, { fetchImpl = (...a) => fetch(...a) } = {}) {
+  const res = await fetchImpl(`${(env.PROXY_URL || DEFAULT_PROXY).replace(/\/$/, '')}/ai/meal`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Su94r-Proof': await mealProof(bot) },
+    body: JSON.stringify({ image: dataUrl, prompt: MEAL_PROMPT }),
+  });
+  if (!res.ok) return null;
+  const j = await res.json().catch(() => ({}));
+  return parseMealAnswer(j.text);
+}
 
 const LINK_TTL_MS = 15 * 60e3;
 const TG = 'https://api.telegram.org';
@@ -113,7 +153,7 @@ function sugarText(snap) {
 }
 
 /** Handles Telegram's own calls (the bot's webhook). */
-async function webhook(request, store, { api, snapshot, night }) {
+async function webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl }) {
   const bot = await store.bot();
   if (!bot?.token || !bot.webhook_secret) return { status: 404 };
   if (request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== bot.webhook_secret) return { status: 401 };
@@ -124,7 +164,30 @@ async function webhook(request, store, { api, snapshot, night }) {
     const cq = u.callback_query;
     const chatId = cq.message?.chat?.id;
     const linked = chatId != null && await store.chat(chatId);
-    const m = /^ack:([0-9a-f]{32})$/.exec(String(cq.data || ''));
+    const data = String(cq.data || '');
+    // "Log it" / "Cancel" under a logbook question.
+    if (data === 'nolog' || data.startsWith('log:')) {
+      let text = 'This chat is not linked to su94r.';
+      let done = null;
+      if (linked && linked.role === 'me' && data === 'nolog') { text = 'Not logged.'; done = 'Not logged.'; }
+      else if (linked && linked.role === 'me') {
+        const entry = entryFromData(data);
+        const pid = await firstPerson(snapshot, doses);
+        if (!entry || !pid || !doses?.ready) text = 'That can no longer be logged. Send it again.';
+        else {
+          try {
+            // The same question answered twice logs once: the id comes from the question.
+            await doses.upsert([{ id: `tg-${chatId}-${cq.message.message_id}`, pid, t: entry.t, kind: entry.kind, amount: entry.amount, source: 'telegram' }]);
+            text = 'Logged.';
+            done = `Logged ${entry.label} at ${new Date(entry.t).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}. It shows in su94r Mini within a minute.`;
+          } catch { text = 'Could not save it just now. Nothing was logged.'; }
+        }
+      } else if (linked) text = 'Only the owner\'s own chats can log.';
+      await api(bot.token, 'answerCallbackQuery', { callback_query_id: cq.id, text }).catch(() => {});
+      if (done) await api(bot.token, 'editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: done }).catch(() => {});
+      return { status: 200 };
+    }
+    const m = /^ack:([0-9a-f]{32})$/.exec(data);
     let text = 'This chat is not linked to su94r.';
     if (linked && m && night?.ready) {
       const row = await night.get();
@@ -138,10 +201,49 @@ async function webhook(request, store, { api, snapshot, night }) {
   }
 
   const msg = u.message;
-  if (!msg?.chat?.id || typeof msg.text !== 'string') return { status: 200 };
+  if (!msg?.chat?.id) return { status: 200 };
   const chatId = msg.chat.id;
+  if (Array.isArray(msg.photo) && msg.photo.length) {
+    const linkedChat = await store.chat(chatId);
+    if (!linkedChat) return { status: 200 };                 // strangers get nothing
+    const typed = parseLog(msg.caption || '');                 // "40 g" written under the photo wins
+    if (typed) return askToLog(chatId, linkedChat, typed);
+    await api(bot.token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
+    let estimate = null;
+    try {
+      const dataUrl = await photoDataUrl(bot, msg.photo, { api, fetchImpl });
+      estimate = dataUrl && meal ? await meal(bot, dataUrl) : null;
+    } catch { estimate = null; }
+    const d = describeMeal(estimate);
+    if (d.total > 0 && linkedChat.role === 'me') {
+      const q = describeLog({ type: 'carbs', grams: d.total, back: null });
+      await say(chatId, d.text, { reply_markup: { inline_keyboard: [[{ text: `Log ${d.total} g`, callback_data: q.data }, { text: 'Cancel', callback_data: 'nolog' }]] } });
+    } else {
+      await say(chatId, d.text);
+    }
+    return { status: 200 };
+  }
+  if (typeof msg.text !== 'string') return { status: 200 };
   const [cmd, arg] = msg.text.trim().split(/\s+/, 2);
   const command = cmd.toLowerCase().replace(/@\w+$/, '');
+
+  // A logbook question with "Log it" / "Cancel" (owner's chats only; nothing is logged yet).
+  async function askToLog(id, chat, entry) {
+    if (chat.role !== 'me') { await say(id, 'Only the owner\'s own chats can log. /sugar shows the glucose now.'); return { status: 200 }; }
+    const q = describeLog(entry);
+    if (q.error) { await say(id, q.error); return { status: 200 }; }
+    let warning = '';
+    if (entry.type === 'insulin' && doses?.ready) {
+      try {
+        const pid = await firstPerson(snapshot, doses);
+        const recent = pid ? asMarkers(await doses.recent(pid)) : [];
+        const w = pid && doubleDoseWarning(recent, pid, { t: Date.now() - (entry.back || 0), kind: entry.kind }, {}, Date.now());
+        if (w) warning = `Careful: ${w}\n`;
+      } catch { /* no warning rather than no question */ }
+    }
+    await say(id, `${warning}${q.text}`, { reply_markup: { inline_keyboard: [[{ text: 'Log it', callback_data: q.data }, { text: 'Cancel', callback_data: 'nolog' }]] } });
+    return { status: 200 };
+  }
 
   if (command === '/start') {
     if (!/^[A-Za-z0-9_-]{16,64}$/.test(arg || '')) {
@@ -167,19 +269,37 @@ async function webhook(request, store, { api, snapshot, night }) {
     try { text = sugarText(await snapshot()); } catch { text = 'I could not reach LibreLinkUp just now.'; }
     await say(chatId, text);
   } else {
-    await say(chatId, '/sugar shows the glucose now. /stop unlinks this chat.');
+    const entry = parseLog(msg.text);
+    if (entry) return askToLog(chatId, linked, entry);
+    await say(chatId, linked.role === 'me'
+      ? 'Log by writing, for example: 4 units rapid · 20 Lantus 30 min ago · 40 g. Or send a photo of your plate for a carb estimate. /sugar shows the glucose now, /stop unlinks this chat.'
+      : '/sugar shows the glucose now. /stop unlinks this chat.');
   }
   return { status: 200 };
 }
 
-export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi }) {
+/** Whose doses: the first person followed (as Alexa does), else whoever has recent doses. */
+async function firstPerson(snapshot, doses) {
+  try { const p = (await snapshot()).people?.[0]; if (p?.pid) return p.pid; } catch { /* LibreLinkUp down */ }
+  try { return (await doses.recent(null))[0]?.pid || null; } catch { return null; }
+}
+
+export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi, doses = null, meal = null, fetchImpl = (...a) => fetch(...a) }) {
   if (path !== 'tg' && !path.startsWith('tg/')) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
 
   if (path === 'tg/webhook') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
-    const r = await webhook(request, store, { api, snapshot, night });
+    const r = await webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl });
     return json({ ok: r.status === 200 }, r.status);
+  }
+
+  if (path === 'tg/proof') {
+    // The proxy asks whether a meal-photo request really came from this server's bot.
+    const bot = await store.bot();
+    const given = request.headers.get('X-Su94r-Proof') || '';
+    const ok = Boolean(bot?.webhook_secret) && /^[0-9a-f]{64}$/.test(given) && given === await mealProof(bot);
+    return json({ ok }, ok ? 200 : 401);
   }
 
   if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
@@ -229,6 +349,26 @@ export async function telegramRoute(path, request, url, env, { store, json, keyO
   if (path === 'tg/enabled') {
     await store.setEnabled(Boolean(body.enabled));
     return json({ ok: true, enabled: Boolean(body.enabled) });
+  }
+  if (path === 'tg/document') {
+    // The glucose report PDF from su94r Mini to the owner's chats.
+    const name = String(body.name || 'su94r-report.pdf').replace(/[^\w.-]/g, '').slice(0, 80) || 'su94r-report.pdf';
+    const data = String(body.data || '');
+    if (!/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 2_000_000) return json({ error: 'bad-file', message: 'That file could not be sent.' }, 400);
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    if (String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-') return json({ error: 'bad-file', message: 'Only PDF reports can be sent.' }, 400);
+    const chats = await store.chats('me');
+    if (!chats.length) return json({ error: 'no-chats', message: 'No Telegram chat is linked for you yet: Link my Telegram first.' }, 409);
+    let n = 0;
+    for (const c of chats) {
+      const form = new FormData();
+      form.append('chat_id', String(c.chat_id));
+      if (body.caption) form.append('caption', String(body.caption).slice(0, 200));
+      form.append('document', new Blob([bytes], { type: 'application/pdf' }), name);
+      const res = await fetchImpl(`${TG}/bot${bot.token}/sendDocument`, { method: 'POST', body: form }).catch(() => null);
+      if (res?.ok) n++;
+    }
+    return json({ ok: n > 0, sent: n }, n ? 200 : 502);
   }
   if (path === 'tg/test') {
     const chats = await store.chats('me');

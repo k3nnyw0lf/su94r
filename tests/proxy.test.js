@@ -199,3 +199,26 @@ describe('nightscoutEntriesUrl', () => {
     }
   });
 });
+
+describe('meal photos through Workers AI (/ai/meal)', () => {
+  it('runs only with a proof su94r-cgm confirms, and only on an image', async () => {
+    const { default: worker } = await import('../workers/proxy.js');
+    const ai = { calls: [], async run(model, input) { this.calls.push({ model, input }); return { response: '{"food":true,"total_g":40}' }; } };
+    const good = 'b'.repeat(64);
+    const fetchMock = vi.fn(async (url, init) => new Response('{}', { status: String(url).endsWith('/tg/proof') && init.headers['x-su94r-proof'] === good ? 200 : 401 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const env = { AI: ai, CGM_URL: 'https://cgm.test' };
+    const ask = (proof, image) => worker.fetch(new Request('https://proxy.test/ai/meal', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(proof ? { 'x-su94r-proof': proof } : {}) }, body: JSON.stringify({ image, prompt: 'p' }) }), env);
+    expect((await ask(null, 'data:image/jpeg;base64,AAAA')).status).toBe(401);
+    expect((await ask('c'.repeat(64), 'data:image/jpeg;base64,AAAA')).status).toBe(401);
+    expect(ai.calls).toHaveLength(0);
+    expect((await ask(good, 'https://example.com/x.jpg')).status).toBe(400);
+    const r = await ask(good, 'data:image/jpeg;base64,AAAA');
+    expect(r.status).toBe(200);
+    expect((await r.json()).text).toBe('{"food":true,"total_g":40}');
+    expect(ai.calls[0].model).toBe('@cf/mistralai/mistral-small-3.1-24b-instruct');
+    expect(ai.calls[0].input.messages[1].content[1].image_url.url).toBe('data:image/jpeg;base64,AAAA');
+    ai.run = async () => ({ response: { food: true, total_g: 30 } });   // sometimes already parsed
+    expect((await (await ask(good, 'data:image/jpeg;base64,AAAA')).json()).text).toBe('{"food":true,"total_g":30}');
+  });
+});

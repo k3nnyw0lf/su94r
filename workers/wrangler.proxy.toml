@@ -23,5 +23,9 @@ enabled = true
 [observability.logs]
 invocation_logs = false
 
+# Workers AI (already on the account's plan): carb estimates from Telegram meal photos (/ai/meal).
+[ai]
+binding = "AI"
+
 [vars]
 CGM_URL = "https://sfelhasepvaoianyuvxe.supabase.co/functions/v1/su94r-cgm"

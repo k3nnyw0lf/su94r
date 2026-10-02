@@ -42,7 +42,7 @@ import { nightscoutRoute, makeNsLink } from './nightscout.js';
 import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
 import { nightStore, nightRoute } from './night.js';
 import { forecastStore, cleanForecasts } from './forecast.js';
-import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor } from './telegram.js';
+import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -296,7 +296,8 @@ async function voiceSync(request, url, env, deps) {
   const forecasts = cleanForecasts(body?.forecasts, now);
   const fstore = deps.forecasts || forecastStore(env);
   if (forecasts.length && fstore.ready) await fstore.save(forecasts).catch(() => {});
-  const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa');
+  // Doses that did not come from a computer: said to Alexa or logged in Telegram.
+  const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa' || d.source === 'telegram');
   return json({ doses: asMarkers(doses), at: now });
 }
 
@@ -411,7 +412,10 @@ export async function handleCgm(path, request, env, deps = {}) {
       telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
     });
     if (night) return night;
-    const tg = await telegramRoute(path, request, url, env, { store: tgStore, json, keyOk, snapshot: () => snapshot(env), night: deps.night || nightStore(env), api: deps.tgApi });
+    const tg = await telegramRoute(path, request, url, env, {
+      store: tgStore, json, keyOk, snapshot: () => snapshot(env), night: deps.night || nightStore(env), api: deps.tgApi,
+      doses: deps.store || doseStore(env), meal: deps.meal || ((bot, dataUrl) => askMeal(env, bot, dataUrl)), fetchImpl: deps.fetchImpl,
+    });
     if (tg) return tg;
     const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (ns) return ns;

@@ -9,65 +9,16 @@ import { withDefaults, displayUnits, fmtGlucose, mergeSeries, INSULIN_KINDS, loc
 import { loadReadings, wholeSeries } from './archive.js';
 import { allPatients } from './store.js';
 import { insulinTiming } from './insights.js';
+import { reportPdf, toBase64 } from './reportpdf.js';
+import { getToken, DRIVE_SCOPES, GOOGLE_HOSTS, saveBlob } from './google.js';
+import { tgDocument } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 const SVG = 'http://www.w3.org/2000/svg';
 const DAY = 864e5;
 
-/** Pure: everything the report shows, from readings and markers. */
-export function agp(points, events, { from, to, low = 70, high = 180 } = {}) {
-  const pts = points.filter((p) => p.t >= from && p.t < to).sort((a, b) => a.t - b.t);
-  const n = pts.length;
-  const share = (f) => (n ? pts.filter(f).length / n : 0);
-  const mean = n ? pts.reduce((s, p) => s + p.mg, 0) / n : null;
-  const sd = n > 1 ? Math.sqrt(pts.reduce((s, p) => s + (p.mg - mean) ** 2, 0) / (n - 1)) : null;
-  // Expected readings: one per 5 minutes over the period (15-minute history counts as 3).
-  let covered = 0;
-  for (let i = 1; i < pts.length; i++) covered += Math.min(pts[i].t - pts[i - 1].t, 15 * 60e3);
-  const days = Math.max(1, Math.round((to - from) / DAY));
-
-  // Percentiles by 15-minute slot of the day, smoothed over the neighbouring slots.
-  const slots = Array.from({ length: 96 }, () => []);
-  for (const p of pts) {
-    const d = new Date(p.t);
-    slots[Math.floor((d.getHours() * 60 + d.getMinutes()) / 15)].push(p.mg);
-  }
-  const q = (arr, f) => {
-    if (!arr.length) return null;
-    const s = [...arr].sort((a, b) => a - b);
-    const i = (s.length - 1) * f;
-    return s[Math.floor(i)] + (s[Math.ceil(i)] - s[Math.floor(i)]) * (i - Math.floor(i));
-  };
-  const profile = slots.map((_, i) => {
-    const near = [-2, -1, 0, 1, 2].flatMap((k) => slots[(i + k + 96) % 96]);
-    return near.length >= 5 ? { slot: i, p5: q(near, 0.05), p25: q(near, 0.25), p50: q(near, 0.5), p75: q(near, 0.75), p95: q(near, 0.95) } : null;
-  });
-
-  const mine = events.filter((e) => e.t >= from && e.t < to);
-  const insulin = {};
-  for (const e of mine.filter((x) => x.type === 'insulin')) {
-    const k = e.kind || 'rapid';
-    insulin[k] = insulin[k] || { doses: 0, units: 0, withAmount: 0 };
-    insulin[k].doses++;
-    if (Number(e.amount) > 0) { insulin[k].units += Number(e.amount); insulin[k].withAmount++; }
-  }
-  const meals = mine.filter((e) => e.type === 'meal');
-  return {
-    from, to, days, n,
-    coverage: Math.min(1, covered / (to - from)),
-    mean,
-    gmi: mean != null ? 3.31 + 0.02392 * mean : null,
-    cv: mean && sd ? (sd / mean) * 100 : null,
-    veryLow: share((p) => p.mg < 54),
-    low: share((p) => p.mg >= 54 && p.mg < low),
-    inRange: share((p) => p.mg >= low && p.mg <= high),
-    high: share((p) => p.mg > high && p.mg <= 250),
-    veryHigh: share((p) => p.mg > 250),
-    profile,
-    insulin,
-    meals: { count: meals.length, carbs: meals.reduce((s, m) => s + (Number(m.amount) || 0), 0) },
-  };
-}
+export { agp } from './agp.js';
+import { agp } from './agp.js';
 
 const pct = (x) => `${(x * 100).toFixed(x > 0 && x < 0.01 ? 1 : 0)}%`;
 function el(tag, attrs = {}, ...kids) {
@@ -187,4 +138,44 @@ async function build() {
 $('who')?.addEventListener('change', (e) => { const p = new URLSearchParams(location.search); p.set('p', e.target.value); location.search = p; });
 $('days')?.addEventListener('change', (e) => { const p = new URLSearchParams(location.search); p.set('days', e.target.value); location.search = p; });
 $('print')?.addEventListener('click', () => print());
+
+// ---- the report as a PDF: download, Drive, Telegram (no print dialog) ----
+const fileName = () => `su94r-glucose-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+const say = (text) => { $('status').textContent = text; };
+async function makePdf() {
+  say('Making the PDF…');
+  const css = await (await fetch('report.css')).text();
+  return new Blob([await reportPdf($('report'), css, { title: document.title })], { type: 'application/pdf' });
+}
+async function run(fn) {
+  for (const b of document.querySelectorAll('.toolbar button')) b.disabled = true;
+  try { await fn(); } catch (e) { say(e.message || 'That did not work.'); }
+  for (const b of document.querySelectorAll('.toolbar button')) b.disabled = false;
+}
+$('pdf')?.addEventListener('click', () => run(async () => {
+  const blob = await makePdf();
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: fileName() });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 30e3);
+  say(`PDF ready (${Math.round(blob.size / 1024)} KB).`);
+}));
+$('drive')?.addEventListener('click', () => run(async () => {
+  const ok = await chrome.permissions.request({ origins: GOOGLE_HOSTS }).catch(() => false);
+  if (!ok) throw new Error('su94r Mini needs permission to reach Google Drive.');
+  const token = await getToken(DRIVE_SCOPES, { interactive: true });
+  const blob = await makePdf();
+  say('Saving to Drive…');
+  const f = await saveBlob(token, fileName(), blob, 'application/pdf');
+  say('Saved in your Drive, folder "su94r".');
+  if (f?.webViewLink) chrome.tabs.create({ url: f.webViewLink });
+}));
+$('telegram')?.addEventListener('click', () => run(async () => {
+  const { settings } = await chrome.storage.local.get('settings');
+  if (!withDefaults(settings).screenLink) throw new Error('Connect su94r Mini to your su94r server first (Settings → Alexa and screens).');
+  const blob = await makePdf();
+  if (blob.size > 1400 * 1024) throw new Error('The PDF is too large for Telegram here; use Download PDF.');
+  say('Sending to Telegram…');
+  const r = await tgDocument(withDefaults(settings).screenLink, fileName(), toBase64(new Uint8Array(await blob.arrayBuffer())), document.title);
+  say(`Sent to ${r.sent} Telegram chat${r.sent === 1 ? '' : 's'}.`);
+}));
 if (globalThis.chrome?.storage) { watchContext(); build(); }

@@ -145,3 +145,122 @@ describe('alerts on Telegram', () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe('the Telegram logbook', () => {
+  let doses, mealCalls;
+  function memDoses() {
+    const rows = new Map();
+    return {
+      ready: true, rows,
+      async recent(pid) { return [...rows.values()].filter((d) => !pid || d.pid === pid).sort((a, b) => b.t - a.t); },
+      async upsert(list) { for (const d of list) rows.set(d.id, { ...d, t: new Date(d.t).getTime() }); return list.length; },
+    };
+  }
+  const callL = (path, { body, headers = {} } = {}) => {
+    const url = new URL(`https://cgm.test/${path}`);
+    return telegramRoute(path, new Request(url, { method: 'POST', headers, body: JSON.stringify(body || {}) }), url, env, {
+      store: tg, json, keyOk, snapshot, night, api: apiL, doses,
+      meal: async (bot, dataUrl) => { mealCalls.push(dataUrl.slice(0, 30)); return { food: true, total: 48, low: 38, high: 60, items: [{ name: 'rice', carbs: 40 }], confidence: 'medium' }; },
+      fetchImpl: async () => new Response(new Uint8Array([255, 216, 255, 224, 1, 2, 3]), { status: 200 }),
+    });
+  };
+  const apiL = async (token, method, body) => { sent.push({ method, body }); if (method === 'getFile') return { file_path: 'photos/a.jpg' }; if (method === 'getMe') return { id: 42, username: 'su94r_alerts_bot' }; return { message_id: 900 }; };
+  const say = (text, chatId = 1001) => callL('tg/webhook', { body: { message: { chat: { id: chatId }, text } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': tg.bot_.webhook_secret } });
+  const tap = (data, chatId = 1001) => callL('tg/webhook', { body: { callback_query: { id: 'c', data, message: { chat: { id: chatId }, message_id: 77 } } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': tg.bot_.webhook_secret } });
+  const lastSend = () => sent.filter((s) => s.method === 'sendMessage').at(-1)?.body;
+
+  beforeEach(async () => {
+    doses = memDoses();
+    mealCalls = [];
+    await call('tg/config', { query: '?key=owner', body: { token: TOKEN } });
+    await startWith(codeOf((await (await call('tg/link/new', { query: '?key=owner', body: { role: 'me' } })).json()).url), 1001);
+    await startWith(codeOf((await (await call('tg/link/new', { query: '?key=owner', body: { role: 'family' } })).json()).url), 5005, 'Mom');
+    sent = [];
+  });
+
+  it('"4 R" asks first with Log it / Cancel, and logs only after Log it (once, even if tapped twice)', async () => {
+    await say('4 R');
+    const q = lastSend();
+    expect(q.text).toBe('Log 4 units of regular insulin now?');
+    const [logIt, cancel] = q.reply_markup.inline_keyboard[0];
+    expect(cancel.callback_data).toBe('nolog');
+    expect(doses.rows.size).toBe(0);
+    await tap(logIt.callback_data);
+    await tap(logIt.callback_data);
+    expect(doses.rows.size).toBe(1);
+    expect([...doses.rows.values()][0]).toMatchObject({ pid: 'p1', kind: 'short', amount: 4, source: 'telegram' });
+    expect(sent.find((s) => s.method === 'editMessageText').body.text).toMatch(/^Logged 4 units of regular insulin at /);
+  });
+
+  it('warns about a recent dose before asking, and Cancel logs nothing', async () => {
+    await doses.upsert([{ id: 'x', pid: 'p1', t: Date.now() - 40 * 60e3, kind: 'rapid', amount: 3, source: 'extension' }]);
+    await say('4 units rapid');
+    expect(lastSend().text).toMatch(/^Careful: You already logged 3 u rapid 40 min ago/);
+    await tap('nolog');
+    expect(doses.rows.size).toBe(1);
+  });
+
+  it('carbs by text; silly amounts refused; family chats cannot log', async () => {
+    await say('40 g');
+    expect(lastSend().text).toBe('Log 40 g of carbs now?');
+    await say('900 g');
+    expect(lastSend().text).toMatch(/not something I can log/);
+    await say('4 R', 5005);
+    expect(lastSend().text).toMatch(/Only the owner's own chats can log/);
+    await tap(`log:c:40:${Math.round(Date.now() / 60e3)}`, 5005);
+    expect(doses.rows.size).toBe(0);
+  });
+
+  it('a plate photo gets a carb estimate with a "Log 48 g" button; a caption with grams wins', async () => {
+    await callL('tg/webhook', { body: { message: { chat: { id: 1001 }, photo: [{ file_id: 's', file_size: 1000 }, { file_id: 'b', file_size: 90000 }] } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': tg.bot_.webhook_secret } });
+    expect(mealCalls[0]).toBe('data:image/jpeg;base64,/9j/4AE');   // the photo, as a data URL
+    expect(sent.find((s) => s.method === 'getFile').body.file_id).toBe('b');
+    const r = lastSend();
+    expect(r.text).toMatch(/^About 48 g of carbs \(likely 38–60 g, medium confidence\)\.\n• rice about 40 g\nPhoto estimates are rough/);
+    expect(r.reply_markup.inline_keyboard[0][0].text).toBe('Log 48 g');
+    await callL('tg/webhook', { body: { message: { chat: { id: 1001 }, caption: '35g', photo: [{ file_id: 'b', file_size: 900 }] } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': tg.bot_.webhook_secret } });
+    expect(mealCalls).toHaveLength(1);
+    expect(lastSend().text).toBe('Log 35 g of carbs now?');
+  });
+
+  it('the proxy\'s proof check: only the proof derived from this bot\'s secret passes', async () => {
+    const { mealProof } = await import('../workers/telegram.js');
+    const good = await mealProof(tg.bot_);
+    expect((await callL('tg/proof', { headers: { 'X-Su94r-Proof': good } })).status).toBe(200);
+    expect((await callL('tg/proof', { headers: { 'X-Su94r-Proof': 'a'.repeat(64) } })).status).toBe(401);
+    expect((await callL('tg/proof', {})).status).toBe(401);
+  });
+});
+
+describe('the doctor visit pack on Telegram', () => {
+  beforeEach(async () => {
+    await call('tg/config', { query: '?key=owner', body: { token: TOKEN } });
+    await startWith(codeOf((await (await call('tg/link/new', { query: '?key=owner', body: { role: 'me' } })).json()).url), 1001);
+    await startWith(codeOf((await (await call('tg/link/new', { query: '?key=owner', body: { role: 'family' } })).json()).url), 5005, 'Mom');
+  });
+  const pdf = Buffer.from('%PDF-1.4\n%fake report\n%%EOF\n').toString('base64');
+
+  it('sends the report PDF to the owner\'s chats only; needs the key; PDFs only', async () => {
+    const posts = [];
+    const fetchImpl = async (url, init) => { posts.push({ url, form: init.body }); return new Response('{"ok":true}', { status: 200 }); };
+    const doc = (query, body) => { const url = new URL(`https://cgm.test/tg/document${query}`); return telegramRoute('tg/document', new Request(url, { method: 'POST', body: JSON.stringify(body) }), url, env, { store: tg, json, keyOk, snapshot, night, api, fetchImpl }); };
+    expect((await doc('?key=wrong', { name: 'r.pdf', data: pdf })).status).toBe(401);
+    expect((await doc('?key=owner', { name: 'r.pdf', data: Buffer.from('<html>').toString('base64') })).status).toBe(400);
+    const r = await (await doc('?key=owner', { name: 'su94r report 1.pdf', data: pdf, caption: 'Glucose report' })).json();
+    expect(r).toEqual({ ok: true, sent: 1 });
+    expect(posts[0].url).toMatch(/\/sendDocument$/);
+    expect(posts[0].form.get('chat_id')).toBe('1001');
+    expect(posts[0].form.get('document').name).toBe('su94rreport1.pdf');
+  });
+
+  it('night/notify sends a plain message to ntfy and the owner\'s Telegram (owner key only)', async () => {
+    const pushes = [];
+    const url = (q) => new URL(`https://cgm.test/night/notify${q}`);
+    const notify = (q, body) => nightRoute('night/notify', new Request(url(q), { method: 'POST', body: JSON.stringify(body) }), url(q), env, { store: night, json, keyOk, snapshot, push: async (topic, msg) => { pushes.push({ topic, ...msg }); }, telegram: (role, msg) => telegramAlert(tg, role, msg, { api }) });
+    expect((await notify('?key=wrong', { title: 'x', message: 'y' })).status).toBe(401);
+    sent = [];
+    expect((await notify('?key=owner', { title: 'Your week', message: 'In range: 72%.' })).status).toBe(200);
+    expect(pushes[0]).toMatchObject({ topic: 'su94r-self', title: 'Your week', message: 'In range: 72%.' });
+    expect(sent.filter((s) => s.method === 'sendMessage').map((s) => s.body.chat_id)).toEqual([1001]);
+  });
+});

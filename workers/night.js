@@ -33,7 +33,7 @@ const AUTH_WARN_EVERY_MS = 12 * 60 * MIN;
 
 export const NIGHT_DEFAULTS = {
   enabled: true, time_zone: 'America/New_York', low_mgdl: 70, severe_mgdl: 55,
-  night_start: 22, night_end: 7, care_enabled: false,
+  night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
 };
 
 export function nightStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
@@ -99,6 +99,26 @@ function repeatMs(severe, night) {
   return night ? 10 * MIN : 20 * MIN;
 }
 
+// State keys starting with "_" are not lows: _meta, _soon (low-soon warnings), _watch (sensor
+// and signal warnings), _last (the previous check's reading, for the rate of change).
+const isLowKey = (k) => !k.startsWith('_');
+
+const SOON_MIN = 20;                         // how far ahead "Low soon" looks
+const ARROW_RATE = { 1: -2.5, 2: -1.5, 3: 0, 4: 1.5, 5: 2.5 };   // LibreLinkUp trend → mg/dL a minute
+
+/** mg/dL a minute, from the previous check, else the graph, else the trend arrow; null if unknown. */
+export function rateOf(p, l, last) {
+  const between = (q, lo, hi) => q && l.t - q.t >= lo * MIN && l.t - q.t <= hi * MIN;
+  if (between(last, 3, 12)) return (l.mg - last.mg) / ((l.t - last.t) / MIN);
+  const ref = (p.history || []).filter((q) => between(q, 8, 20)).sort((a, b) => b.t - a.t)[0];
+  if (ref) return (l.mg - ref.mg) / ((l.t - ref.t) / MIN);
+  return ARROW_RATE[l.trend] ?? null;
+}
+
+function localTime(t, timeZone) {
+  try { return new Date(t).toLocaleTimeString('en-US', { timeZone, hour: 'numeric', minute: '2-digit' }); } catch { return new Date(t).toISOString().slice(11, 16); }
+}
+
 /**
  * One check. Pure apart from `push` and the returned state: given the row, the people and
  * the time, decides what to push and returns the new state.
@@ -116,7 +136,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   if (!cfg.enabled) return { state, sent, skipped: 'off' };
 
   // Without a reading from LibreLinkUp, everyone who was low counts as gone silent.
-  const openLows = Object.entries(state).filter(([k]) => k !== '_meta')
+  const openLows = Object.entries(state).filter(([k]) => isLowKey(k))
     .map(([pid, ep]) => ({ pid, firstName: ep.name || '', name: ep.name || '', units: ep.units, latest: null }));
   const list = error ? openLows : people;
   const many = list.length > 1;
@@ -137,12 +157,70 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     }
   }
 
+  // "Low soon": in range now, but falling so that it is likely under the low line within
+  // 20 minutes. Once per fall, repeated after 15 minutes (at most 3 times) until "I'm OK".
+  async function lowSoon(p, l, last) {
+    const low = cfg.low_mgdl;
+    const rate = rateOf(p, l, last);
+    const projected = rate == null ? null : l.mg + rate * SOON_MIN;
+    const falling = l.trend === 1 || l.trend === 2 || (rate != null && rate <= -1.5);
+    const soon = state._soon[p.pid];
+    if (projected != null && falling && rate < 0 && projected < low && l.mg < low + 45) {
+      if (soon && (soon.ackAt || soon.count >= 3 || now - soon.at < 15 * MIN)) return;
+      const token = randomToken(16);
+      const mins = Math.max(5, Math.round((l.mg - low) / -rate));
+      const severeSoon = projected < cfg.severe_mgdl;
+      state._soon[p.pid] = { at: now, count: (soon?.count || 0) + 1, ackHash: await sha256(token) };
+      await send(cfg.self_topic, {
+        title: `${who(p)}Low soon: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
+        message: `Falling about ${Math.abs(rate).toFixed(1)} mg/dL a minute: likely under ${fmt(p, low)} in about ${mins} min${severeSoon ? ', and fast' : ''}. Have fast sugar ready. Tap "I'm OK" once you have handled it.`,
+        priority: night || severeSoon ? 5 : 4,
+        tags: ['chart_with_downwards_trend'],
+        actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
+      }, 'soon');
+    } else if (soon && (projected == null || projected >= low + 10 || !falling)) {
+      delete state._soon[p.pid];                        // the fall stopped: the next one warns again
+    }
+  }
+
+  // Sensor and signal: no readings for 30+ minutes (said once per gap, and when they are back),
+  // and a sensor that ends within a day (said once per sensor).
+  async function watchdog(p, l, ep) {
+    const w = state._watch[p.pid] || {};
+    if (!l && p.latest && !ep && now - p.latest.t >= 30 * MIN && w.gapFor !== p.latest.t) {
+      w.gapFor = p.latest.t;
+      await send(cfg.self_topic, {
+        title: `${who(p)}No glucose for ${Math.round((now - p.latest.t) / MIN)} min`,
+        message: 'Libre has not sent a reading. Check the sensor and the phone\'s Libre app (open, Bluetooth on). Lows cannot be seen until readings come back.',
+        priority: night ? 4 : 3, tags: ['satellite'],
+      }, 'signal');
+    } else if (l && w.gapFor) {
+      delete w.gapFor;
+      await send(cfg.self_topic, { title: `${who(p)}Readings are back: ${fmt(p, l.mg)}`, message: 'Libre is sending again.', priority: 2, tags: ['white_check_mark'] }, 'signal-back');
+    }
+    const days = Number(cfg.sensor_days) || 14;
+    const ends = p.sensorStart ? p.sensorStart + days * 24 * 60 * MIN : null;
+    if (ends && now >= ends - 24 * 60 * MIN && now < ends && w.sensorFor !== p.sensorStart) {
+      w.sensorFor = p.sensorStart;
+      const left = ends - now;
+      const when = left > 12 * 60 * MIN ? `tomorrow around ${localTime(ends, cfg.time_zone)}` : `today around ${localTime(ends, cfg.time_zone)}`;
+      await send(cfg.self_topic, { title: `${who(p)}Sensor ends ${when}`, message: 'Have the next sensor ready. Readings stop when it ends.', priority: 3, tags: ['hourglass'] }, 'sensor');
+    }
+    state._watch[p.pid] = w;
+  }
+
   const seen = new Set();
+  state._soon = state._soon || {};
+  state._watch = state._watch || {};
+  state._last = state._last || {};
   for (const p of list) {
     seen.add(p.pid);
     const l = p.latest && now - p.latest.t <= STALE_MS ? p.latest : null;
     let ep = state[p.pid] || null;
     const low = cfg.low_mgdl;
+    const last = state._last[p.pid];
+    if (l) state._last[p.pid] = { t: l.t, mg: l.mg };
+    if (!error && cfg.watch_enabled !== false) await watchdog(p, l, ep);
     if (ep && !l && now - ep.since > 6 * 60 * MIN) { delete state[p.pid]; continue; }   // an old episode, not an ongoing one
     if (ep) Object.assign(ep, { name: p.firstName || p.name || ep.name || '', units: p.units || ep.units });
 
@@ -151,11 +229,13 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: 'The low is over.', priority: 3, tags: ['white_check_mark'] }, 'recovered');
       }
       delete state[p.pid];
+      if (cfg.soon_enabled !== false) await lowSoon(p, l, last);
       continue;
     }
 
     if (l) {
-      // Low.
+      // Low. A "Low soon" warning for it is done; the low alerts take over.
+      delete state._soon[p.pid];
       const severe = l.mg < cfg.severe_mgdl;
       ep = ep || { since: now, count: 0, name: p.firstName || p.name || '', units: p.units };
       ep.lastMg = l.mg;
@@ -215,8 +295,11 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     }
     if (ep) state[p.pid] = ep;
   }
-  // People no longer followed: forget their episodes.
-  if (!error) for (const pid of Object.keys(state)) if (pid !== '_meta' && !seen.has(pid)) delete state[pid];
+  // People no longer followed: forget their episodes and warnings.
+  if (!error) {
+    for (const pid of Object.keys(state)) if (isLowKey(pid) && !seen.has(pid)) delete state[pid];
+    for (const box of [state._soon, state._watch, state._last]) for (const pid of Object.keys(box)) if (!seen.has(pid)) delete box[pid];
+  }
   return { state, sent, night };
 }
 
@@ -225,8 +308,9 @@ export async function acknowledge(row, token, now = Date.now()) {
   if (!/^[0-9a-f]{32}$/.test(String(token || ''))) return null;
   const hash = await sha256(token);
   const state = structuredClone(row.state || {});
-  for (const [pid, ep] of Object.entries(state)) {
-    if (pid !== '_meta' && ep?.ackHash === hash) {
+  const entries = [...Object.entries(state).filter(([k]) => isLowKey(k)), ...Object.entries(state._soon || {})];
+  for (const [, ep] of entries) {
+    if (ep?.ackHash === hash) {
       ep.ackAt = now;
       ep.ackHash = null;
       return state;
@@ -243,6 +327,10 @@ function settingsPatch(body, row) {
   const out = {};
   if (typeof body.enabled === 'boolean') out.enabled = body.enabled;
   if (typeof body.careEnabled === 'boolean') out.care_enabled = body.careEnabled;
+  if (typeof body.soonEnabled === 'boolean') out.soon_enabled = body.soonEnabled;
+  if (typeof body.watchEnabled === 'boolean') out.watch_enabled = body.watchEnabled;
+  const sd = int(body.sensorDays, 10, 15);
+  if (sd !== undefined) out.sensor_days = sd;
   const low = int(body.lowMgdl, 60, 100);
   if (low !== undefined) out.low_mgdl = low;
   const severe = int(body.severeMgdl, 40, 70);
@@ -259,9 +347,10 @@ function settingsPatch(body, row) {
 function publicView(row, base) {
   const topicUrl = (t) => `${base}/${t}`;
   const meta = row.state?._meta || {};
-  const open = Object.entries(row.state || {}).filter(([k]) => k !== '_meta').length;
+  const open = Object.keys(row.state || {}).filter(isLowKey).length;
   return {
     enabled: row.enabled, lowMgdl: row.low_mgdl, severeMgdl: row.severe_mgdl,
+    soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14,
     nightStart: row.night_start, nightEnd: row.night_end, timeZone: row.time_zone, careEnabled: row.care_enabled,
     selfTopic: row.self_topic, selfUrl: topicUrl(row.self_topic),
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
@@ -270,7 +359,7 @@ function publicView(row, base) {
 }
 
 export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, now = () => Date.now() }) {
-  if (path !== 'night/tick' && path !== 'night/setup' && path !== 'night/test' && path !== 'night/ack') return null;
+  if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
   // Every alert goes to ntfy and, when set up, to the linked Telegram chats of the same role
@@ -310,6 +399,17 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
   // Owner-only below.
   if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
   const row = await store.get();
+
+  if (path === 'night/notify') {
+    // A plain message to the owner's phone (ntfy and Telegram): the Sunday summary from su94r Mini.
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const body = await request.json().catch(() => ({}));
+    const title = String(body.title || '').replace(/[\u0000-\u001f]/g, ' ').slice(0, 120);
+    const message = String(body.message || '').slice(0, 1500);
+    if (!title && !message) return json({ error: 'empty' }, 400);
+    try { await sendFor(row)(row.self_topic, { title, message, priority: 3, tags: ['bar_chart'] }); } catch (e) { return json({ error: 'push-failed', message: e.message }, 502); }
+    return json({ ok: true });
+  }
 
   if (path === 'night/test') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);

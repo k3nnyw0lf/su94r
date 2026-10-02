@@ -33,7 +33,7 @@ describe('night alerts', () => {
     const row = baseRow();
     await run(row, [person(110, DAY)], DAY);
     expect(pushes).toEqual([]);
-    expect(row.state).toEqual({});
+    expect(Object.keys(row.state).filter((k) => !k.startsWith('_'))).toEqual([]);   // no open low
   });
 
   it('a daytime low is pushed with an "I\'m OK" button and repeats every 20 minutes', async () => {
@@ -83,7 +83,7 @@ describe('night alerts', () => {
     await run(row, [person(64, DAY)], DAY);
     await run(row, [person(85, DAY + 5 * MIN)], DAY + 5 * MIN);
     expect(pushes[1]).toMatchObject({ title: 'Back up: 85 mg/dL', priority: 3 });
-    expect(row.state).toEqual({});
+    expect(Object.keys(row.state).filter((k) => !k.startsWith('_'))).toEqual([]);   // no open low
   });
 
   it('a low that goes silent is pushed', async () => {
@@ -211,5 +211,77 @@ describe('wired into the server', () => {
     const t = await handleCgm('night/tick', new Request('https://cgm.test/night/tick', { method: 'POST' }), env, { night: store, push });
     expect(t.status).toBe(200);
     expect(store.row.last_result.error).toBeTruthy();      // no LibreLinkUp sign-in here: recorded, not thrown
+  });
+});
+
+describe('low soon and the watchdog', () => {
+  const at = (mg, t, trend = 3, extra = {}) => person(mg, t, { latest: { t, mg, trend }, ...extra });
+
+  it('warns before the line: falling fast toward 70 from the previous check', async () => {
+    const row = baseRow();
+    await run(row, [at(110, DAY - 5 * MIN)], DAY - 5 * MIN);
+    await run(row, [at(98, DAY, 2)], DAY);                         // -2.4 a minute → about 50 in 20 min
+    expect(pushes).toHaveLength(1);
+    expect(pushes[0]).toMatchObject({ title: 'Low soon: 98 mg/dL ↘', priority: 5 });   // severe ahead → urgent
+    expect(pushes[0].message).toMatch(/Falling about 2\.4 mg\/dL a minute: likely under 70 mg\/dL in about 12 min, and fast/);
+    expect(pushes[0].actions[0].label).toBe("I'm OK");
+  });
+
+  it('not when flat or rising, nor far above the line', async () => {
+    const row = baseRow();
+    await run(row, [at(80, DAY - 5 * MIN)], DAY - 5 * MIN);
+    await run(row, [at(81, DAY, 3)], DAY);
+    await run(row, [at(160, DAY + 5 * MIN, 1)], DAY + 5 * MIN);   // falling fast but far above
+    expect(pushes).toEqual([]);
+  });
+
+  it('the trend arrow alone is enough when there is no earlier reading', async () => {
+    const row = baseRow();
+    await run(row, [at(88, DAY, 1)], DAY);                          // arrow: falling fast (-2.5)
+    expect(pushes[0].title).toBe('Low soon: 88 mg/dL ↓');
+  });
+
+  it('once per fall: repeats after 15 minutes at most 3 times, stops on "I\'m OK", and the real low takes over', async () => {
+    const { acknowledge } = await import('../workers/night.js');
+    const row = baseRow();
+    await run(row, [at(92, DAY, 1)], DAY);
+    await run(row, [at(80, DAY + 5 * MIN, 1)], DAY + 5 * MIN);         // still falling: no new message yet
+    expect(pushes).toHaveLength(1);
+    await run(row, [at(76, DAY + 15 * MIN, 2)], DAY + 15 * MIN);        // 15 min later, still heading under 70
+    expect(pushes).toHaveLength(2);
+    row.state = await acknowledge(row, tokenOf(pushes[1]), DAY + 16 * MIN);
+    await run(row, [at(74, DAY + 31 * MIN, 2)], DAY + 31 * MIN);
+    expect(pushes).toHaveLength(2);
+    await run(row, [at(66, DAY + 36 * MIN, 1)], DAY + 36 * MIN);
+    expect(pushes.at(-1).title).toBe('Low: 66 mg/dL ↓');
+    expect(row.state._soon.p1).toBeUndefined();
+  });
+
+  it('can be switched off', async () => {
+    const row = baseRow({ soon_enabled: false });
+    await run(row, [at(88, DAY, 1)], DAY);
+    expect(pushes).toEqual([]);
+  });
+
+  it('no readings for 30 minutes: said once, and again when they are back', async () => {
+    const row = baseRow();
+    await run(row, [at(120, DAY - 31 * MIN)], DAY);                 // last reading 31 min old
+    expect(pushes[0]).toMatchObject({ title: 'No glucose for 31 min', priority: 3 });
+    await run(row, [at(120, DAY - 31 * MIN)], DAY + 5 * MIN);
+    expect(pushes).toHaveLength(1);
+    await run(row, [at(118, DAY + 10 * MIN)], DAY + 10 * MIN);
+    expect(pushes[1]).toMatchObject({ title: 'Readings are back: 118 mg/dL', priority: 2 });
+  });
+
+  it('a sensor that ends within a day is said once, with the local time', async () => {
+    const row = baseRow();
+    const start = DAY - 14 * 24 * 60 * MIN + 20 * 60 * MIN;          // ends in 20 hours
+    await run(row, [at(120, DAY, 3, { sensorStart: start })], DAY);
+    expect(pushes[0].title).toMatch(/^Sensor ends tomorrow around \d{1,2}:\d{2} [AP]M$/);
+    await run(row, [at(120, DAY + 5 * MIN, 3, { sensorStart: start })], DAY + 5 * MIN);
+    expect(pushes).toHaveLength(1);
+    pushes = [];
+    await run(baseRow({ sensor_days: 15 }), [at(120, DAY, 3, { sensorStart: start })], DAY);
+    expect(pushes).toEqual([]);                                     // a 15-day sensor is not ending yet
   });
 });

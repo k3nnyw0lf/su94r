@@ -106,6 +106,10 @@ export const tgLink = (link, role) => call(link, 'tg/link/new', { method: 'POST'
 export const tgRemove = (link, chatId) => call(link, 'tg/chats/remove', { method: 'POST', body: { chatId } });
 export const tgEnabled = (link, enabled) => call(link, 'tg/enabled', { method: 'POST', body: { enabled } });
 export const tgTest = (link) => call(link, 'tg/test', { method: 'POST', body: {} });
+/** The glucose report PDF to the owner's Telegram chats ({ name, data: base64, caption }). */
+export const tgDocument = (link, name, data, caption = '') => call(link, 'tg/document', { method: 'POST', body: { name, data, caption } });
+/** A message to the owner's phone (ntfy and Telegram), e.g. the Sunday summary. */
+export const nightNotify = (link, title, message) => call(link, 'night/notify', { method: 'POST', body: { title, message } });
 
 // Night safety net (server: workers/night.js): phone alerts through ntfy, checked every 5 minutes.
 export const nightSetup = (link) => call(link, 'night/setup');

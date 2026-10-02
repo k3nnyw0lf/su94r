@@ -14,7 +14,7 @@ import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 
 const MMOL = 18.0182;
-const MAX_UNITS = 100;
+export const MAX_UNITS = 100;
 const STALE_MS = 10 * 60e3;
 const TREND_WORDS = { 1: 'falling fast', 2: 'falling', 3: 'steady', 4: 'rising', 5: 'rising fast' };
 
@@ -185,7 +185,7 @@ const KIND_WORDS = {
   mix: /^(mix|mixed|premix|pre mixed|70 30|seventy thirty|humalog mix|novolog mix)/,
 };
 
-function slotKind(slot) {
+export function slotKind(slot) {
   const id = slot?.resolutions?.resolutionsPerAuthority?.find((a) => a.status?.code === 'ER_SUCCESS_MATCH')?.values?.[0]?.value?.id;
   if (id && KIND_WORDS[id]) return id;
   const v = String(slot?.value || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim().replace(/ insulin$/, '');
@@ -200,8 +200,8 @@ export function durationMs(iso) {
   return ((d * 24 + h) * 60 + mi) * 60e3 + s * 1e3;
 }
 
-const unitWord = (n) => `${n} unit${Number(n) === 1 ? '' : 's'}`;
-const spokenKind = (kind) => ({ short: 'regular', rapid: 'rapid', basal: 'long-acting', intermediate: 'N P H', mix: 'pre-mixed' }[kind] || kindWord(kind));
+export const unitWord = (n) => `${n} unit${Number(n) === 1 ? '' : 's'}`;
+export const spokenKind = (kind) => ({ short: 'regular', rapid: 'rapid', basal: 'long-acting', intermediate: 'N P H', mix: 'pre-mixed' }[kind] || kindWord(kind));
 // The extension's wording ("4 u rapid 45 min ago (3.4 u still active)") read aloud.
 const speak = (text) => String(text)
   .replace(/(\d+(?:\.\d+)?) u\b/g, (_, n) => unitWord(n))

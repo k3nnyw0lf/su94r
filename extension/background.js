@@ -11,7 +11,8 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify } from './voice.js';
+import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
 import { careTick, careRefresh, careClicked } from './care-bg.js';
@@ -145,6 +146,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) careTick().catch(() => {});
     if (!LEGACY) refreshServer().catch(() => {});
     if (!LEGACY) autoConnect().catch(() => {});
+    if (!LEGACY) weeklySummary().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -307,6 +309,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     removeAccount: () => removeAccount(msg.id),
     signOut: () => removeAccount(null),
     testAlert: () => testAlert(),
+    weeklyNow: () => weeklySummary({ force: true }),
     addEvents: () => addEvents(msg.events),
     removeEvents: () => removeEvents(msg.ids),
     bringOver: () => (LEGACY ? { ok: false } : takeOverOldCopy(msg.id ? [msg.id] : KNOWN_OLD_IDS)),
@@ -341,8 +344,8 @@ function serial(fn) {
 }
 
 const validEvent = (e) => e && typeof e.id === 'string' && e.p && Number.isFinite(e.t) && typeof e.type === 'string';
-// What the su94r server shares with Alexa: every insulin dose, and meals said to Alexa.
-const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && e.source === 'alexa');
+// What the su94r server shares with Alexa and Telegram: every insulin dose, and meals said to Alexa or logged in Telegram.
+const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && (e.source === 'alexa' || e.source === 'telegram'));
 
 function addEvents(list) {
   return serial(async () => {
@@ -747,6 +750,39 @@ async function refreshServer() {
   }
 }
 
+// ---- Sunday summary: the week against the week before, to the phone (ntfy and Telegram) ----
+// Sunday from 6 PM, once (also when this computer comes on later that evening). Describes the
+// week in plain words; it never advises. Settings → Low alerts on your phone can switch it off.
+async function weeklySummary({ force = false } = {}) {
+  const settings = await getSettings();
+  if (LEGACY || !settings.screenLink || (settings.weeklySummary === false && !force)) return { ok: false, error: 'off' };
+  const now = new Date();
+  const key = now.toDateString();
+  if (!force) {
+    if (now.getDay() !== 0 || now.getHours() < 18) return { ok: false };
+    const { weeklyAt } = await local.get('weeklyAt');
+    if (weeklyAt === key) return { ok: false };
+    await local.set({ weeklyAt: key });                  // one try per Sunday, even if it fails
+  }
+  const people = await allPatients(settings);
+  const p = people.find((x) => x.pid === settings.vaultOwner) || people[0];
+  if (!p) return { ok: false, error: 'No one to sum up yet.' };
+  const t = now.getTime(), D = 864e5;
+  const saved = wholeSeries(await loadReadings(p.pid, t - 14 * D));
+  const recent = mergeSeries(p.hist, p.live);
+  const cutoff = recent.length ? recent[0].t : Infinity;
+  const points = [...saved.filter((q) => q.t < cutoff - 60e3), ...recent];
+  const { events = [] } = await local.get('events');
+  const mine = events.filter((e) => e.p === p.pid);
+  const range = { low: p.low ?? 70, high: p.high ?? 180 };
+  const cur = agp(points, mine, { from: t - 7 * D, to: t, ...range });
+  const prev = agp(points, mine, { from: t - 14 * D, to: t - 7 * D, ...range });
+  const units = displayUnits(settings, p);
+  const text = weeklyText(cur, prev, { lows: lowEpisodes(points, { from: t - 7 * D, to: t, low: range.low }), fmt: (mg) => `${fmtGlucose(mg, units)} ${units}` });
+  await nightNotify(settings.screenLink, `Your week${people.length > 1 ? ` (${firstName(p.name)})` : ''}`, text);
+  return { ok: true };
+}
+
 // ---- connecting without the button, on the owner's own computers ----
 // A connect-here.json file put by hand in the extension folder ({ "server": "https://…" };
 // never shipped) connects this copy to that su94r server by itself, the same way the Settings
@@ -985,7 +1021,7 @@ async function syncVoice(settings) {
       // and the server is told on the next exchange.
       const tomb = offered.length ? await tombstoned(offered).catch(() => new Set()) : new Set();
       const waiting = new Set([...voiceRemoved.filter((id) => !sent.has(id)), ...(syncQueue?.remove || []).map((e) => e.id)]);
-      const fresh = offered.filter((d) => !tomb.has(d.id) && !waiting.has(d.id)).map((d) => ({ ...d, source: 'alexa' }));
+      const fresh = offered.filter((d) => !tomb.has(d.id) && !waiting.has(d.id)).map((d) => ({ ...d, source: d.source === 'telegram' ? 'telegram' : 'alexa' }));
       const stillToTell = [...voiceRemoved.filter((id) => !sent.has(id)), ...offered.filter((d) => tomb.has(d.id)).map((d) => d.id)];
       await local.set({ voiceRemoved: [...new Set(stillToTell)].slice(-500) });
       if (fresh.length) {

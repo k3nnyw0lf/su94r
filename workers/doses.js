@@ -67,7 +67,7 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
 export function valid(d) {
   return d && /^[\w-]{1,80}$/.test(String(d.id)) && d.pid && Number.isFinite(new Date(d.t).getTime())
     && KINDS.has(d.kind) && (d.amount == null || (Number(d.amount) > 0 && Number(d.amount) <= 300))
-    && (d.source === 'alexa' || d.source === 'extension');
+    && (d.source === 'alexa' || d.source === 'extension' || d.source === 'telegram');
 }
 
 /** Doses in the marker shape su94r Mini and its double-dose guard use. */

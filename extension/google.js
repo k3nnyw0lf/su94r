@@ -233,3 +233,21 @@ The files are yours. su94r Mini can see only the files it made in this folder, n
 else in your Drive. Delete them any time; turning off "Save to Google Drive" in su94r Mini
 stops new copies.
 `;
+
+/**
+ * Saves a file (the glucose report PDF) into the su94r folder, replacing one with the same
+ * name. Returns { id, webViewLink }.
+ */
+export async function saveBlob(token, name, blob, type) {
+  const folder = await folderId(token);
+  const existing = await findFile(token, folder, name);
+  if (existing) {
+    await api(token, `${UPLOAD}/files/${existing.id}?uploadType=media`, { method: 'PATCH', headers: { 'Content-Type': type }, body: blob });
+    return (await api(token, `${DRIVE}/files/${existing.id}?fields=id,webViewLink`)).json();
+  }
+  const boundary = `su94r${Math.random().toString(36).slice(2)}`;
+  const meta = JSON.stringify({ name, parents: [folder], mimeType: type });
+  const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${meta}\r\n--${boundary}\r\nContent-Type: ${type}\r\n\r\n`, blob, `\r\n--${boundary}--`]);
+  const r = await api(token, `${UPLOAD}/files?uploadType=multipart&fields=id,webViewLink`, { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
+  return r.json();
+}
