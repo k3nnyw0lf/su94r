@@ -168,6 +168,14 @@ There is no "Hey Google, ask my sugar" skill: Google switched off custom voice a
 - **Nest Hub, Chromecast, Google TV:** show the big-screen page. In Chrome, open the page → ⋮ → **Cast…** → pick the device (it stays while that Chrome tab is open). Or, from any computer on the same Wi-Fi, `catt cast_site <big-screen link>` (free, `pip install catt`) makes the device load the page itself.
 - **Pixel Watch and phone widgets:** the Nightscout-style feed with GlucoDataHandler (see `docs/widgets.md`).
 
+## Español
+
+- **The phone app:** More → Language / Idioma. Each phone picks its own; the server answers that phone in the same language (logging, the double-dose warning, patterns, the report). Spoken Spanish works for logging ("cuatro unidades de rápida", "comí cuarenta gramos hace media hora"), and photo estimates name the food in Spanish.
+- **Alerts:** every alert is written in both languages. Each phone with app alerts and each Telegram chat gets its own; ntfy follows su94r Mini → Low alerts → **Alert language** (one for you, one for family).
+- **Telegram:** a chat starts in the language of the person's Telegram and switches with /espanol or /english; Spanish logging works the same way.
+- **Alexa:** on an Echo set to Spanish (US): "Alexa, pregunta a mi azúcar cómo estoy", "dile a mi azúcar cuatro unidades de insulina rápida", "cómo fue mi noche", "qué patrones ves" (voice model `docs/alexa/interaction-model.es-US.json`).
+- **Doctor's link:** choose English or Español when you make it.
+
 ## Not a medical device
 
 These screens and the skill are conveniences. LibreLinkUp data can be late or missing. Rely on the Libre app and its alarms for treatment decisions.

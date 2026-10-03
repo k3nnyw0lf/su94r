@@ -52,6 +52,16 @@ describe('plain-language answers', () => {
     expect(nightSummary([], { now })).toMatch(/not have enough readings/);
   });
 
+  it('asked after 10 PM, last night does not take in tonight; before 7 AM it is tonight so far', () => {
+    const tonight = [];
+    for (let t = Date.parse('2026-10-03T02:00:00Z'); t <= Date.parse('2026-10-03T02:30:00Z'); t += 5 * MIN) tonight.push({ t, mg: 230 });
+    const at2231 = Date.parse('2026-10-03T02:31:00Z');
+    expect(nightSummary([...night, ...tonight], { now: at2231, tz: 'America/New_York' })).toBe('Last night you were in range 97% of the time. You went low once, lowest 62 at 1:00 AM. The highest was 120 at 10:00 PM.');
+    const early = [];
+    for (let t = Date.parse('2026-10-03T02:00:00Z'); t < Date.parse('2026-10-03T08:00:00Z'); t += 15 * MIN) early.push({ t, mg: 140 });
+    expect(nightSummary(early, { now: Date.parse('2026-10-03T08:00:00Z'), tz: 'America/New_York' })).toMatch(/^So far tonight you were in range 100%/);
+  });
+
   it('"how was my week" in one line', () => {
     const pts = Array.from({ length: 300 }, (_, i) => ({ t: now - i * 30 * MIN, mg: i % 10 === 0 ? 60 : 130 }));   // 6 days
     expect(weekLine(pts, { now })).toBe('This week: 90% in range, 10% below, 0% above; average 123, GMI 6.3%.');

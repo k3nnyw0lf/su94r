@@ -11,6 +11,7 @@
 import { localParts } from './nudges.js';
 
 const DAY = 864e5;
+const LABEL_ES = { rapid: 'insulina rápida', basal: 'insulina de acción prolongada', short: 'insulina regular', intermediate: 'insulina NPH', mix: 'insulina premezclada', sensors: 'sensores' };
 export const SUPPLY_ITEMS = {
   rapid: { label: 'Rapid insulin', unit: 'units' },
   basal: { label: 'Long-acting insulin', unit: 'units' },
@@ -89,9 +90,12 @@ export function supplyReminders(statuses, { reminded = {}, now = Date.now(), tz 
     const key = `${s.pid}:${s.item}`;
     if (reminded[key] === date || (!s.low && !s.refillDue)) continue;
     const left = `${s.left} ${s.left === 1 && s.unit === 'sensors' ? 'sensor' : s.unit} left${s.daysLeft != null ? `, about ${s.daysLeft} day${s.daysLeft === 1 ? '' : 's'} at your recent use` : ''}`;
+    const unitEs = s.unit === 'sensors' ? (s.left === 1 ? 'sensor' : 'sensores') : 'unidades';
+    const leftEs = `Quedan ${s.left} ${unitEs}${s.daysLeft != null ? `, unos ${s.daysLeft} día${s.daysLeft === 1 ? '' : 's'} a tu ritmo reciente` : ''}`;
+    const labelEs = LABEL_ES[s.item] || s.label;
     out.push(s.refillDue
-      ? { key, title: `Refill due ${s.refillOn}: ${s.label.toLowerCase()}`, message: `${left}.` }
-      : { key, title: `Running low: ${s.label.toLowerCase()}`, message: `${left}. Update the count in the su94r app when you restock.` });
+      ? { key, title: `Refill due ${s.refillOn}: ${s.label.toLowerCase()}`, message: `${left}.`, es: { title: `Toca surtir el ${s.refillOn}: ${labelEs}`, message: `${leftEs}.` } }
+      : { key, title: `Running low: ${s.label.toLowerCase()}`, message: `${left}. Update the count in the su94r app when you restock.`, es: { title: `Queda poco: ${labelEs}`, message: `${leftEs}. Actualiza la cuenta en la app su94r cuando compres más.` } });
   }
   return { reminders: out, date };
 }

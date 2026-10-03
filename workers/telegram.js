@@ -17,13 +17,17 @@
 //   POST tg/config?key=<owner>          { token } checks it with Telegram, points the bot here
 //   POST tg/link/new?key=<owner>        { role } → { url, expiresIn }
 //   POST tg/chats/remove?key=<owner>    { chatId }
+//   POST tg/chats/allow?key=<owner>     { chatId, canLog } a family chat may log (or not)
+//
+// Each chat has its own language: Telegram's own setting when it links, /espanol or /english
+// after that. Alerts carry both languages (night.js) and each chat gets its own.
 //   POST tg/enabled?key=<owner>         { enabled }
 //   POST tg/test?key=<owner>            a test message to the owner's chats
 //   POST tg/webhook                     Telegram itself (its secret header must match)
 
 import { sha256, randomToken } from './screens.js';
-import { acknowledge } from './night.js';
-import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal } from './tglog.js';
+import { acknowledge, inLanguage } from './night.js';
+import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal, labelEs } from './tglog.js';
 import { asMarkers } from './doses.js';
 import { doubleDoseWarning } from '../extension/insulin.js';
 import { nightSummary, weekLine } from './history.js';
@@ -92,6 +96,8 @@ export function telegramStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     chat: async (id) => (await call('su94r_telegram_chats', `?select=*&chat_id=eq.${q(id)}&active=is.true`))[0] || null,
     linkChat: (row) => call('su94r_telegram_chats', '?on_conflict=chat_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ ...row, active: true, linked_at: new Date().toISOString() }) }),
     unlink: (id) => call('su94r_telegram_chats', `?chat_id=eq.${q(id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ active: false }) }),
+    /** Changes a linked chat (its language, or whether a family chat may log). */
+    setChat: async (id, patch) => (await call('su94r_telegram_chats', `?chat_id=eq.${q(id)}&active=is.true`, { method: 'PATCH', body: JSON.stringify(patch) })).length > 0,
     newLink: (codeHash, role) => call('su94r_telegram_links', '', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ code_hash: codeHash, role, expires_at: new Date(Date.now() + LINK_TTL_MS).toISOString() }) }),
     /** Takes a link once: deleted on use, only while it is fresh. */
     takeLink: async (codeHash) => (await call('su94r_telegram_links', `?code_hash=eq.${q(codeHash)}&expires_at=gt.${q(new Date().toISOString())}`, { method: 'DELETE' }))[0] || null,
@@ -124,11 +130,12 @@ export async function telegramAlert(store, role, msg, { api = tgApi } = {}) {
   const ack = ackTokenOf(msg);
   let n = 0;
   for (const c of chats) {
+    const m = inLanguage(msg, c.lang);
     try {
       await api(bot.token, 'sendMessage', {
         chat_id: c.chat_id,
-        text: [msg.title, msg.message].filter(Boolean).join('\n'),
-        ...(ack ? { reply_markup: { inline_keyboard: [[{ text: "I'm OK", callback_data: `ack:${ack}` }]] } } : {}),
+        text: [m.title, m.message].filter(Boolean).join('\n'),
+        ...(ack ? { reply_markup: { inline_keyboard: [[{ text: c.lang === 'es' ? 'Estoy bien' : "I'm OK", callback_data: `ack:${ack}` }]] } } : {}),
         disable_web_page_preview: true,
       });
       n++;
@@ -140,16 +147,18 @@ export async function telegramAlert(store, role, msg, { api = tgApi } = {}) {
 const clean = (s, max = 40) => String(s || '').replace(/[^\p{L}\p{N} '._-]/gu, '').trim().slice(0, max);
 const nameOf = (from) => clean([from?.first_name, from?.last_name].filter(Boolean).join(' ') || from?.username || 'Telegram');
 
-function sugarText(snap) {
+function sugarText(snap, lang = 'en') {
+  const es = lang === 'es';
   const people = snap?.people || [];
-  if (!people.length) return 'No one is sharing their glucose with this account yet.';
+  if (!people.length) return es ? 'Nadie está compartiendo su glucosa con esta cuenta todavía.' : 'No one is sharing their glucose with this account yet.';
   const arrows = ['', '↓', '↘', '→', '↗', '↑'];
   return people.map((p) => {
     const l = p.latest;
-    if (!l) return `${p.firstName || p.name}: no reading yet`;
+    if (!l) return `${p.firstName || p.name}: ${es ? 'sin lecturas todavía' : 'no reading yet'}`;
     const mins = Math.max(0, Math.round((Date.now() - l.t) / 60e3));
     const v = p.units === 'mmol/L' ? `${(l.mg / 18.0182).toFixed(1)} mmol/L` : `${Math.round(l.mg)} mg/dL`;
-    return `${people.length > 1 ? `${p.firstName || p.name}: ` : ''}${l.mg < 40 ? 'LO' : v} ${arrows[l.trend] || ''} (${mins < 1 ? 'just now' : `${mins} min ago`})`.replace(/\s+\(/, ' (');
+    const when = es ? (mins < 1 ? 'ahora mismo' : `hace ${mins} min`) : (mins < 1 ? 'just now' : `${mins} min ago`);
+    return `${people.length > 1 ? `${p.firstName || p.name}: ` : ''}${l.mg < 40 ? 'LO' : v} ${arrows[l.trend] || ''} (${when})`.replace(/\s+\(/, ' (');
   }).join('\n');
 }
 
@@ -166,35 +175,39 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
     const chatId = cq.message?.chat?.id;
     const linked = chatId != null && await store.chat(chatId);
     const data = String(cq.data || '');
+    const es = (linked?.lang || (/^es/i.test(cq.from?.language_code || '') ? 'es' : 'en')) === 'es';
+    const T = (en, sp) => (es ? sp : en);
+    const mayLog = linked && (linked.role === 'me' || linked.can_log === true);
     // "Log it" / "Cancel" under a logbook question.
     if (data === 'nolog' || data.startsWith('log:')) {
-      let text = 'This chat is not linked to su94r.';
+      let text = T('This chat is not linked to su94r.', 'Este chat no está vinculado a su94r.');
       let done = null;
-      if (linked && linked.role === 'me' && data === 'nolog') { text = 'Not logged.'; done = 'Not logged.'; }
-      else if (linked && linked.role === 'me') {
+      if (mayLog && data === 'nolog') { text = T('Not logged.', 'No se registró.'); done = text; }
+      else if (mayLog) {
         const entry = entryFromData(data);
         const pid = await firstPerson(snapshot, doses);
-        if (!entry || !pid || !doses?.ready) text = 'That can no longer be logged. Send it again.';
+        if (!entry || !pid || !doses?.ready) text = T('That can no longer be logged. Send it again.', 'Eso ya no se puede registrar. Envíalo otra vez.');
         else {
           try {
             // The same question answered twice logs once: the id comes from the question.
             await doses.upsert([{ id: `tg-${chatId}-${cq.message.message_id}`, pid, t: entry.t, kind: entry.kind, amount: entry.amount, source: 'telegram' }]);
-            text = 'Logged.';
-            done = `Logged ${entry.label} at ${new Date(entry.t).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' })}. It shows in su94r Mini within a minute.`;
-          } catch { text = 'Could not save it just now. Nothing was logged.'; }
+            const at = new Date(entry.t).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit' });
+            text = T('Logged.', 'Registrado.');
+            done = T(`Logged ${entry.label} at ${at}. It shows in su94r Mini within a minute.`, `Registrado: ${labelEs(entry.kind, entry.amount)} a las ${at}. Aparece en su94r Mini en un minuto.`);
+          } catch { text = T('Could not save it just now. Nothing was logged.', 'No se pudo guardar ahora. No se registró nada.'); }
         }
-      } else if (linked) text = 'Only the owner\'s own chats can log.';
+      } else if (linked) text = T('This chat can\'t log yet. The owner can allow it in su94r Mini.', 'Este chat todavía no puede registrar. El dueño lo puede permitir en su94r Mini.');
       await api(bot.token, 'answerCallbackQuery', { callback_query_id: cq.id, text }).catch(() => {});
       if (done) await api(bot.token, 'editMessageText', { chat_id: chatId, message_id: cq.message.message_id, text: done }).catch(() => {});
       return { status: 200 };
     }
     const m = /^ack:([0-9a-f]{32})$/.exec(data);
-    let text = 'This chat is not linked to su94r.';
+    let text = T('This chat is not linked to su94r.', 'Este chat no está vinculado a su94r.');
     if (linked && m && night?.ready) {
       const row = await night.get();
       const state = await acknowledge(row, m[1]);
-      if (state) { await night.patch({ state }); text = "Got it. Reminders for this low stop; a severe low still tells you once."; }
-      else text = 'That alert was already answered, or the low is over.';
+      if (state) { await night.patch({ state }); text = T('Got it. Reminders for this low stop; a severe low still tells you once.', 'Entendido. Los recordatorios de esta baja paran; una baja severa avisa una vez más.'); }
+      else text = T('That alert was already answered, or the low is over.', 'Esa alerta ya se respondió, o la baja terminó.');
       await api(bot.token, 'editMessageReplyMarkup', { chat_id: chatId, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
     await api(bot.token, 'answerCallbackQuery', { callback_query_id: cq.id, text }).catch(() => {});
@@ -204,10 +217,14 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
   const msg = u.message;
   if (!msg?.chat?.id) return { status: 200 };
   const chatId = msg.chat.id;
+  const known = await store.chat(chatId);
+  const es = (known?.lang || (/^es/i.test(msg.from?.language_code || '') ? 'es' : 'en')) === 'es';
+  const T = (en, sp) => (es ? sp : en);
+  const lang = es ? 'es' : 'en';
   if (Array.isArray(msg.photo) && msg.photo.length) {
     const linkedChat = await store.chat(chatId);
     if (!linkedChat) return { status: 200 };                 // strangers get nothing
-    const typed = parseLog(msg.caption || '');                 // "40 g" written under the photo wins
+    const typed = parseLog(msg.caption || '');                 // "40 g" (or "40 gramos") written under the photo wins
     if (typed) return askToLog(chatId, linkedChat, typed);
     await api(bot.token, 'sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {});
     let estimate = null;
@@ -215,10 +232,10 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
       const dataUrl = await photoDataUrl(bot, msg.photo, { api, fetchImpl });
       estimate = dataUrl && meal ? await meal(bot, dataUrl) : null;
     } catch { estimate = null; }
-    const d = describeMeal(estimate);
-    if (d.total > 0 && linkedChat.role === 'me') {
+    const d = describeMeal(estimate, lang);
+    if (d.total > 0 && (linkedChat.role === 'me' || linkedChat.can_log === true)) {
       const q = describeLog({ type: 'carbs', grams: d.total, back: null });
-      await say(chatId, d.text, { reply_markup: { inline_keyboard: [[{ text: `Log ${d.total} g`, callback_data: q.data }, { text: 'Cancel', callback_data: 'nolog' }]] } });
+      await say(chatId, d.text, { reply_markup: { inline_keyboard: [[{ text: T(`Log ${d.total} g`, `Registrar ${d.total} g`), callback_data: q.data }, { text: T('Cancel', 'Cancelar'), callback_data: 'nolog' }]] } });
     } else {
       await say(chatId, d.text);
     }
@@ -230,60 +247,64 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
 
   // A logbook question with "Log it" / "Cancel" (owner's chats only; nothing is logged yet).
   async function askToLog(id, chat, entry) {
-    if (chat.role !== 'me') { await say(id, 'Only the owner\'s own chats can log. /sugar shows the glucose now.'); return { status: 200 }; }
-    const q = describeLog(entry);
+    if (chat.role !== 'me' && chat.can_log !== true) { await say(id, T('This chat can\'t log yet: the owner can allow it in su94r Mini. /sugar shows the glucose now.', 'Este chat todavía no puede registrar: el dueño lo puede permitir en su94r Mini. /sugar muestra la glucosa ahora.')); return { status: 200 }; }
+    const q = describeLog(entry, Date.now(), lang);
     if (q.error) { await say(id, q.error); return { status: 200 }; }
     let warning = '';
     if (entry.type === 'insulin' && doses?.ready) {
       try {
         const pid = await firstPerson(snapshot, doses);
         const recent = pid ? asMarkers(await doses.recent(pid)) : [];
-        const w = pid && doubleDoseWarning(recent, pid, { t: Date.now() - (entry.back || 0), kind: entry.kind }, {}, Date.now());
-        if (w) warning = `Careful: ${w}\n`;
+        const w = pid && doubleDoseWarning(recent, pid, { t: Date.now() - (entry.back || 0), kind: entry.kind }, {}, Date.now(), lang);
+        if (w) warning = T(`Careful: ${w}\n`, `Cuidado: ${w}\n`);
       } catch { /* no warning rather than no question */ }
     }
-    await say(id, `${warning}${q.text}`, { reply_markup: { inline_keyboard: [[{ text: 'Log it', callback_data: q.data }, { text: 'Cancel', callback_data: 'nolog' }]] } });
+    await say(id, `${warning}${q.text}`, { reply_markup: { inline_keyboard: [[{ text: T('Log it', 'Registrar'), callback_data: q.data }, { text: T('Cancel', 'Cancelar'), callback_data: 'nolog' }]] } });
     return { status: 200 };
   }
 
   if (command === '/start') {
     if (!/^[A-Za-z0-9_-]{16,64}$/.test(arg || '')) {
-      if (await store.chat(chatId)) return say(chatId, 'This chat is already linked to su94r. /sugar shows the glucose now, /stop unlinks.').then(() => ({ status: 200 }));
-      return say(chatId, 'To get su94r alerts here, open a link made in su94r Mini (Health vault → Low alerts on Telegram), or on a phone su94r shared with you.').then(() => ({ status: 200 }));
+      if (known) return say(chatId, T('This chat is already linked to su94r. /sugar shows the glucose now, /stop unlinks.', 'Este chat ya está vinculado a su94r. /sugar muestra la glucosa ahora, /stop lo desvincula.')).then(() => ({ status: 200 }));
+      return say(chatId, T('To get su94r alerts here, open a link made in su94r Mini (Health vault → Low alerts on Telegram), or on a phone su94r shared with you.', 'Para recibir alertas de su94r aquí, abre un enlace hecho en su94r Mini (Health vault → Low alerts on Telegram) o en un teléfono con el que su94r se compartió.')).then(() => ({ status: 200 }));
     }
     const link = await store.takeLink(await sha256(arg));
-    if (!link) return say(chatId, 'This link has expired or was already used. Make a new one in su94r Mini.').then(() => ({ status: 200 }));
-    await store.linkChat({ chat_id: chatId, role: link.role, name: nameOf(msg.from) });
+    if (!link) return say(chatId, T('This link has expired or was already used. Make a new one in su94r Mini.', 'Este enlace venció o ya se usó. Crea uno nuevo en su94r Mini.')).then(() => ({ status: 200 }));
+    await store.linkChat({ chat_id: chatId, role: link.role, name: nameOf(msg.from), lang });
     await say(chatId, link.role === 'family'
-      ? "Linked to su94r as family. You will be told here when a low is not handled. /sugar shows the glucose now, /stop unlinks."
-      : "Linked to su94r. Low alerts come here with an \"I'm OK\" button, until you tap it or you are back up. /sugar shows the glucose now, /stop unlinks.");
+      ? T('Linked to su94r as family. You will be told here when a low is not handled. /sugar shows the glucose now, /stop unlinks.', 'Vinculado a su94r como familia. Aquí te avisaremos cuando una baja no se atienda. /sugar muestra la glucosa ahora, /stop lo desvincula. /english for English.')
+      : T("Linked to su94r. Low alerts come here with an \"I'm OK\" button, until you tap it or you are back up. /sugar shows the glucose now, /stop unlinks.", 'Vinculado a su94r. Las alertas de baja llegan aquí con un botón "Estoy bien", hasta que lo toques o vuelvas a subir. /sugar muestra la glucosa ahora, /stop lo desvincula. /english for English.'));
     return { status: 200 };
   }
 
-  const linked = await store.chat(chatId);
+  const linked = known;
   if (!linked) return { status: 200 };                       // strangers get nothing
-  if (command === '/stop') {
+  if (command === '/espanol' || command === '/español' || command === '/english') {
+    const to = command === '/english' ? 'en' : 'es';
+    await store.setChat(chatId, { lang: to });
+    await say(chatId, to === 'es' ? 'Listo: su94r te escribe en español aquí. /english for English.' : 'Done: su94r writes to you in English here. /espanol para español.');
+  } else if (command === '/stop') {
     await store.unlink(chatId);
-    await say(chatId, 'Unlinked. No more su94r alerts here. A new link from su94r Mini links again.');
+    await say(chatId, T('Unlinked. No more su94r alerts here. A new link from su94r Mini links again.', 'Desvinculado. No llegarán más alertas de su94r aquí. Un enlace nuevo de su94r Mini lo vuelve a vincular.'));
   } else if ((command === '/night' || command === '/week') && history?.ready) {
     let text;
     try {
       const p = (await snapshot()).people?.[0];
       const pts = p ? await history.range(p.pid, Date.now() - (command === '/night' ? 1 : 7) * 24 * 3600e3, Date.now() + 60e3) : [];
-      const opts = { low: p?.low ?? 70, high: p?.high ?? 180 };
+      const opts = { low: p?.low ?? 70, high: p?.high ?? 180, lang };
       text = command === '/night' ? nightSummary(pts, opts) : weekLine(pts, opts);
-    } catch { text = 'I could not reach the history just now.'; }
+    } catch { text = T('I could not reach the history just now.', 'No pude abrir el historial ahora.'); }
     await say(chatId, text);
   } else if (command === '/sugar' || command === '/now') {
     let text;
-    try { text = sugarText(await snapshot()); } catch { text = 'I could not reach LibreLinkUp just now.'; }
+    try { text = sugarText(await snapshot(), lang); } catch { text = T('I could not reach LibreLinkUp just now.', 'No pude conectar con LibreLinkUp ahora.'); }
     await say(chatId, text);
   } else {
     const entry = parseLog(msg.text);
     if (entry) return askToLog(chatId, linked, entry);
-    await say(chatId, linked.role === 'me'
-      ? 'Log by writing, for example: 4 units rapid · 20 Lantus 30 min ago · 40 g. Or send a photo of your plate for a carb estimate. /sugar shows the glucose now, /stop unlinks this chat.'
-      : '/sugar shows the glucose now. /stop unlinks this chat.');
+    await say(chatId, linked.role === 'me' || linked.can_log === true
+      ? T('Log by writing, for example: 4 units rapid · 20 Lantus 30 min ago · 40 g. Or send a photo of your plate for a carb estimate. /sugar shows the glucose now, /stop unlinks this chat. /espanol para español.', 'Registra escribiendo, por ejemplo: 4 unidades de rápida · 20 Lantus hace 30 min · 40 gramos. O envía una foto del plato para estimar los carbohidratos. /sugar muestra la glucosa ahora, /stop desvincula este chat. /english for English.')
+      : T('/sugar shows the glucose now. /stop unlinks this chat. /espanol para español.', '/sugar muestra la glucosa ahora. /stop desvincula este chat. /english for English.'));
   }
   return { status: 200 };
 }
@@ -320,7 +341,7 @@ export async function telegramRoute(path, request, url, env, { store, json, keyO
     const chats = bot ? await store.chats() : [];
     return json({
       configured: Boolean(bot?.token), bot: bot?.bot_username ? `@${bot.bot_username}` : null, enabled: Boolean(bot?.enabled),
-      chats: chats.map((c) => ({ id: String(c.chat_id), name: c.name, role: c.role, linkedAt: c.linked_at })),
+      chats: chats.map((c) => ({ id: String(c.chat_id), name: c.name, role: c.role, linkedAt: c.linked_at, lang: c.lang || 'en', canLog: c.role === 'me' || c.can_log === true })),
     });
   }
 
@@ -333,7 +354,8 @@ export async function telegramRoute(path, request, url, env, { store, json, keyO
     const hook = `${String(env.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/su94r-cgm/tg/webhook`;
     try {
       await api(token, 'setWebhook', { url: hook, secret_token: secret, allowed_updates: ['message', 'callback_query'], drop_pending_updates: true });
-      await api(token, 'setMyCommands', { commands: [{ command: 'sugar', description: 'The glucose now' }, { command: 'night', description: 'How last night went' }, { command: 'week', description: 'This week in one line' }, { command: 'stop', description: 'Stop su94r alerts in this chat' }] }).catch(() => {});
+      await api(token, 'setMyCommands', { commands: [{ command: 'sugar', description: 'The glucose now' }, { command: 'night', description: 'How last night went' }, { command: 'week', description: 'This week in one line' }, { command: 'espanol', description: 'Español' }, { command: 'stop', description: 'Stop su94r alerts in this chat' }] }).catch(() => {});
+      await api(token, 'setMyCommands', { language_code: 'es', commands: [{ command: 'sugar', description: 'La glucosa ahora' }, { command: 'night', description: 'Cómo fue anoche' }, { command: 'week', description: 'Esta semana en una línea' }, { command: 'english', description: 'English' }, { command: 'stop', description: 'Parar las alertas de su94r en este chat' }] }).catch(() => {});
     } catch (e) {
       return json({ error: 'webhook', message: `Telegram would not point the bot here (${e.message}).` }, 502);
     }
@@ -355,6 +377,13 @@ export async function telegramRoute(path, request, url, env, { store, json, keyO
     await store.unlink(String(body.chatId));
     await api(bot.token, 'sendMessage', { chat_id: String(body.chatId), text: 'This chat was unlinked from su94r in su94r Mini. No more alerts here.' }).catch(() => {});
     return json({ ok: true });
+  }
+  if (path === 'tg/chats/allow') {
+    if (!body.chatId) return json({ error: 'chatId needed' }, 400);
+    const chat = await store.chat(String(body.chatId));
+    if (!chat || chat.role !== 'family') return json({ ok: false, error: 'Only a family member\'s chat can be allowed to log.' }, 404);
+    await store.setChat(String(body.chatId), { can_log: body.canLog === true });
+    return json({ ok: true, canLog: body.canLog === true });
   }
   if (path === 'tg/enabled') {
     await store.setEnabled(Boolean(body.enabled));

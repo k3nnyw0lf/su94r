@@ -76,10 +76,20 @@ function clock(t, tz) {
 }
 
 /** Last night (22:00–07:00 local, ending before now) as words; describes, never advises. */
-export function nightSummary(points, { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}` } = {}) {
-  // The night that ended most recently: readings between 10 PM and 7 AM, within the last 20 hours.
-  const night = points.filter((p) => p.t > now - 20 * 60 * MIN && p.t <= now && (hourIn(p.t, tz) >= 22 || hourIn(p.t, tz) < 7));
-  if (night.length < 6) return 'I do not have enough readings from last night to say.';
+export function nightSummary(points, { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, lang = 'en' } = {}) {
+  const es = lang === 'es';
+  // Which night: before 7 AM, the one in progress so far; later in the day (and after 10 PM, so
+  // tonight's first minutes are not mixed in), the one that ended at 7 this morning.
+  const step = 5 * MIN;
+  const boundary = (from, hour) => {
+    for (let t = from; t > from - 34 * 60 * MIN; t -= step) if (hourIn(t, tz) === hour && hourIn(t - step, tz) === (hour + 23) % 24) return t;
+    return null;
+  };
+  const soFar = hourIn(now, tz) < 7;
+  const end = soFar ? now : boundary(now, 7);
+  const start = end != null ? boundary(end, 22) : null;
+  const night = points.filter((p) => (start != null ? p.t > start - step && p.t <= end : p.t > now - 20 * 60 * MIN && p.t <= now) && (hourIn(p.t, tz) >= 22 || hourIn(p.t, tz) < 7));
+  if (night.length < 6) return es ? 'No tengo suficientes lecturas de anoche para decirlo.' : 'I do not have enough readings from last night to say.';
   const share = (f) => Math.round((night.filter(f).length / night.length) * 100);
   const lowest = night.reduce((a, b) => (b.mg < a.mg ? b : a));
   const highest = night.reduce((a, b) => (b.mg > a.mg ? b : a));
@@ -89,7 +99,15 @@ export function nightSummary(points, { now = Date.now(), tz = 'America/New_York'
   // When the readings start late in the night, say from when.
   const first = night[0];
   const startsLate = (() => { const h = hourIn(first.t, tz); return h >= 0 && h < 7 && night.every((p) => hourIn(p.t, tz) < 7); })() && hourIn(first.t, tz) >= 1;
-  const parts = [`${startsLate ? `From ${clock(first.t, tz)}, when my readings start, ` : 'Last night '}you were in range ${share((p) => p.mg >= low && p.mg <= high)}% of the time.`];
+  const inRange = share((p) => p.mg >= low && p.mg <= high);
+  if (es) {
+    return [
+      `${startsLate ? `Desde las ${clock(first.t, tz)}, cuando empiezan mis lecturas, ` : soFar ? 'En lo que va de la noche ' : 'Anoche '}estuviste en rango el ${inRange}% del tiempo.`,
+      lows.length ? `Tuviste ${lows.length === 1 ? 'una baja' : `${lows.length} bajas`}; la más baja fue ${fmt(lowest.mg)} a las ${clock(lowest.t, tz)}.` : `Sin bajas; la más baja fue ${fmt(lowest.mg)} a las ${clock(lowest.t, tz)}.`,
+      `La más alta fue ${fmt(highest.mg)} a las ${clock(highest.t, tz)}.`,
+    ].join(' ');
+  }
+  const parts = [`${startsLate ? `From ${clock(first.t, tz)}, when my readings start, ` : soFar ? 'So far tonight ' : 'Last night '}you were in range ${inRange}% of the time.`];
   parts.push(lows.length
     ? `You went low ${lows.length === 1 ? 'once' : `${lows.length} times`}, lowest ${fmt(lowest.mg)} at ${clock(lowest.t, tz)}.`
     : `No lows; the lowest was ${fmt(lowest.mg)} at ${clock(lowest.t, tz)}.`);
@@ -98,14 +116,20 @@ export function nightSummary(points, { now = Date.now(), tz = 'America/New_York'
 }
 
 /** The last 7 days in one line. */
-export function weekLine(points, { now = Date.now(), low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}` } = {}) {
+export function weekLine(points, { now = Date.now(), low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, lang = 'en' } = {}) {
+  const es = lang === 'es';
   const pts = points.filter((p) => p.t > now - 7 * DAY && p.t <= now);
-  if (pts.length < 50) return 'I do not have enough readings from this week yet.';
+  if (pts.length < 50) return es ? 'Todavía no tengo suficientes lecturas de esta semana.' : 'I do not have enough readings from this week yet.';
   const span = now - pts.reduce((a, p) => Math.min(a, p.t), now);
-  if (span < 2 * DAY) return `I only have ${Math.max(1, Math.round(span / (60 * MIN)))} hours of readings so far. Ask again in a few days, or open the report in su94r Mini.`;
+  if (span < 2 * DAY) {
+    const h = Math.max(1, Math.round(span / (60 * MIN)));
+    return es ? `Solo tengo ${h} horas de lecturas hasta ahora. Pregunta otra vez en unos días, o abre el informe en la app su94r.` : `I only have ${h} hours of readings so far. Ask again in a few days, or open the report in su94r Mini.`;
+  }
   const pct = (f) => Math.round((pts.filter(f).length / pts.length) * 100);
   const mean = pts.reduce((s, p) => s + p.mg, 0) / pts.length;
-  return `This week: ${pct((p) => p.mg >= low && p.mg <= high)}% in range, ${pct((p) => p.mg < low)}% below, ${pct((p) => p.mg > high)}% above; average ${fmt(mean)}, GMI ${(3.31 + 0.02392 * mean).toFixed(1)}%.`;
+  const gmi = (3.31 + 0.02392 * mean).toFixed(1);
+  if (es) return `Esta semana: ${pct((p) => p.mg >= low && p.mg <= high)}% en rango, ${pct((p) => p.mg < low)}% por debajo, ${pct((p) => p.mg > high)}% por encima; promedio ${fmt(mean)}, GMI ${gmi}%.`;
+  return `This week: ${pct((p) => p.mg >= low && p.mg <= high)}% in range, ${pct((p) => p.mg < low)}% below, ${pct((p) => p.mg > high)}% above; average ${fmt(mean)}, GMI ${gmi}%.`;
 }
 
 // ---- routes ----

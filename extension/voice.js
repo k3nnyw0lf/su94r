@@ -104,7 +104,7 @@ export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/app/#jo
 
 // A live report link for the doctor (server: workers/doctor.js): always the latest 14 days,
 // read-only, expires. The token is shown once; the server keeps only its hash.
-export const doctorNew = (link, name, days) => call(link, 'doctor/new', { method: 'POST', body: { name, days } });
+export const doctorNew = (link, name, days, lang = 'en') => call(link, 'doctor/new', { method: 'POST', body: { name, days, lang } });
 export const doctorUrl = (link, token) => `${parseScreenLink(link).base}/r/${token}`;
 
 // Low alerts on Telegram (server: workers/telegram.js): one bot of the owner's, chats linked by a
@@ -113,6 +113,8 @@ export const tgStatus = (link) => call(link, 'tg/status');
 export const tgConfig = (link, token) => call(link, 'tg/config', { method: 'POST', body: { token } });
 export const tgLink = (link, role) => call(link, 'tg/link/new', { method: 'POST', body: { role } });
 export const tgRemove = (link, chatId) => call(link, 'tg/chats/remove', { method: 'POST', body: { chatId } });
+/** Lets a family member's Telegram chat log doses and meals, or stops it. */
+export const tgAllow = (link, chatId, canLog) => call(link, 'tg/chats/allow', { method: 'POST', body: { chatId, canLog } });
 export const tgEnabled = (link, enabled) => call(link, 'tg/enabled', { method: 'POST', body: { enabled } });
 export const tgTest = (link) => call(link, 'tg/test', { method: 'POST', body: {} });
 /** The glucose report PDF to the owner's Telegram chats ({ name, data: base64, caption }). */

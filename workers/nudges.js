@@ -44,6 +44,7 @@ const clock = (minute) => {
   const h = Math.floor(minute / 60) % 24, m = minute % 60;
   return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 };
+const slotEs = (minute) => (minute >= 300 && minute < 630 ? 'el desayuno' : minute >= 660 && minute < 900 ? 'el almuerzo' : minute >= 1020 && minute < 1290 ? 'la cena' : `alrededor de las ${clock(minute)}`);
 const slotName = (minute) => (minute >= 300 && minute < 630 ? 'breakfast time' : minute >= 660 && minute < 900 ? 'lunch time' : minute >= 1020 && minute < 1290 ? 'dinner time' : `about ${clock(minute)}`);
 
 /**
@@ -66,7 +67,8 @@ export function missedDoseNudges({ person, doses, now = Date.now(), tz = 'Americ
     // Once a day: none in the last 18 hours. Twice a day or more: none since 4 hours before this one.
     const since = bClusters.length === 1 ? now - 18 * 60 * MIN : now - (late + 240) * MIN;
     if (basal.some((d) => d.t >= since)) continue;
-    out.push({ key, title: 'Long-acting not logged yet', message: `You usually log it around ${clock(c.center)}. If you have taken it, log it so su94r, Alexa and the double-dose check know.` });
+    out.push({ key, title: 'Long-acting not logged yet', message: `You usually log it around ${clock(c.center)}. If you have taken it, log it so su94r, Alexa and the double-dose check know.`,
+      es: { title: 'Insulina de acción prolongada sin registrar todavía', message: `Normalmente la registras alrededor de las ${clock(c.center)}. Si ya te la pusiste, regístrala para que su94r, Alexa y la revisión de doble dosis lo sepan.` } });
   }
   // Mealtimes: only when the glucose shows something was missed.
   const hour = Math.floor(today.minute / 60);
@@ -84,7 +86,8 @@ export function missedDoseNudges({ person, doses, now = Date.now(), tz = 'Americ
       if (late < 75 || late > 240) continue;
       if (meals.some((d) => d.t >= now - (late + 120) * MIN)) continue;
       const arrow = ['', '↓', '↘', '→', '↗', '↑'][l.trend] || '';
-      out.push({ key, title: `Nothing logged since ${slotName(c.center)}`, message: `You usually log around ${clock(c.center)}, and glucose is ${fmt(l.mg)} ${arrow} now. If you ate or took insulin, log it.`.replace(/ {2,}/g, ' ') });
+      out.push({ key, title: `Nothing logged since ${slotName(c.center)}`, message: `You usually log around ${clock(c.center)}, and glucose is ${fmt(l.mg)} ${arrow} now. If you ate or took insulin, log it.`.replace(/ {2,}/g, ' '),
+        es: { title: `Nada registrado desde ${slotEs(c.center)}`, message: `Normalmente registras alrededor de las ${clock(c.center)} y la glucosa está en ${fmt(l.mg)} ${arrow}. Si comiste o te pusiste insulina, regístralo.`.replace(/ {2,}/g, ' ') } });
     }
   }
   return { nudges: out, date: today.date };

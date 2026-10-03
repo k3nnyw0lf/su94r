@@ -97,7 +97,9 @@ async function appMeal(request, env) {
   if (!who.canLog) return json({ error: 'Only the owner\'s own phone can log meals.' }, 403);
   const { image } = await request.json().catch(() => ({}));
   if (!IMAGE.test(String(image || ''))) return json({ error: 'That is not a photo this can read.' }, 400);
-  return json({ meal: parseMealAnswer(await runMeal(env, image, MEAL_PROMPT)) });
+  // A phone set to Spanish gets the food names in Spanish (the JSON stays the same).
+  const es = /^es/i.test(request.headers.get('x-su94r-lang') || '');
+  return json({ meal: parseMealAnswer(await runMeal(env, image, es ? `${MEAL_PROMPT} Write the item names in Spanish.` : MEAL_PROMPT)) });
 }
 
 // The phone app's own files (built from workers/app/ by scripts/build-app.mjs).
@@ -132,6 +134,9 @@ export function moveSecrets(url, headers) {
   if (inbox) { if (!headers.has('x-api-key')) headers.set('x-api-key', inbox[1]); path = `/inbox${inbox[2] || ''}`; }
   const mcp = path.match(/^\/mcp\/([0-9a-f]{64})\/?$/);
   if (mcp) { headers.set('authorization', `Bearer ${mcp[1]}`); path = '/mcp'; }
+  // su94r Mini's key (and a display key) out of the address, so request logs never hold it.
+  const key = params.get('key');
+  if (key && !headers.has('x-su94r-key')) { headers.set('x-su94r-key', key); params.delete('key'); }
   const token = params.get('token');
   if (token && HEX64.test(token)) {
     if (path === '/ns' || path.startsWith('/ns/')) { headers.set('x-ns-token', token); params.delete('token'); }
@@ -146,7 +151,7 @@ async function forward(request, url, env) {
   if (Number(request.headers.get('content-length')) > MAX_BODY) return json({ error: 'too large' }, 413);
   const headers = new Headers();
   // Alexa's signature headers must arrive untouched, with the body byte for byte.
-  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256', 'x-api-key', 'x-collector-key', 'x-ns-token', 'api-secret', 'accept', 'mcp-protocol-version', 'mcp-session-id']) {
+  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256', 'x-api-key', 'x-collector-key', 'x-ns-token', 'api-secret', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'x-su94r-lang']) {
     const v = request.headers.get(h);
     if (v) headers.set(h, v);
   }

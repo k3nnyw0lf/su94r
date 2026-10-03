@@ -88,7 +88,7 @@ const GUARD = {
  * pre-mixed also against rapid doses within 3 hours. Doses logged without an
  * amount count too.
  */
-export function doubleDoseWarning(events, pid, candidate, settings = {}, now = Date.now()) {
+export function doubleDoseWarning(events, pid, candidate, settings = {}, now = Date.now(), lang = 'en') {
   const rules = GUARD[candidate.kind || 'rapid'];
   if (!rules) return null;
   const near = insulinDoses(events, pid, { needAmount: false })
@@ -101,6 +101,13 @@ export function doubleDoseWarning(events, pid, candidate, settings = {}, now = D
   const isNow = Math.abs(now - candidate.t) < 2 * 60e3;
   const rel = isNow ? `${gap} ago` : near.t <= candidate.t ? `${gap} before this time` : `${gap} after this time`;
   const active = group === BOLUS_KINDS && near.t <= candidate.t ? insulinOnBoard(events, pid, settings, candidate.t) : 0;
+  if (lang === 'es') {
+    const kindEs = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' }[near.kind || 'rapid'] || near.kind;
+    const gapEs = mins < 1 ? 'menos de un minuto' : mins < 60 ? `${mins} min` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+    const relEs = isNow ? `hace ${gapEs}` : near.t <= candidate.t ? `${gapEs} antes de esa hora` : `${gapEs} después de esa hora`;
+    const queEs = Number(near.amount) > 0 ? `${near.amount} u de insulina ${kindEs}` : `una dosis de insulina ${kindEs} (sin cantidad anotada)`;
+    return `Ya registraste ${queEs} ${relEs}` + (active > 0 ? ` (${active} u ${isNow ? 'aún activas' : 'activas a esa hora'})` : '') + '.';
+  }
   const what = Number(near.amount) > 0 ? `${near.amount} u ${kindWord(near.kind)}` : `a ${kindWord(near.kind)} dose (amount not logged)`;
   return `You already logged ${what} ${rel}`
     + (active > 0 ? ` (${active} u ${isNow ? 'still active' : 'active then'})` : '') + '.';

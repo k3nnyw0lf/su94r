@@ -57,8 +57,21 @@ export function cleanForecasts(list, now = Date.now()) {
   });
 }
 
+function speakForecastEs(f, { units, name, now }) {
+  if (!f || now - f.at > FRESH_MS) return `No tengo un estimado reciente ${name ? `para ${name}` : 'para ti'}. su94r Mini lo hace en tu computadora con tu propio historial, y no ha enviado uno en los últimos 20 minutos.`;
+  if (!f.trusted) return `El aprendizaje de su94r Mini todavía no es confiable ${name ? `para ${name}` : 'para ti'}, así que no voy a adivinar. Necesita más días de lecturas con dosis y comidas registradas, y tiene que superar una suposición simple en días que no usó para aprender.`;
+  const mmol = units === 'mmol/L';
+  const v = (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
+  const part = (q, when) => (q ? `${when}, probablemente unos ${v(q.mg)}, entre ${v(q.lo)} y ${v(q.hi)}` : null);
+  const parts = [part(f.h30, 'En media hora'), part(f.h60, 'En una hora')].filter(Boolean);
+  const lowEnd = Math.min(...[f.h30, f.h60].filter(Boolean).map((q) => q.lo));
+  const care = lowEnd < 70 ? ` El extremo bajo de ese rango está por debajo de ${mmol ? '3.9' : '70'}, así que ten azúcar rápida a mano.` : '';
+  return `${parts.join('. ')}.${care} Es un estimado con ${name ? `los datos de ${name}` : 'tus propios datos'}, no una razón para dosificar.`;
+}
+
 /** The spoken answer. Plain numbers and ranges; no advice beyond keeping fast sugar close. */
-export function speakForecast(f, { units = 'mg/dL', name = '', now = Date.now() } = {}) {
+export function speakForecast(f, { units = 'mg/dL', name = '', now = Date.now(), lang = 'en' } = {}) {
+  if (lang === 'es') return speakForecastEs(f, { units, name, now });
   const who = name ? `${name}'s` : 'your';
   if (!f || now - f.at > FRESH_MS) {
     return `I don't have a fresh estimate for ${name || 'you'}. su94r Mini makes it on your computer from your own history, and it has not sent one in the last 20 minutes.`;

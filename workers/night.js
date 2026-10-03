@@ -42,8 +42,16 @@ export const NIGHT_DEFAULTS = {
   enabled: true, time_zone: 'America/New_York', low_mgdl: 70, severe_mgdl: 55,
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
-  treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true,
+  treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
 };
+
+/** The alert in one language: msg.es holds the Spanish words, and "I'm OK" becomes "Estoy bien". */
+export function inLanguage(msg, lang) {
+  if (lang !== 'es' || !msg?.es) return msg;
+  const { es, ...rest } = msg;
+  return { ...rest, title: es.title ?? msg.title, message: es.message ?? msg.message, actions: (msg.actions || []).map((a) => ({ ...a, label: a.label === "I'm OK" ? 'Estoy bien' : a.label })) };
+}
+const sensorWhenEs = (left, ends, tz) => (left > 12 * 60 * MIN ? `mañana alrededor de las ${localTime(ends, tz)}` : `hoy alrededor de las ${localTime(ends, tz)}`);
 
 export function nightStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
   const base = env.SUPABASE_URL && `${env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/su94r_night`;
@@ -168,6 +176,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
           title: 'su94r cannot read your glucose',
           message: 'The su94r server lost its LibreLinkUp sign-in, so night alerts are paused. Open su94r Mini on your computer; it reconnects by itself.',
           priority: 4, tags: ['warning'],
+          es: { title: 'su94r no puede leer tu glucosa', message: 'El servidor de su94r perdió su sesión de LibreLinkUp, así que las alertas nocturnas están en pausa. Abre su94r Mini en tu computadora; se vuelve a conectar solo.' },
         }, 'signin');
         state._meta = { ...meta, authWarnAt: now };
       }
@@ -191,6 +200,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       await send(cfg.self_topic, {
         title: `${who(p)}Low soon: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
         message: `Falling about ${Math.abs(rate).toFixed(1)} mg/dL a minute: likely under ${fmt(p, low)} in about ${mins} min${severeSoon ? ', and fast' : ''}. Have fast sugar ready. Tap "I'm OK" once you have handled it.`,
+        es: { title: `${who(p)}Baja pronto: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `Bajando unos ${Math.abs(rate).toFixed(1)} mg/dL por minuto: probablemente por debajo de ${fmt(p, low)} en unos ${mins} min${severeSoon ? ', y rápido' : ''}. Ten azúcar rápida a mano. Toca "Estoy bien" cuando lo hayas atendido.` },
         priority: night || severeSoon ? 5 : 4,
         tags: ['chart_with_downwards_trend'],
         actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
@@ -211,10 +221,11 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         title: `${who(p)}No glucose for ${Math.round((now - p.latest.t) / MIN)} min`,
         message: 'Libre has not sent a reading. Check the sensor and the phone\'s Libre app (open, Bluetooth on). Lows cannot be seen until readings come back.',
         priority: night ? 4 : 3, tags: ['satellite'],
+        es: { title: `${who(p)}Sin glucosa desde hace ${Math.round((now - p.latest.t) / MIN)} min`, message: 'Libre no ha enviado lecturas. Revisa el sensor y la app de Libre del teléfono (abierta, Bluetooth encendido). No se pueden ver las bajas hasta que vuelvan las lecturas.' },
       }, 'signal');
     } else if (l && w.gapFor) {
       delete w.gapFor;
-      await send(cfg.self_topic, { title: `${who(p)}Readings are back: ${fmt(p, l.mg)}`, message: 'Libre is sending again.', priority: 2, tags: ['white_check_mark'] }, 'signal-back');
+      await send(cfg.self_topic, { title: `${who(p)}Readings are back: ${fmt(p, l.mg)}`, message: 'Libre is sending again.', priority: 2, tags: ['white_check_mark'], es: { title: `${who(p)}Volvieron las lecturas: ${fmt(p, l.mg)}`, message: 'Libre está enviando otra vez.' } }, 'signal-back');
     }
     const days = Number(cfg.sensor_days) || 14;
     const ends = p.sensorStart ? p.sensorStart + days * 24 * 60 * MIN : null;
@@ -222,7 +233,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       w.sensorFor = p.sensorStart;
       const left = ends - now;
       const when = left > 12 * 60 * MIN ? `tomorrow around ${localTime(ends, cfg.time_zone)}` : `today around ${localTime(ends, cfg.time_zone)}`;
-      await send(cfg.self_topic, { title: `${who(p)}Sensor ends ${when}`, message: 'Have the next sensor ready. Readings stop when it ends.', priority: 3, tags: ['hourglass'] }, 'sensor');
+      await send(cfg.self_topic, { title: `${who(p)}Sensor ends ${when}`, message: 'Have the next sensor ready. Readings stop when it ends.', priority: 3, tags: ['hourglass'], es: { title: `${who(p)}El sensor termina ${sensorWhenEs(left, ends, cfg.time_zone)}`, message: 'Ten listo el próximo sensor. Las lecturas paran cuando termina.' } }, 'sensor');
     }
     state._watch[p.pid] = w;
   }
@@ -248,7 +259,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
 
     if (l && l.mg >= low) {
       if (ep?.notified) {
-        await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: 'The low is over.', priority: 3, tags: ['white_check_mark'] }, 'recovered');
+        await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: 'The low is over.', priority: 3, tags: ['white_check_mark'], es: { title: `${who(p)}Volvió a subir: ${fmt(p, l.mg)}`, message: 'La baja terminó.' } }, 'recovered');
         recovered.add(p.pid);
       }
       delete state[p.pid];
@@ -277,6 +288,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         await send(cfg.self_topic, {
           title: `${who(p)}${severe ? 'Severe low' : 'Low'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
           message: `${cfg.treat_plan ? `${severe ? 'Treat now.' : 'Treat it.'} Your plan: ${cfg.treat_plan}.` : severe ? 'Treat now with fast sugar.' : 'Treat with fast sugar.'} Tap "I'm OK" once you have.${ep.count > 1 ? ` (Reminder ${ep.count})` : ''}`,
+          es: { title: `${who(p)}${severe ? 'Baja severa' : 'Baja'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `${cfg.treat_plan ? `${severe ? 'Trátala ya.' : 'Trátala.'} Tu plan: ${cfg.treat_plan}.` : severe ? 'Trátala ya con azúcar rápida.' : 'Trátala con azúcar rápida.'} Toca "Estoy bien" cuando lo hayas hecho.${ep.count > 1 ? ` (Recordatorio ${ep.count})` : ''}` },
           priority: severe || night ? 5 : 4,
           tags: [severe ? 'rotating_light' : 'warning'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
@@ -293,6 +305,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         await send(cfg.self_topic, {
           title: `${who(p)}Low, and the sensor stopped reporting`,
           message: `Last reading ${fmt(p, ep.lastMg ?? low)}. Check now. Tap "I'm OK" once you have.`,
+          es: { title: `${who(p)}Baja, y el sensor dejó de reportar`, message: `Última lectura ${fmt(p, ep.lastMg ?? low)}. Revisa ahora. Toca "Estoy bien" cuando lo hayas hecho.` },
           priority: 5, tags: ['rotating_light'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
         }, 'gap');
@@ -315,7 +328,9 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         const payload = alertPayload(decision, { name: p.firstName || p.name || 'Your person' });
         ep.careRung = decision.rung;
         ep.careAt = now;
-        await send(cfg.care_topic, { title: payload.title, message: payload.body, priority: payload.urgency === 'critical' ? 5 : 4, tags: ['rotating_light'] }, 'care');
+        const nameEs = p.firstName || p.name || 'Tu familiar';
+        const urgentEs = payload.urgency === 'critical';
+        await send(cfg.care_topic, { title: payload.title, message: payload.body, priority: urgentEs ? 5 : 4, tags: ['rotating_light'], es: { title: urgentEs ? `${nameEs} necesita ayuda ahora` : `${nameEs} tiene la glucosa baja`, message: `${ep.lastMg != null ? `Última lectura ${fmt(p, ep.lastMg)}.` : ''}${decision.dataGap ? ' El sensor dejó de reportar.' : ''}${ep.ackAt ? '' : ' No ha respondido la alerta.'} Revisa cómo está.`.trim() } }, 'care');
       }
     }
     if (ep) state[p.pid] = ep;
@@ -336,6 +351,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         title: `${who(p)}Recheck: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
         message: tr.mg != null ? `Up from ${fmt(p, tr.mg)} when ${tr.grams} g was logged at ${at}.` : `${tr.grams} g was logged at ${at}.`,
         priority: 3, tags: ['white_check_mark'],
+        es: { title: `${who(p)}Revisión: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: tr.mg != null ? `Subió desde ${fmt(p, tr.mg)} cuando se registraron ${tr.grams} g a las ${at}.` : `Se registraron ${tr.grams} g a las ${at}.` },
       }, 'recheck');
       continue;
     }
@@ -351,6 +367,10 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       message: `${tr.grams} g at ${at}. ${l ? (cfg.treat_plan ? `Your plan: ${cfg.treat_plan}.` : 'Treat again with fast sugar.') : 'Check with a meter.'} Reminders start again until you are above ${fmt(p, cfg.low_mgdl)}. Tap "I'm OK" once you have.`,
       priority: 5, tags: ['rotating_light'],
       actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
+      es: {
+        title: l ? `${who(p)}Sigue baja después de tratarla: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim() : `${who(p)}No se pudo revisar: sin lectura`,
+        message: `${tr.grams} g a las ${at}. ${l ? (cfg.treat_plan ? `Tu plan: ${cfg.treat_plan}.` : 'Trátala otra vez con azúcar rápida.') : 'Mide con un glucómetro.'} Los recordatorios vuelven a empezar hasta que estés por encima de ${fmt(p, cfg.low_mgdl)}. Toca "Estoy bien" cuando lo hayas hecho.`,
+      },
     }, 'recheck-low');
     await echo('low', true);
   }
@@ -409,6 +429,7 @@ function settingsPatch(body, row) {
   if (typeof body.soonEnabled === 'boolean') out.soon_enabled = body.soonEnabled;
   if (typeof body.watchEnabled === 'boolean') out.watch_enabled = body.watchEnabled;
   if (typeof body.nudgeEnabled === 'boolean') out.nudge_enabled = body.nudgeEnabled;
+  for (const [key, col] of [['langSelf', 'lang_self'], ['langCare', 'lang_care']]) if (body[key] === 'en' || body[key] === 'es') out[col] = body[key];
   const tg = int(body.treatGrams, 5, 60);
   if (tg !== undefined) out.treat_grams = tg;
   const tm = int(body.treatMinutes, 5, 30);
@@ -443,7 +464,7 @@ function publicView(row, base) {
   const open = Object.keys(row.state || {}).filter(isLowKey).length;
   return {
     enabled: row.enabled, lowMgdl: row.low_mgdl, severeMgdl: row.severe_mgdl,
-    soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14, nudgeEnabled: row.nudge_enabled !== false,
+    soonEnabled: row.soon_enabled !== false, watchEnabled: row.watch_enabled !== false, sensorDays: row.sensor_days || 14, nudgeEnabled: row.nudge_enabled !== false, langSelf: row.lang_self || 'en', langCare: row.lang_care || 'en',
     echoLow: Boolean(row.echo_low_url), echoSoon: Boolean(row.echo_soon_url), echoAlways: Boolean(row.echo_always),
     treatGrams: row.treat_grams ?? NIGHT_DEFAULTS.treat_grams, treatMinutes: row.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, treatPlan: row.treat_plan || '',
     nightStart: row.night_start, nightEnd: row.night_end, timeZone: row.time_zone, careEnabled: row.care_enabled,
@@ -462,8 +483,9 @@ export function alertFanOut(env, row, { push = null, telegram = null, webpush = 
   const ntfy = push || ((topic, msg) => ntfyPush(env, topic, msg));
   return async (role, msg) => {
     const topic = role === 'family' ? row.care_topic : row.self_topic;
+    const lang = role === 'family' ? row.lang_care : row.lang_self;
     const [viaNtfy, viaTg, viaApp] = await Promise.allSettled([
-      topic ? ntfy(topic, msg) : Promise.reject(new Error('no topic')),
+      topic ? ntfy(topic, inLanguage(msg, lang)) : Promise.reject(new Error('no topic')),
       telegram ? telegram(role, msg) : Promise.resolve(0),
       webpush ? webpush(role, msg) : Promise.resolve(0),
     ]);
@@ -481,8 +503,9 @@ export async function reminders(row, people, state, send, { doses = null, suppli
   const sent = [];
   if (!cfg.enabled || !people.length) return sent;
   const many = people.length > 1;
-  const say = async (p, title, message, tag, label) => {
-    try { await send(cfg.self_topic, { title: `${many && p ? `${p.firstName || p.name}: ` : ''}${title}`, message, priority: 3, tags: [tag] }); sent.push({ label, ok: true }); } catch (e) { sent.push({ label, ok: false, error: e.message }); }
+  const say = async (p, title, message, tag, label, es = null) => {
+    const pre = many && p ? `${p.firstName || p.name}: ` : '';
+    try { await send(cfg.self_topic, { title: `${pre}${title}`, message, priority: 3, tags: [tag], ...(es ? { es: { title: `${pre}${es.title}`, message: es.message } } : {}) }); sent.push({ label, ok: true }); } catch (e) { sent.push({ label, ok: false, error: e.message }); }
   };
   if (cfg.nudge_enabled !== false && doses?.ready) {
     state._nudge = state._nudge || {};
@@ -490,7 +513,7 @@ export async function reminders(row, people, state, send, { doses = null, suppli
       const list = await doses.between(p.pid, now - 14 * 24 * 60 * MIN, now + MIN);
       const nudged = state._nudge[p.pid] || {};
       const { nudges, date } = missedDoseNudges({ person: p, doses: list, now, tz: cfg.time_zone, nudged, nightStart: cfg.night_start, nightEnd: cfg.night_end, fmt: (mg) => fmt(p, mg) });
-      for (const n of nudges) { await say(p, n.title, n.message, 'memo', 'nudge'); nudged[n.key] = date; }
+      for (const n of nudges) { await say(p, n.title, n.message, 'memo', 'nudge', n.es); nudged[n.key] = date; }
       for (const k of Object.keys(nudged)) if (nudged[k] !== date) delete nudged[k];
       state._nudge[p.pid] = nudged;
     }
@@ -506,7 +529,7 @@ export async function reminders(row, people, state, send, { doses = null, suppli
       const statuses = supplyStatus(rs, { doses: list, sensorStarts: (state._sensors || {})[pid] || [], sensorDays: cfg.sensor_days, now, tz: cfg.time_zone });
       const { reminders: due, date } = supplyReminders(statuses, { reminded: state._supply, now, tz: cfg.time_zone });
       const p = people.find((x) => x.pid === pid);
-      for (const r of due) { await say(p, r.title, r.message, 'package', 'supplies'); state._supply[r.key] = date; }
+      for (const r of due) { await say(p, r.title, r.message, 'package', 'supplies', r.es); state._supply[r.key] = date; }
     }
     for (const k of Object.keys(state._supply)) if (!rows.some((r) => `${r.pid}:${r.item}` === k)) delete state._supply[k];
   }
@@ -585,7 +608,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
   if (path === 'night/test') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     try {
-      await sendFor(row)(row.self_topic, { title: 'su94r test alert', message: 'Night alerts reach this phone. A real low comes with an "I\'m OK" button.', priority: 4, tags: ['test_tube'] });
+      await sendFor(row)(row.self_topic, { title: 'su94r test alert', message: 'Night alerts reach this phone. A real low comes with an "I\'m OK" button.', priority: 4, tags: ['test_tube'], es: { title: 'Alerta de prueba de su94r', message: 'Las alertas nocturnas llegan a este teléfono. Una baja real trae un botón "Estoy bien".' } });
     } catch (e) {
       return json({ error: 'push-failed', message: `The alert did not go out (${e.message}). Try again in a minute.` }, 502);
     }

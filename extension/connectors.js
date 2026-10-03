@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgEnabled, tgTest } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgAllow, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -168,11 +168,12 @@ export const CONNECTORS = [
         const who = h('input', { type: 'text', placeholder: 'Dr. Lee', 'aria-label': 'Who the link is for', class: 'grow', maxlength: '40' });
         const days = h('select', { 'aria-label': 'How long the link works' },
           h('option', { value: '7' }, '1 week'), h('option', { value: '30', selected: true }, '30 days'), h('option', { value: '90' }, '90 days'));
+        const lang = h('select', { 'aria-label': 'Language of the report' }, h('option', { value: 'en', selected: true }, 'English'), h('option', { value: 'es' }, 'Español'));
         out.push(
-          h('div', { class: 'actions' }, who, days,
+          h('div', { class: 'actions' }, who, days, lang,
             action(ctx, msg, 'Make the link', 'Making the link…', async () => {
               const name = who.value.trim() || 'Doctor';
-              const r = await doctorNew(settings.screenLink, name, Number(days.value));
+              const r = await doctorNew(settings.screenLink, name, Number(days.value), lang.value);
               if (!r.ok) return r;
               doctorShown = { url: doctorUrl(settings.screenLink, r.token), name, expiresAt: r.expiresAt };
             }, 'primary')),
@@ -239,8 +240,10 @@ export const CONNECTORS = [
       }
       if (s.chats.length) {
         out.push(h('ul', { class: 'chats' }, s.chats.map((c) => h('li', {},
-          `${c.name || 'Telegram'} (${c.role === 'family' ? 'family' : 'you'}) `,
+          `${c.name || 'Telegram'} (${c.role === 'family' ? (c.canLog ? 'family, can log' : 'family') : 'you'}${c.lang === 'es' ? ', español' : ''}) `,
+          c.role === 'family' ? action(ctx, msg, c.canLog ? 'Stop logging' : 'Allow logging', 'Saving…', () => tgAllow(settings.screenLink, c.id, !c.canLog)) : null,
           action(ctx, msg, 'Remove', 'Removing…', () => tgRemove(settings.screenLink, c.id))))));
+        out.push(state(h, 'Each chat picks its own language: /espanol or /english in Telegram.'));
       }
       out.push(msg, h('div', { class: 'actions' },
         action(ctx, msg, 'Send a test message', 'Sending…', () => tgTest(settings.screenLink)),
@@ -343,6 +346,12 @@ export const CONNECTORS = [
           state(h, 'Anyone you trust can get your alerts too: they install ntfy and subscribe to the care topic. They are told only when a low is not handled (the care ladder: a severe low, or no "I\'m OK" in time at night).'),
           h('div', { class: 'qr-row' }, qrImage(h, v.careUrl, 'Care topic for family'), copyable(h, v.careTopic)),
           h('div', { class: 'actions' }, action(ctx, msg, v.careEnabled ? 'Stop telling caregivers' : 'Tell caregivers too', 'Saving…', () => nightSave(settings.screenLink, { careEnabled: !v.careEnabled })))),
+        h('details', {},
+          h('summary', {}, 'Alert language / Idioma de las alertas'),
+          state(h, `Your ntfy alerts: ${v.langSelf === 'es' ? 'Español' : 'English'}. Family ntfy alerts: ${v.langCare === 'es' ? 'Español' : 'English'}. Phones with the su94r app and Telegram chats each use their own language.`),
+          h('div', { class: 'actions' },
+            action(ctx, msg, v.langSelf === 'es' ? 'My alerts in English' : 'Mis alertas en español', 'Saving…', () => nightSave(settings.screenLink, { langSelf: v.langSelf === 'es' ? 'en' : 'es' })),
+            action(ctx, msg, v.langCare === 'es' ? 'Family alerts in English' : 'Alertas de la familia en español', 'Saving…', () => nightSave(settings.screenLink, { langCare: v.langCare === 'es' ? 'en' : 'es' })))),
       ];
     },
   },

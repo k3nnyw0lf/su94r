@@ -1,0 +1,424 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "mi azúcar",
+      "intents": [
+        {
+          "name": "GetGlucoseIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "cómo estoy",
+            "cómo está mi azúcar",
+            "cuál es mi azúcar",
+            "cuánto tengo",
+            "cuál es mi glucosa",
+            "cómo está mi glucosa",
+            "qué tal estoy",
+            "cuál es mi nivel de azúcar",
+            "dime mi azúcar",
+            "dime mi glucosa",
+            "cómo está {name}",
+            "cuánto tiene {name}",
+            "cómo anda {name}"
+          ]
+        },
+        {
+          "name": "LogInsulinIntent",
+          "slots": [
+            {
+              "name": "units",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "insulin",
+              "type": "INSULIN_TYPE"
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION"
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "{units} unidades de {insulin}",
+            "{units} unidades de insulina {insulin}",
+            "registra {units} unidades de {insulin}",
+            "registra {units} unidades de insulina {insulin}",
+            "me puse {units} unidades de {insulin}",
+            "me inyecté {units} unidades de {insulin}",
+            "anota {units} unidades de {insulin}",
+            "{units} unidades de {insulin} hace {ago}",
+            "me puse {units} unidades de {insulin} hace {ago}",
+            "registra {units} unidades de {insulin} para {name}",
+            "registra insulina",
+            "quiero registrar insulina",
+            "registra una dosis",
+            "registra {units} de {insulin}"
+          ]
+        },
+        {
+          "name": "LastInsulinIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "cuándo me puse insulina",
+            "cuándo me puse insulina por última vez",
+            "cuándo fue la última vez que me puse insulina",
+            "a qué hora me puse insulina",
+            "cuándo fue mi última insulina",
+            "cuál fue mi última dosis",
+            "cuándo me inyecté",
+            "mi última insulina",
+            "cuándo fue la última dosis",
+            "qué insulina me puse",
+            "cuándo se puso insulina {name}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "LogCarbsIntent",
+          "slots": [
+            {
+              "name": "grams",
+              "type": "AMAZON.NUMBER"
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION"
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "comí {grams} gramos",
+            "comí {grams} gramos de carbohidratos",
+            "registra {grams} gramos",
+            "registra {grams} gramos de carbohidratos",
+            "anota {grams} gramos",
+            "{grams} gramos de carbohidratos",
+            "comí {grams} gramos hace {ago}",
+            "registra {grams} gramos hace {ago}",
+            "registra una comida",
+            "quiero registrar una comida",
+            "registra carbohidratos",
+            "{name} comió {grams} gramos",
+            "registra {grams} gramos para {name}"
+          ]
+        },
+        {
+          "name": "ForecastIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "hacia dónde voy",
+            "a dónde va mi azúcar",
+            "cómo voy a estar",
+            "qué va a pasar con mi azúcar",
+            "cómo estaré en una hora",
+            "dame un estimado",
+            "cuál es el pronóstico",
+            "voy a subir",
+            "voy a bajar",
+            "voy a tener una baja",
+            "hacia dónde va {name}"
+          ]
+        },
+        {
+          "name": "NightIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "cómo fue mi noche",
+            "cómo estuvo mi noche",
+            "cómo dormí",
+            "qué tal la noche",
+            "cómo pasé la noche",
+            "cómo fue anoche",
+            "cómo estuvo anoche",
+            "cómo fue la noche de {name}",
+            "cómo pasó la noche {name}"
+          ]
+        },
+        {
+          "name": "WeekIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "cómo fue mi semana",
+            "cómo va mi semana",
+            "cómo estuvo esta semana",
+            "cuánto tiempo en rango esta semana",
+            "resumen de la semana",
+            "cómo fue la semana de {name}"
+          ]
+        },
+        {
+          "name": "PatternIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "qué patrones ves",
+            "qué patrones hay",
+            "cuáles son mis patrones",
+            "dime mis patrones",
+            "qué se repite",
+            "busca patrones",
+            "qué patrones tiene {name}"
+          ]
+        }
+      ],
+      "types": [
+        {
+          "name": "INSULIN_TYPE",
+          "values": [
+            {
+              "id": "short",
+              "name": {
+                "value": "regular",
+                "synonyms": [
+                  "R",
+                  "insulina regular",
+                  "humulin R",
+                  "novolin R",
+                  "actrapid",
+                  "corta"
+                ]
+              }
+            },
+            {
+              "id": "rapid",
+              "name": {
+                "value": "rápida",
+                "synonyms": [
+                  "rapida",
+                  "ultrarrápida",
+                  "de acción rápida",
+                  "humalog",
+                  "novolog",
+                  "novorapid",
+                  "fiasp",
+                  "lyumjev",
+                  "admelog",
+                  "apidra",
+                  "lispro",
+                  "aspart"
+                ]
+              }
+            },
+            {
+              "id": "basal",
+              "name": {
+                "value": "de acción prolongada",
+                "synonyms": [
+                  "prolongada",
+                  "lenta",
+                  "basal",
+                  "lantus",
+                  "basaglar",
+                  "toujeo",
+                  "tresiba",
+                  "levemir",
+                  "semglee",
+                  "glargina",
+                  "degludec"
+                ]
+              }
+            },
+            {
+              "id": "intermediate",
+              "name": {
+                "value": "NPH",
+                "synonyms": [
+                  "N",
+                  "N P H",
+                  "humulin N",
+                  "novolin N",
+                  "intermedia"
+                ]
+              }
+            },
+            {
+              "id": "mix",
+              "name": {
+                "value": "premezclada",
+                "synonyms": [
+                  "mezclada",
+                  "mezcla",
+                  "setenta treinta",
+                  "70 30",
+                  "humalog mix",
+                  "novolog mix"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "dialog": {
+      "intents": [
+        {
+          "name": "LogInsulinIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "units",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "insulin",
+              "type": "INSULIN_TYPE",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "LogCarbsIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "grams",
+              "type": "AMAZON.NUMBER",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "ago",
+              "type": "AMAZON.DURATION",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            },
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "ForecastIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "NightIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        },
+        {
+          "name": "WeekIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "confirmationRequired": false,
+          "prompts": {},
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName",
+              "elicitationRequired": false,
+              "confirmationRequired": false,
+              "prompts": {}
+            }
+          ]
+        }
+      ],
+      "delegationStrategy": "SKILL_RESPONSE"
+    },
+    "prompts": []
+  }
+}

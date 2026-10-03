@@ -232,6 +232,37 @@ await shot('17-treating');
 forceLow = false;
 resetCaches();
 
+// Spanish: the language switch under More; tabs, Now, Log and History in Spanish.
+await tab('more');
+await page.waitForSelector('button[data-lang="es"]');
+await page.click('button[data-lang="es"]');
+await page.waitForSelector('#tabs button[data-tab="now"] span >> text=Ahora');
+checks.esTabs = (await page.textContent('#tabs')).includes('Historial') && (await page.textContent('#tabs')).includes('Más');
+checks.esLang = (await page.evaluate(() => document.documentElement.lang)) === 'es';
+await page.waitForSelector('text=Alertas de baja en esta app');
+await shot('18-mas-es');
+await tab('now');
+await page.waitForSelector('.big .v');
+checks.esNow = /en rango|Tratar la baja|actualizado|Actualizado/.test(await page.textContent('body'));
+await shot('19-ahora-es');
+await tab('log');
+await page.waitForSelector('#logBtn');
+checks.esLog = (await page.textContent('#main')).includes('Insulina rápida');
+await page.click('button[data-amount="2"]');
+await page.click('#logBtn');
+await page.waitForSelector('#sheet');
+checks.esConfirm = (await page.textContent('#sheet')).includes('¿Registrar 2 unidades de insulina rápida');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('#toast');
+checks.esServerText = (await page.textContent('#toast')).startsWith('Registrado:');
+await shot('20-registrar-es');
+await tab('history');
+await page.waitForSelector('.days');
+checks.esHistory = (await page.textContent('#main')).includes('Día por día');
+await page.click('#tabs button[data-tab="more"]');
+await page.click('button[data-lang="en"]');
+await page.waitForSelector('#tabs button[data-tab="now"] span >> text=Now');
+
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });
 await tab('now');

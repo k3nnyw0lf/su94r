@@ -55,6 +55,9 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   const screen = await screenFor(request, screens, '');
   if (!screen || screen.kind !== 'screen' || (screen.role !== 'me' && screen.role !== 'family')) return json({ error: 'unauthorized' }, 401);
   const owner = screen.role === 'me';
+  // The app sends its language; only the words change.
+  const es = /^es/i.test(request.headers.get('x-su94r-lang') || '');
+  const T = (en, sp) => (es ? sp : en);
   const canLog = owner || screen.can_log === true;
   let list = null;
   const people = async () => {
@@ -90,7 +93,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
     let tz;
     try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
-    return json(await reportFor(pid, { history, doses, snapshot, labs, tz, now }));
+    return json(await reportFor(pid, { history, doses, snapshot, labs, tz, now, lang: es ? 'es' : 'en' }));
   }
 
   if (path === 'app/recent') {
@@ -142,7 +145,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (path === 'app/patterns') {
     if (!history?.ready) return json({ error: 'The server history is not set up' }, 503);
     const pid = await pidFor(url.searchParams.get('pid'));
-    if (!pid) return json({ patterns: [], days: 0, note: 'No one to look at yet.' });
+    if (!pid) return json({ patterns: [], days: 0, note: T('No one to look at yet.', 'Todavía no hay a quién mirar.') });
     const person = (await people()).find((p) => p.pid === pid) || {};
     let tz;
     try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
@@ -150,7 +153,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     let events = [];
     try { if (doses?.ready) events = markersOf(await doses.between(pid, now - 14 * DAY, now)); } catch { /* none */ }
     const mmol = person.units === 'mmol/L';
-    return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL' }));
+    return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en' }));
   }
 
   if (path === 'app/labs') {
@@ -166,11 +169,13 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const b = await request.json().catch(() => ({}));
     const text = spokenNumbers(String(b.text || '').slice(0, 200));
     const e = parseLog(text);
-    if (!e) return json({ ok: false, heard: text, error: 'Say an amount and what it is, for example "4 units rapid" or "40 grams".' });
+    const said = String(b.text || '').slice(0, 200);
+    if (!e) return json({ ok: false, heard: es ? said : text, error: T('Say an amount and what it is, for example "4 units rapid" or "40 grams".', 'Di una cantidad y qué es, por ejemplo "4 unidades de rápida" o "40 gramos".') });
     const minutesAgo = Math.min(24 * 60, Math.round((e.back || 0) / MIN));
+    const heard = es ? said : text;
     return json(e.type === 'carbs'
-      ? { ok: true, heard: text, kind: 'carbs', amount: e.grams, minutesAgo }
-      : { ok: true, heard: text, kind: e.kind, amount: e.units, minutesAgo });
+      ? { ok: true, heard, kind: 'carbs', amount: e.grams, minutesAgo }
+      : { ok: true, heard, kind: e.kind, amount: e.units, minutesAgo });
   }
 
   if (path === 'app/supplies') {
@@ -195,19 +200,20 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       if (!pushEndpointOk(endpoint) || !/^[A-Za-z0-9_-]{80,100}$/.test(p256dh) || !/^[A-Za-z0-9_-]{16,32}$/.test(auth)) {
         return json({ ok: false, error: 'This browser gave an alert address su94r does not send to.' }, 400);
       }
-      await push.add(screen.id, { endpoint, p256dh, auth });
+      await push.add(screen.id, { endpoint, p256dh, auth, lang: b.lang === 'es' || es ? 'es' : 'en' });
       return json({ ok: true });
     }
     if (path === 'app/push/unsubscribe') { await push.remove(screen.id, String(b.endpoint || '')); return json({ ok: true }); }
     const sent = await pushTo(push, await push.forScreen(screen.id), {
       title: 'su94r test alert', priority: 4,
       message: owner ? 'Lows ring on this phone, with an "I\'m OK" button.' : 'This phone rings when a low is not handled.',
+      es: { title: 'Alerta de prueba de su94r', message: owner ? 'Las bajas suenan en este teléfono, con un botón "Estoy bien".' : 'Este teléfono suena cuando una baja no se atiende.' },
     });
-    return sent ? json({ ok: true }) : json({ ok: false, error: 'The test did not go out. Turn app alerts off and on again.' }, 502);
+    return sent ? json({ ok: true }) : json({ ok: false, error: T('The test did not go out. Turn app alerts off and on again.', 'La prueba no salió. Apaga y vuelve a encender las alertas de la app.') }, 502);
   }
 
   // Logging: the owner's own phone, and family phones the owner allowed.
-  if (!canLog) return json({ error: 'This phone can\'t log yet. The owner can allow it in su94r Mini (Share to another phone) or in their own su94r app (More).' }, 403);
+  if (!canLog) return json({ error: T('This phone can\'t log yet. The owner can allow it in su94r Mini (Share to another phone) or in their own su94r app (More).', 'Este teléfono todavía no puede registrar. El dueño lo puede permitir en su94r Mini (Compartir con otro teléfono) o en su propia app su94r (Más).') }, 403);
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
   if (!doses?.ready) return json({ error: 'The dose store is not set up' }, 503);
   const body = await request.json().catch(() => ({}));
@@ -218,28 +224,30 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const raw = Number(body.amount);
     const amount = carbs ? Math.round(raw) : Math.round(raw * 2) / 2;
     const minutesAgo = Math.round(Number(body.minutesAgo) || 0);
-    if (!KINDS.has(kind)) return json({ ok: false, error: 'Pick insulin or carbs.' }, 400);
+    if (!KINDS.has(kind)) return json({ ok: false, error: T('Pick insulin or carbs.', 'Elige insulina o carbohidratos.') }, 400);
     if (!(amount > 0) || amount > (carbs ? APP_MAX_GRAMS : APP_MAX_UNITS)) {
-      return json({ ok: false, error: carbs ? `Carbs must be between 1 and ${APP_MAX_GRAMS} g.` : `Insulin must be between 0.5 and ${APP_MAX_UNITS} units.` }, 400);
+      return json({ ok: false, error: carbs ? T(`Carbs must be between 1 and ${APP_MAX_GRAMS} g.`, `Los carbohidratos deben estar entre 1 y ${APP_MAX_GRAMS} g.`) : T(`Insulin must be between 0.5 and ${APP_MAX_UNITS} units.`, `La insulina debe estar entre 0.5 y ${APP_MAX_UNITS} unidades.`) }, 400);
     }
-    if (minutesAgo < 0 || minutesAgo > 24 * 60) return json({ ok: false, error: 'The time must be within the last 24 hours.' }, 400);
+    if (minutesAgo < 0 || minutesAgo > 24 * 60) return json({ ok: false, error: T('The time must be within the last 24 hours.', 'La hora debe estar dentro de las últimas 24 horas.') }, 400);
     const pid = await pidFor(String(body.pid || ''));
     if (!pid) return json({ ok: false, error: 'No one to log for yet.' }, 400);
     const t = now - minutesAgo * MIN;
     if (!carbs && body.confirm !== true) {
       let warning = null;
-      try { warning = doubleDoseWarning(asMarkers(await doses.recent(pid, now)), pid, { t, kind }, {}, now); } catch { /* a warning, never a block */ }
+      try { warning = doubleDoseWarning(asMarkers(await doses.recent(pid, now)), pid, { t, kind }, {}, now, es ? 'es' : 'en'); } catch { /* a warning, never a block */ }
       if (warning) return json({ ok: false, confirm: true, warning });
     }
     const id = `app-${screen.id.slice(0, 8)}-${now.toString(36)}`;
     await doses.upsert([{ id, pid, t, kind, amount, source: 'phone' }]);
     const what = carbs ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`;
-    return json({ ok: true, id, t, text: `Logged ${what}${minutesAgo ? `, ${minutesAgo} min ago` : ''}.` });
+    const kindEs = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' }[kind];
+    const que = carbs ? `${amount} g de carbohidratos` : `${amount} ${amount === 1 ? 'unidad' : 'unidades'} de insulina ${kindEs}`;
+    return json({ ok: true, id, t, text: T(`Logged ${what}${minutesAgo ? `, ${minutesAgo} min ago` : ''}.`, `Registrado: ${que}${minutesAgo ? `, hace ${minutesAgo} min` : ''}.`) });
   }
 
   if (path === 'app/treat') {
     const grams = Math.round(Number(body.grams));
-    if (!(grams >= 1 && grams <= 100)) return json({ ok: false, error: 'Between 1 and 100 g.' }, 400);
+    if (!(grams >= 1 && grams <= 100)) return json({ ok: false, error: T('Between 1 and 100 g.', 'Entre 1 y 100 g.') }, 400);
     if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
     const pid = await pidFor(String(body.pid || ''));
     if (!pid) return json({ ok: false, error: 'No one to log for yet.' }, 400);
@@ -252,9 +260,10 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     // Caregivers who were told about this low hear that it is being handled.
     if (t.ep?.careRung && row.care_enabled && notify) {
       const at = new Date(now).toLocaleTimeString('en-US', { timeZone: row.time_zone || 'America/New_York', hour: 'numeric', minute: '2-digit' });
-      await notify(row, 'family', { title: `${person.firstName || person.name || 'They'} ${person.firstName || person.name ? 'is' : 'are'} treating the low`, message: `${grams} g at ${at}${screen.name ? ` (logged on ${screen.name})` : ''}.`, priority: 3, tags: ['white_check_mark'] }).catch(() => {});
+      const who = person.firstName || person.name;
+      await notify(row, 'family', { title: `${who || 'They'} ${who ? 'is' : 'are'} treating the low`, message: `${grams} g at ${at}${screen.name ? ` (logged on ${screen.name})` : ''}.`, priority: 3, tags: ['white_check_mark'], es: { title: `${who || 'Tu familiar'} está tratando la baja`, message: `${grams} g a las ${at}${screen.name ? ` (registrado en ${screen.name})` : ''}.` } }).catch(() => {});
     }
-    return json({ ok: true, id, recheckAt: t.recheckAt, text: `Logged ${grams} g. Reminders stop; recheck in ${Math.round((t.recheckAt - now) / MIN)} min.` });
+    return json({ ok: true, id, recheckAt: t.recheckAt, text: T(`Logged ${grams} g. Reminders stop; recheck in ${Math.round((t.recheckAt - now) / MIN)} min.`, `Registrado: ${grams} g. Los recordatorios paran; se vuelve a revisar en ${Math.round((t.recheckAt - now) / MIN)} min.`) });
   }
 
   if (path === 'app/labs/save' || path === 'app/labs/remove') {
@@ -263,7 +272,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ ok: false, error: 'No one to keep results for yet.' }, 400);
     if (path === 'app/labs/remove') { await labs.remove(pid, String(body.id || '')); return json({ ok: true }); }
     const row = labRow(pid, body, now);
-    if (row.error) return json({ ok: false, error: row.error }, 400);
+    if (row.error) return json({ ok: false, error: es ? (LAB_ES[row.error] || row.error) : row.error }, 400);
     await labs.add(row);
     return json({ ok: true });
   }
@@ -274,7 +283,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ ok: false, error: 'No one to track supplies for yet.' }, 400);
     if (path === 'app/supplies/remove') { await supplies.remove(pid, String(body.item || '')); return json({ ok: true }); }
     const row = supplyRow(pid, body, now);
-    if (row.error) return json({ ok: false, error: row.error }, 400);
+    if (row.error) return json({ ok: false, error: es ? (SUPPLY_ES[row.error] || row.error) : row.error }, 400);
     await supplies.save(row);
     return json({ ok: true });
   }
@@ -282,7 +291,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (path === 'app/undo') {
     const id = String(body.id || '');
     if (!id.startsWith(`app-${screen.id.slice(0, 8)}-`) || !(now - createdAt(id) < UNDO_MS)) {
-      return json({ ok: false, error: 'Only a dose this phone logged in the last 30 minutes can be undone here.' }, 400);
+      return json({ ok: false, error: T('Only a dose this phone logged in the last 30 minutes can be undone here.', 'Aquí solo se puede deshacer una dosis que este teléfono registró en los últimos 30 minutos.') }, 400);
     }
     await doses.markDeleted([id]);
     return json({ ok: true });
@@ -290,6 +299,19 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   return json({ error: 'not found' }, 404);
 }
 
+const SUPPLY_ES = {
+  'Pick insulin or sensors.': 'Elige insulina o sensores.',
+  'Type how many you have on hand.': 'Escribe cuántos tienes.',
+  'The reminder level is not a number.': 'El nivel del recordatorio no es un número.',
+  'The refill date is not a date.': 'La fecha de surtido no es una fecha.',
+};
+const LAB_ES = {
+  'Pick the date of the test.': 'Elige la fecha de la prueba.',
+  'That date does not look right.': 'Esa fecha no parece correcta.',
+  'Type the result as a number.': 'Escribe el resultado como número.',
+  'An A1c is a percentage between 3 and 20.': 'La A1c es un porcentaje entre 3 y 20.',
+  'Name the test, for example LDL cholesterol.': 'Escribe el nombre de la prueba, por ejemplo colesterol LDL.',
+};
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
 /** "four and a half units", "twenty five grams", "a hundred" → digits, for the text parser. */

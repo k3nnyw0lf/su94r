@@ -23,24 +23,29 @@ function partsIn(tz) {
   };
 }
 const hourLabel = (h) => (h % 24 === 0 ? 'midnight' : h === 12 ? 'noon' : `${h % 12} ${h < 12 ? 'AM' : 'PM'}`);
+// Spanish: "entre la 1 AM y las 3 AM", "la medianoche", "el mediodía".
+const horaEs = (h) => (h % 24 === 0 ? 'la medianoche' : h === 12 ? 'el mediodía' : `${h % 12 === 1 ? 'la' : 'las'} ${h % 12} ${h < 12 ? 'AM' : 'PM'}`);
+const SLOT_ES = { breakfast: 'el desayuno', lunch: 'el almuerzo', dinner: 'la cena' };
+const PART_ES = { night: 'la madrugada', morning: 'la mañana', afternoon: 'la tarde', evening: 'la noche' };
 const median = (xs) => { const s = xs.slice().sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null; };
 const pct = (x) => `${Math.round(x * 100)}%`;
 const SLOTS = [['breakfast', 300, 630], ['lunch', 660, 900], ['dinner', 1020, 1290]];
 
 /** { patterns: [{ kind, text }], days, note } — at most 5 patterns, the most useful first. */
-export function findPatterns(points, events = [], { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, unit = 'mg/dL' } = {}) {
+export function findPatterns(points, events = [], { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, unit = 'mg/dL', lang = 'en' } = {}) {
+  const es = lang === 'es';
   const localParts = partsIn(tz);
   const pts = points.filter((p) => p.t > now - 14 * DAY && p.t <= now && Number.isFinite(p.mg)).sort((a, b) => a.t - b.t)
     .map((p) => ({ ...p, ...localParts(p.t) }));
   const byDate = new Map();
   for (const p of pts) byDate.set(p.date, [...(byDate.get(p.date) || []), p]);
   const days = [...byDate.entries()].filter(([, l]) => new Set(l.map((x) => Math.floor(x.minute / 15))).size >= 48);
-  if (days.length < 5) return { patterns: [], days: days.length, note: `Patterns need at least 5 days of readings; there ${days.length === 1 ? 'is 1' : `are ${days.length}`} so far.` };
+  if (days.length < 5) return { patterns: [], days: days.length, note: es ? `Los patrones necesitan al menos 5 días de lecturas; ${days.length === 1 ? 'hay 1' : `hay ${days.length}`} hasta ahora.` : `Patterns need at least 5 days of readings; there ${days.length === 1 ? 'is 1' : `are ${days.length}`} so far.` };
   const good = new Set(days.map(([d]) => d));
   const use = pts.filter((p) => good.has(p.date));
   const n = days.length;
   const out = [];
-  const amount = (mg) => `${fmt(mg)} ${unit}`;
+  const amount = (mg) => `${fmt(mg)} ${unit}`.trim();
 
   // Lows that come back at the same time of day.
   const lowDays = Array.from({ length: 12 }, () => new Set());
@@ -55,20 +60,20 @@ export function findPatterns(points, events = [], { now = Date.now(), tz = 'Amer
   for (const w of lowWins) {
     if (taken.has(w.i - 1) || taken.has(w.i + 1) || taken.size >= 2) continue;
     taken.add(w.i);
-    out.push({ kind: 'lows', w: 100 + w.k, text: `Lows on ${w.k} of the last ${n} days between ${hourLabel(w.i * 2)} and ${hourLabel(w.i * 2 + 2)}.` });
+    out.push({ kind: 'lows', w: 100 + w.k, text: es ? `Bajas en ${w.k} de los últimos ${n} días entre ${horaEs(w.i * 2)} y ${horaEs(w.i * 2 + 2)}.` : `Lows on ${w.k} of the last ${n} days between ${hourLabel(w.i * 2)} and ${hourLabel(w.i * 2 + 2)}.` });
   }
 
   // Highs above 250 at the same time of day.
   const hiDays = Array.from({ length: 8 }, () => new Set());
   for (const x of use) if (x.mg > 250) hiDays[Math.floor(x.minute / 180)].add(x.date);
   const hi = hiDays.map((s, i) => ({ i, k: s.size })).filter((w) => w.k >= 4).sort((a, b) => b.k - a.k)[0];
-  if (hi) out.push({ kind: 'highs', w: 80 + hi.k, text: `Above ${amount(250)} on ${hi.k} of the last ${n} days between ${hourLabel(hi.i * 3)} and ${hourLabel(hi.i * 3 + 3)}.` });
+  if (hi) out.push({ kind: 'highs', w: 80 + hi.k, text: es ? `Por encima de ${amount(250)} en ${hi.k} de los últimos ${n} días entre ${horaEs(hi.i * 3)} y ${horaEs(hi.i * 3 + 3)}.` : `Above ${amount(250)} on ${hi.k} of the last ${n} days between ${hourLabel(hi.i * 3)} and ${hourLabel(hi.i * 3 + 3)}.` });
 
   // A rise before waking.
   const near = (l, minute) => l.filter((x) => Math.abs(x.minute - minute) <= 20).sort((a, b) => Math.abs(a.minute - minute) - Math.abs(b.minute - minute))[0];
   const rises = days.map(([, l]) => { const a = near(l, 180), b = near(l, 420); return a && b ? b.mg - a.mg : null; }).filter((x) => x != null);
   const dawn = rises.length >= 5 ? median(rises) : null;
-  if (dawn != null && dawn >= 25) out.push({ kind: 'dawn', w: 70, text: `On most mornings glucose rises about ${amount(dawn)} between 3 and 7 AM, before breakfast.` });
+  if (dawn != null && dawn >= 25) out.push({ kind: 'dawn', w: 70, text: es ? `Casi todas las mañanas la glucosa sube unos ${amount(dawn)} entre las 3 y las 7 AM, antes del desayuno.` : `On most mornings glucose rises about ${amount(dawn)} between 3 and 7 AM, before breakfast.` });
 
   // After meals: from logged carbs or rapid insulin (one per meal), by meal time.
   const anchors = events.filter((e) => e.type === 'meal' || (e.type === 'insulin' && ['rapid', 'short', 'mix'].includes(e.kind || 'rapid')))
@@ -90,8 +95,10 @@ export function findPatterns(points, events = [], { now = Date.now(), tz = 'Amer
   if (meals.length && meals[0].rise >= 50) {
     const m = meals[0];
     const when = m.mins >= 60 ? `${Math.floor(m.mins / 60)} h ${Math.round(m.mins % 60)} min` : `${Math.round(m.mins)} min`;
-    const other = meals.length > 1 && meals[0].rise - meals[meals.length - 1].rise >= 30 ? ` Less after ${meals[meals.length - 1].slot} (about ${amount(meals[meals.length - 1].rise)}).` : '';
-    out.push({ kind: 'meals', w: 60, text: `After ${m.slot}, glucose rises about ${amount(m.rise)} (the middle of ${m.k} meals), peaking about ${when} later.${other}` });
+    const last = meals[meals.length - 1];
+    const less = meals.length > 1 && m.rise - last.rise >= 30;
+    const other = less ? (es ? ` Sube menos después de ${SLOT_ES[last.slot]} (unos ${amount(last.rise)}).` : ` Less after ${last.slot} (about ${amount(last.rise)}).`) : '';
+    out.push({ kind: 'meals', w: 60, text: es ? `Después de ${SLOT_ES[m.slot]}, la glucosa sube unos ${amount(m.rise)} (la mediana de ${m.k} comidas), con el pico unos ${when} después.${other}` : `After ${m.slot}, glucose rises about ${amount(m.rise)} (the middle of ${m.k} meals), peaking about ${when} later.${other}` });
   }
 
   // Weekdays and weekends.
@@ -100,7 +107,7 @@ export function findPatterns(points, events = [], { now = Date.now(), tz = 'Amer
   const wkDays = days.filter(([d]) => !weekend(d)), weDays = days.filter(([d]) => weekend(d));
   if (wkDays.length >= 3 && weDays.length >= 2) {
     const a = tir(wkDays.flatMap(([, l]) => l)), b = tir(weDays.flatMap(([, l]) => l));
-    if (Math.abs(a - b) >= 0.1) out.push({ kind: 'weekend', w: 50, text: `Time in range is ${pct(a)} on weekdays and ${pct(b)} on weekends.` });
+    if (Math.abs(a - b) >= 0.1) out.push({ kind: 'weekend', w: 50, text: es ? `El tiempo en rango es ${pct(a)} entre semana y ${pct(b)} los fines de semana.` : `Time in range is ${pct(a)} on weekdays and ${pct(b)} on weekends.` });
   }
 
   // The steadiest and the hardest part of the day.
@@ -109,9 +116,9 @@ export function findPatterns(points, events = [], { now = Date.now(), tz = 'Amer
     .filter((p) => p.v != null && p.k >= 3).sort((x, y) => y.v - x.v);
   if (parts.length >= 2 && parts[0].v - parts[parts.length - 1].v >= 0.15) {
     const best = parts[0], worst = parts[parts.length - 1];
-    out.push({ kind: 'parts', w: 40, text: `Your steadiest time is the ${best.name} (${pct(best.v)} in range); the hardest is the ${worst.name} (${pct(worst.v)}).` });
+    out.push({ kind: 'parts', w: 40, text: es ? `Tu momento más estable es ${PART_ES[best.name]} (${pct(best.v)} en rango); el más difícil es ${PART_ES[worst.name]} (${pct(worst.v)}).` : `Your steadiest time is the ${best.name} (${pct(best.v)} in range); the hardest is the ${worst.name} (${pct(worst.v)}).` });
   }
 
   out.sort((a, b) => b.w - a.w);
-  return { patterns: out.slice(0, 5).map(({ kind, text }) => ({ kind, text })), days: n, note: out.length ? null : `No clear patterns in the last ${n} days.` };
+  return { patterns: out.slice(0, 5).map(({ kind, text }) => ({ kind, text })), days: n, note: out.length ? null : es ? `No hay patrones claros en los últimos ${n} días.` : `No clear patterns in the last ${n} days.` };
 }

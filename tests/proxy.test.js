@@ -198,7 +198,8 @@ describe('su94r-proxy forwarding', () => {
     // su94r Mini's history copy and the history read reach the server too (they once got "alive").
     await proxy.fetch(new Request('https://proxy.test/history/import?key=k', { method: 'POST', body: '{}' }), env);
     await proxy.fetch(new Request('https://proxy.test/history?key=k&days=14'), env);
-    expect(seen.slice(1).map((s) => s.url)).toEqual(['https://cgm.test/functions/v1/su94r-cgm/history/import?key=k', 'https://cgm.test/functions/v1/su94r-cgm/history?key=k&days=14']);
+    expect(seen.slice(1).map((s) => s.url)).toEqual(['https://cgm.test/functions/v1/su94r-cgm/history/import', 'https://cgm.test/functions/v1/su94r-cgm/history?days=14']);
+    expect(seen[1].init.headers.get('x-su94r-key')).toBe('k');
     expect(seen[0].init.headers.get('authorization')).toBe(`Bearer ${token}`);
   });
   it('fails closed when CGM_URL is unset', async () => {

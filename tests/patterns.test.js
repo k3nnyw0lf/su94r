@@ -93,7 +93,8 @@ describe('Alexa: "what patterns do you see?"', () => {
     const pts = [];
     for (let t = now - 14 * DAY; t <= now; t += 15 * MIN) {
       const h = new Date(t).toLocaleString('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' });
-      pts.push({ t, mg: Number(h) >= 3 && Number(h) < 7 ? 120 + (Number(h) - 3) * 12 : 120 });
+      // The rise runs on to 8 AM, so whatever minute the readings fall on, 7 AM reads higher than 3 AM.
+      pts.push({ t, mg: Number(h) >= 3 && Number(h) < 8 ? 120 + (Number(h) - 3) * 12 : 120 });
     }
     const text = await ask(pts);
     expect(text).toMatch(/^Over the last \d+ days: On most mornings glucose rises about \d+ between 3 and 7 AM/);

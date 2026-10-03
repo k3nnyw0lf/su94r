@@ -32,12 +32,13 @@ export async function doctorNew(request, store, snapshot) {
   await store.insert({
     id: crypto.randomUUID(), secret_hash: await sha256(randomToken()), token_hash: await sha256(token),
     kind: 'doctor', pid, name: clean(body.name) || 'Doctor', claimed_at: new Date(now).toISOString(), expires_at: expiresAt,
+    lang: body.lang === 'es' ? 'es' : 'en',
   });
   return { ok: true, token, expiresAt };
 }
 
 /** The 14-day report numbers for one person, from the server's history and logged doses. */
-export async function reportFor(pid, { history, doses, snapshot, labs = null, tz = 'America/New_York', now = Date.now() }) {
+export async function reportFor(pid, { history, doses, snapshot, labs = null, tz = 'America/New_York', now = Date.now(), lang = 'en' }) {
   let person = null;
   try { person = (await snapshot()).people?.find((p) => p.pid === pid) || null; } catch { /* history only */ }
   const from = now - 14 * DAY;
@@ -47,7 +48,7 @@ export async function reportFor(pid, { history, doses, snapshot, labs = null, tz
   const low = person?.low ?? 70, high = person?.high ?? 180;
   const r = agp(points, events, { from, to: now, low, high });
   const mmol = person?.units === 'mmol/L';
-  const found = findPatterns(points, events, { now, tz, low, high, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL' });
+  const found = findPatterns(points, events, { now, tz, low, high, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang });
   let lab = { labs: [], a1c: null };
   try { if (labs?.ready) lab = labsForReport(await labs.list(pid), now); } catch { /* without labs */ }
   return {
@@ -63,20 +64,24 @@ export async function reportFor(pid, { history, doses, snapshot, labs = null, tz
 /** The report numbers for a doctor link's token, or null when the link is unknown, removed or expired. */
 export async function doctorData(screen, { history, doses, snapshot, labs = null, tz, now = Date.now() }) {
   if (!screen || screen.kind !== 'doctor' || !screen.pid || Date.parse(screen.expires_at) <= now) return null;
-  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, tz, now })), expiresAt: screen.expires_at, label: screen.name };
+  const lang = screen.lang === 'es' ? 'es' : 'en';
+  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, tz, now, lang })), expiresAt: screen.expires_at, label: screen.name, lang };
 }
 
 /** The report as HTML in the browser: esc, pct, day, val, stat, chart and reportHtml(d). Plain ES2017,
  *  shared by the doctor's page and the phone app (workers/app-page.js). */
 export const REPORT_SCRIPT = `function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function pct(x){return Math.round((x||0)*100)+'%'}
-function day(t){return new Date(t).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+var RL='en';
+var RES={'Glucose report':'Informe de glucosa','(14 days)':'(14 días)','For':'Para','always the latest 14 days':'siempre los últimos 14 días','link expires':'el enlace vence','Always the latest 14 days':'Siempre los últimos 14 días','From su94r (FreeStyle Libre via LibreLinkUp). Not a medical device.':'De su94r (FreeStyle Libre vía LibreLinkUp). No es un dispositivo médico.','Average glucose':'Glucosa promedio','GMI':'GMI','estimated from the average':'estimado a partir del promedio','Variability (CV)':'Variabilidad (CV)','target ≤36%':'meta ≤36%','Sensor data':'Datos del sensor','below the 70% advised for a reliable report':'menos del 70% recomendado para un informe confiable','of the period':'del periodo','Time in ranges':'Tiempo en rangos','Very high (&gt;250)':'Muy alta (&gt;250)','target &lt;5%':'meta &lt;5%','High':'Alta','target &lt;25% with very high':'meta &lt;25% con muy alta','In range':'En rango','target &gt;70%':'meta &gt;70%','Low':'Baja','target &lt;4% with very low':'meta &lt;4% con muy baja','Very low (&lt;54)':'Muy baja (&lt;54)','target &lt;1%':'meta &lt;1%','Glucose by time of day':'Glucosa según la hora del día','Median line, 25–75% band and 5–95% band of all days; target range shaded.':'Línea de la mediana, franja del 25–75% y del 5–95% de todos los días; el rango meta está sombreado.','Patterns':'Patrones','What repeated in these 14 days. It describes; it does not advise.':'Lo que se repitió en estos 14 días. Describe; no aconseja.','Logged insulin and meals':'Insulina y comidas registradas','Insulin':'Insulina','Doses':'Dosis','Units per day':'Unidades por día','No insulin logged on the server in this period.':'No hay insulina registrada en el servidor en este periodo.','meals logged. Logged markers are what was entered and may be incomplete.':'comidas registradas. Los registros son lo que se anotó y pueden estar incompletos.','Lab results (last 12 months)':'Resultados de laboratorio (últimos 12 meses)','Latest A1c':'A1c más reciente','GMI over these 14 days':'GMI de estos 14 días','not enough readings':'faltan lecturas','They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.':'Suelen diferir por unas décimas: el GMI abarca 14 días y la A1c unos 3 meses.','Date':'Fecha','Test':'Prueba','Result':'Resultado','Typed in by the patient.':'Anotado por el paciente.','rapid':'rápida','short':'regular','intermediate':'NPH','basal':'acción prolongada','mix':'premezclada'};
+function L(s){return RL==='es'&&RES[s]?RES[s]:s}
+function day(t){return new Date(t).toLocaleDateString(RL==='es'?'es-US':'en-US',{month:'short',day:'numeric',year:'numeric'})}
 function val(mg,u){return u==='mmol/L'?(mg/18.0182).toFixed(1):String(Math.round(mg))}
 function stat(l,v,n){return '<div class="stat"><div class="v">'+v+'</div><div class="l">'+l+'</div>'+(n?'<div class="n">'+n+'</div>':'')+'</div>'}
 function chart(d){
   var W=760,H=260,pl=34,pr=8,pt=10,pb=24,lo=40,hi=300;
   var x=function(i){return pl+(i/95)*(W-pl-pr)},y=function(v){return pt+(1-(Math.min(hi,Math.max(lo,v))-lo)/(hi-lo))*(H-pt-pb)};
-  var s='<svg class="agp" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="Glucose percentiles by time of day">';
+  var s='<svg class="agp" viewBox="0 0 '+W+' '+H+'" role="img" aria-label="'+L('Glucose by time of day')+'">';
   s+='<rect x="'+pl+'" y="'+y(d.high)+'" width="'+(W-pl-pr)+'" height="'+(y(d.low)-y(d.high))+'" fill="rgba(26,127,55,.10)"/>';
   [d.low,d.high,250].forEach(function(v){s+='<line x1="'+pl+'" x2="'+(W-pr)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#d0d7de"/><text x="2" y="'+(y(v)+4)+'">'+val(v,d.units)+'</text>'});
   [0,24,48,72,95].forEach(function(i){var h=Math.round(i/4)%24;s+='<text x="'+(x(i)-10)+'" y="'+(H-6)+'">'+(h===0?'12a':h<12?h+'a':h===12?'12p':(h-12)+'p')+'</text>'});
@@ -88,24 +93,25 @@ function chart(d){
   }
   return s+'</svg>';
 }
-function reportHtml(d){
+function reportHtml(d,lang){
+  RL=lang==='es'?'es':'en';
   var r=d.ranges,u=d.units;
-  var ins=Object.keys(d.insulin||{}).map(function(k){var v=d.insulin[k];return '<tr><td>'+esc(k)+'</td><td class="num">'+v.doses+'</td><td class="num">'+(v.withAmount?(v.units/d.days).toFixed(1):'—')+'</td></tr>'}).join('');
-  return     '<div class="head"><div><h1>Glucose report</h1><div class="muted">'+esc(d.person)+' · '+day(d.from)+' to '+day(d.to)+' (14 days) · '+esc(u)+'</div></div>'+
-    '<div class="muted small">'+(d.label?'For '+esc(d.label)+' · always the latest 14 days · link expires '+day(d.expiresAt):'Always the latest 14 days')+'<br>From su94r (FreeStyle Libre via LibreLinkUp). Not a medical device.</div></div>'+
-    '<div class="stats">'+stat('Average glucose',d.mean!=null?val(d.mean,u)+' '+esc(u):'—')+stat('GMI',d.gmi!=null?d.gmi.toFixed(1)+'%':'—','estimated from the average')+stat('Variability (CV)',d.cv!=null?d.cv.toFixed(1)+'%':'—','target ≤36%')+stat('Sensor data',pct(d.coverage),d.coverage<0.7?'below the 70% advised for a reliable report':'of the period')+'</div>'+
-    '<h2>Time in ranges</h2><div class="ranges"><div class="col">'+[['vh',r.veryHigh],['hh',r.high],['in',r.inRange],['lo',r.low],['vl',r.veryLow]].map(function(a){return '<span class="seg '+a[0]+'" style="flex-grow:'+(a[1]||0)+'"></span>'}).join('')+'</div>'+
-    '<table><tr><td>Very high (&gt;250)</td><td class="num">'+pct(r.veryHigh)+'</td><td class="muted small">target &lt;5%</td></tr><tr><td>High</td><td class="num">'+pct(r.high)+'</td><td class="muted small">target &lt;25% with very high</td></tr><tr><td>In range ('+val(d.low,u)+'–'+val(d.high,u)+')</td><td class="num">'+pct(r.inRange)+'</td><td class="muted small">target &gt;70%</td></tr><tr><td>Low</td><td class="num">'+pct(r.low)+'</td><td class="muted small">target &lt;4% with very low</td></tr><tr><td>Very low (&lt;54)</td><td class="num">'+pct(r.veryLow)+'</td><td class="muted small">target &lt;1%</td></tr></table></div>'+
-    '<h2>Glucose by time of day</h2><p class="muted small">Median line, 25–75% band and 5–95% band of all days; target range shaded.</p>'+chart(d)+
-    (d.patterns&&d.patterns.length?'<h2>Patterns</h2><ul class="pat">'+d.patterns.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul><p class="muted small">What repeated in these 14 days. It describes; it does not advise.</p>':'')+
-    '<h2>Logged insulin and meals</h2>'+(ins?'<table><tr><th>Insulin</th><th class="num">Doses</th><th class="num">Units per day</th></tr>'+ins+'</table>':'<p class="muted">No insulin logged on the server in this period.</p>')+
-    '<p class="muted small">'+(d.meals?d.meals.count:0)+' meals logged. Logged markers are what was entered and may be incomplete.</p>'+
+  var ins=Object.keys(d.insulin||{}).map(function(k){var v=d.insulin[k];return '<tr><td>'+esc(L(k))+'</td><td class="num">'+v.doses+'</td><td class="num">'+(v.withAmount?(v.units/d.days).toFixed(1):'—')+'</td></tr>'}).join('');
+  return '<div class="head"><div><h1>'+L('Glucose report')+'</h1><div class="muted">'+esc(d.person)+' · '+day(d.from)+' – '+day(d.to)+' '+L('(14 days)')+' · '+esc(u)+'</div></div>'+
+    '<div class="muted small">'+(d.label?L('For')+' '+esc(d.label)+' · '+L('always the latest 14 days')+' · '+L('link expires')+' '+day(d.expiresAt):L('Always the latest 14 days'))+'<br>'+L('From su94r (FreeStyle Libre via LibreLinkUp). Not a medical device.')+'</div></div>'+
+    '<div class="stats">'+stat(L('Average glucose'),d.mean!=null?val(d.mean,u)+' '+esc(u):'—')+stat(L('GMI'),d.gmi!=null?d.gmi.toFixed(1)+'%':'—',L('estimated from the average'))+stat(L('Variability (CV)'),d.cv!=null?d.cv.toFixed(1)+'%':'—',L('target ≤36%'))+stat(L('Sensor data'),pct(d.coverage),d.coverage<0.7?L('below the 70% advised for a reliable report'):L('of the period'))+'</div>'+
+    '<h2>'+L('Time in ranges')+'</h2><div class="ranges"><div class="col">'+[['vh',r.veryHigh],['hh',r.high],['in',r.inRange],['lo',r.low],['vl',r.veryLow]].map(function(a){return '<span class="seg '+a[0]+'" style="flex-grow:'+(a[1]||0)+'"></span>'}).join('')+'</div>'+
+    '<table><tr><td>'+L('Very high (&gt;250)')+'</td><td class="num">'+pct(r.veryHigh)+'</td><td class="muted small">'+L('target &lt;5%')+'</td></tr><tr><td>'+L('High')+'</td><td class="num">'+pct(r.high)+'</td><td class="muted small">'+L('target &lt;25% with very high')+'</td></tr><tr><td>'+L('In range')+' ('+val(d.low,u)+'–'+val(d.high,u)+')</td><td class="num">'+pct(r.inRange)+'</td><td class="muted small">'+L('target &gt;70%')+'</td></tr><tr><td>'+L('Low')+'</td><td class="num">'+pct(r.low)+'</td><td class="muted small">'+L('target &lt;4% with very low')+'</td></tr><tr><td>'+L('Very low (&lt;54)')+'</td><td class="num">'+pct(r.veryLow)+'</td><td class="muted small">'+L('target &lt;1%')+'</td></tr></table></div>'+
+    '<h2>'+L('Glucose by time of day')+'</h2><p class="muted small">'+L('Median line, 25–75% band and 5–95% band of all days; target range shaded.')+'</p>'+chart(d)+
+    (d.patterns&&d.patterns.length?'<h2>'+L('Patterns')+'</h2><ul class="pat">'+d.patterns.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul><p class="muted small">'+L('What repeated in these 14 days. It describes; it does not advise.')+'</p>':'')+
+    '<h2>'+L('Logged insulin and meals')+'</h2>'+(ins?'<table><tr><th>'+L('Insulin')+'</th><th class="num">'+L('Doses')+'</th><th class="num">'+L('Units per day')+'</th></tr>'+ins+'</table>':'<p class="muted">'+L('No insulin logged on the server in this period.')+'</p>')+
+    '<p class="muted small">'+(d.meals?d.meals.count:0)+' '+L('meals logged. Logged markers are what was entered and may be incomplete.')+'</p>'+
     labsHtml(d);
 }
 function labsHtml(d){
   if(!d.labs||!d.labs.length)return '';
-  var cmp=d.a1c?'<p class="small">Latest A1c <b>'+d.a1c.value.toFixed(1)+'%</b> ('+day(d.a1c.takenOn+'T12:00:00')+'). GMI over these 14 days: <b>'+(d.gmi!=null?d.gmi.toFixed(1)+'%':'not enough readings')+'</b>. They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.</p>':'';
-  return '<h2>Lab results (last 12 months)</h2>'+cmp+'<table><tr><th>Date</th><th>Test</th><th class="num">Result</th></tr>'+d.labs.map(function(l){return '<tr><td>'+day(l.takenOn+'T12:00:00')+'</td><td>'+esc(l.name)+'</td><td class="num">'+esc(String(l.value))+(l.unit?' '+esc(l.unit):'')+'</td></tr>'}).join('')+'</table><p class="muted small">Typed in by the patient.</p>';
+  var cmp=d.a1c?'<p class="small">'+L('Latest A1c')+' <b>'+d.a1c.value.toFixed(1)+'%</b> ('+day(d.a1c.takenOn+'T12:00:00')+'). '+L('GMI over these 14 days')+': <b>'+(d.gmi!=null?d.gmi.toFixed(1)+'%':L('not enough readings'))+'</b>. '+L('They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.')+'</p>':'';
+  return '<h2>'+L('Lab results (last 12 months)')+'</h2>'+cmp+'<table><tr><th>'+L('Date')+'</th><th>'+L('Test')+'</th><th class="num">'+L('Result')+'</th></tr>'+d.labs.map(function(l){return '<tr><td>'+day(l.takenOn+'T12:00:00')+'</td><td>'+esc(l.name)+'</td><td class="num">'+esc(String(l.value))+(l.unit?' '+esc(l.unit):'')+'</td></tr>'}).join('')+'</table><p class="muted small">'+L('Typed in by the patient.')+'</p>';
 }
 `;
 
@@ -133,16 +139,18 @@ table{border-collapse:collapse}td,th{padding:5px 10px 5px 0;text-align:left}.num
 @media print{html,body{background:#fff}.bar{display:none}.report{border:0;margin:0;max-width:none}}
 </style></head>
 <body>
-<div class="bar"><span class="muted small">Shared from su94r Mini · read-only</span><button type="button" onclick="print()">Print or save as PDF</button></div>
-<main id="r" class="report"><p class="muted">Loading…</p></main>
+<div class="bar"><span class="muted small" id="shared">Shared from su94r Mini · read-only</span><button type="button" id="printBtn" onclick="print()">Print or save as PDF</button></div>
+<main id="r" class="report"><p class="muted" id="loading">Loading…</p></main>
 <script>
 var token = location.pathname.split('/').filter(Boolean).pop();
 ${REPORT_SCRIPT}fetch('/doctor/data',{cache:'no-store',headers:{Authorization:'Bearer '+token}}).then(function(res){return res.json().then(function(j){return{ok:res.ok,j:j}})}).then(function(o){
   var d=o.j;
-  if(!o.ok){document.getElementById('r').outerHTML='<div class="err"><h1>This link has ended</h1><p class="muted">It expired or was removed. Ask for a new one.</p></div>';return}
-  document.title='Glucose report · '+(d.person||'')+' · '+day(d.to);
-  document.getElementById('r').innerHTML=reportHtml(d);
-}).catch(function(){document.getElementById('r').innerHTML='<p class="muted">Could not load the report. Try again in a minute.</p>'});
+  var esNav=/^es/i.test(navigator.language||'');
+  if(!o.ok){document.getElementById('r').outerHTML=esNav?'<div class="err"><h1>Este enlace terminó</h1><p class="muted">Venció o lo quitaron. Pide uno nuevo.</p></div>':'<div class="err"><h1>This link has ended</h1><p class="muted">It expired or was removed. Ask for a new one.</p></div>';return}
+  if(d.lang==='es'){document.documentElement.lang='es';document.getElementById('shared').textContent='Compartido desde su94r Mini · solo lectura';document.getElementById('printBtn').textContent='Imprimir o guardar como PDF'}
+  document.getElementById('r').innerHTML=reportHtml(d,d.lang);
+  document.title=(d.lang==='es'?'Informe de glucosa · ':'Glucose report · ')+(d.person||'')+' · '+day(d.to);
+}).catch(function(){document.getElementById('r').innerHTML=/^es/i.test(navigator.language||'')?'<p class="muted">No se pudo cargar el informe. Intenta en un minuto.</p>':'<p class="muted">Could not load the report. Try again in a minute.</p>'});
 </script>
 </body></html>`;
 }

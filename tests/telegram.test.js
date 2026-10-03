@@ -23,6 +23,7 @@ function memTg() {
     async chat(id) { const c = chats.get(String(id)); return c?.active ? c : null; },
     async linkChat(row) { chats.set(String(row.chat_id), { ...row, active: true, linked_at: new Date().toISOString() }); },
     async unlink(id) { const c = chats.get(String(id)); if (c) c.active = false; },
+    async setChat(id, patch) { const c = chats.get(String(id)); if (!c?.active) return false; Object.assign(c, patch); return true; },
     async newLink(h, role) { links.set(h, { code_hash: h, role, expires_at: Date.now() + 15 * 60e3 }); },
     async takeLink(h) { const l = links.get(h); links.delete(h); return l && l.expires_at > Date.now() ? l : null; },
     async sweepLinks() {},
@@ -206,9 +207,48 @@ describe('the Telegram logbook', () => {
     await say('900 g');
     expect(lastSend().text).toMatch(/not something I can log/);
     await say('4 R', 5005);
-    expect(lastSend().text).toMatch(/Only the owner's own chats can log/);
+    expect(lastSend().text).toMatch(/This chat can't log yet: the owner can allow it in su94r Mini/);
     await tap(`log:c:40:${Math.round(Date.now() / 60e3)}`, 5005);
     expect(doses.rows.size).toBe(0);
+  });
+
+  it('a family chat logs once the owner allows it in su94r Mini', async () => {
+    expect((await call('tg/chats/allow', { query: '?key=wrong', body: { chatId: '5005', canLog: true } })).status).toBe(401);
+    expect((await call('tg/chats/allow', { query: '?key=owner', body: { chatId: '1001', canLog: true } })).status).toBe(404);   // the owner's own chat logs anyway
+    expect(await (await call('tg/chats/allow', { query: '?key=owner', body: { chatId: '5005', canLog: true } })).json()).toEqual({ ok: true, canLog: true });
+    const st = await (await call('tg/status', { method: 'GET', query: '?key=owner' })).json();
+    expect(st.chats.find((c) => c.id === '5005')).toMatchObject({ role: 'family', canLog: true });
+    await say('40 g', 5005);
+    expect(lastSend().text).toBe('Log 40 g of carbs now?');
+    await tap(`log:c:40:${Math.round(Date.now() / 60e3)}`, 5005);
+    expect(doses.rows.size).toBe(1);
+  });
+
+  it('a chat in Spanish: Spanish words in, Spanish answers out; /english and /espanol switch', async () => {
+    await startWith(codeOf((await (await call('tg/link/new', { query: '?key=owner', body: { role: 'me' } })).json()).url), 7007, 'Ana');
+    await callL('tg/webhook', { body: { message: { chat: { id: 7007 }, from: { language_code: 'es' }, text: '/espanol' } }, headers: { 'X-Telegram-Bot-Api-Secret-Token': tg.bot_.webhook_secret } });
+    expect(lastSend().text).toMatch(/^Listo: su94r te escribe en español/);
+    await say('cuatro unidades de rápida', 7007);
+    const q = lastSend();
+    expect(q.text).toBe('¿Registrar 4 unidades de insulina rápida ahora?');
+    expect(q.reply_markup.inline_keyboard[0].map((b) => b.text)).toEqual(['Registrar', 'Cancelar']);
+    await tap(q.reply_markup.inline_keyboard[0][0].callback_data, 7007);
+    expect(sent.find((x) => x.method === 'editMessageText').body.text).toMatch(/^Registrado: 4 unidades de insulina rápida a las /);
+    await say('comí cuarenta gramos', 7007);
+    expect(lastSend().text).toBe('¿Registrar 40 g de carbohidratos ahora?');
+    await say('/english', 7007);
+    await say('/sugar', 7007);
+    expect(lastSend().text).toMatch(/118 mg\/dL .*min ago|118 mg\/dL .*just now/);
+  });
+
+  it('alerts reach each chat in its own language, with its own "I\'m OK" button', async () => {
+    tg.chats_.get('5005').lang = 'es';
+    await tg.setEnabled(true);
+    const n = await telegramAlert(tg, 'family', { title: 'Ken is low', message: 'Check on them.', es: { title: 'Ken tiene la glucosa baja', message: 'Revisa cómo está.' }, actions: [{ action: 'http', label: "I'm OK", url: 'https://x/night/ack?t=' + 'a'.repeat(32) }] }, { api: apiL });
+    expect(n).toBe(1);
+    const m = sent.filter((x) => x.method === 'sendMessage').at(-1).body;
+    expect(m.text).toBe('Ken tiene la glucosa baja\nRevisa cómo está.');
+    expect(m.reply_markup.inline_keyboard[0][0].text).toBe('Estoy bien');
   });
 
   it('a plate photo gets a carb estimate with a "Log 48 g" button; a caption with grams wins', async () => {

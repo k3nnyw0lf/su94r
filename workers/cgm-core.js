@@ -424,6 +424,9 @@ async function glance(env, n) {
 export async function handleCgm(path, request, env, deps = {}) {
   if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
   const url = new URL(request.url);
+  // The proxy moves ?key= into a header (logs never hold it); routes read it from the address.
+  const headerKey = request.headers.get('x-su94r-key');
+  if (headerKey && !url.searchParams.has('key')) url.searchParams.set('key', headerKey);
   try {
     if (path === 'libre/login' && request.method === 'POST') return await libreLogin(request);
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);

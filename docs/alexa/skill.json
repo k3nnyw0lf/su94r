@@ -16,6 +16,21 @@
             "diabetes",
             "insulin"
           ]
+        },
+        "es-US": {
+          "name": "Mi Azúcar",
+          "summary": "Tu glucosa e insulina desde tu propio servidor su94r.",
+          "description": "Skill privada de su94r: escucha tu lectura de FreeStyle Libre y su tendencia, registra insulina y comidas por voz (siempre se confirma primero) y pregunta cuándo te pusiste insulina. No es un dispositivo médico.",
+          "examplePhrases": [
+            "Alexa, pregunta a mi azúcar cómo estoy",
+            "Alexa, dile a mi azúcar 4 unidades de insulina rápida",
+            "Alexa, pregunta a mi azúcar cuándo me puse insulina"
+          ],
+          "keywords": [
+            "glucosa",
+            "diabetes",
+            "insulina"
+          ]
         }
       },
       "isAvailableWorldwide": false,
@@ -81,6 +96,10 @@
       "containsAds": false,
       "locales": {
         "en-US": {
+          "privacyPolicyUrl": "https://su94r.com/",
+          "termsOfUseUrl": "https://su94r.com/"
+        },
+        "es-US": {
           "privacyPolicyUrl": "https://su94r.com/",
           "termsOfUseUrl": "https://su94r.com/"
         }

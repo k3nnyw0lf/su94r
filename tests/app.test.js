@@ -220,7 +220,7 @@ describe('su94r-proxy: the app files and meal photos', () => {
     expect(page.headers.get('content-security-policy')).toMatch(/script-src 'self';/);
     expect(await page.text()).toContain('<script src="/app/app.js"></script>');
     const js = await (await proxy.fetch(new Request('https://p.test/app/app.js'), env)).text();
-    expect(js).toContain('function reportHtml(d)');
+    expect(js).toContain('function reportHtml(d,lang)');
     expect(js).toContain("api('app/log'");
     const png = await proxy.fetch(new Request('https://p.test/app/icon-192.png'), env);
     expect(png.headers.get('content-type')).toBe('image/png');

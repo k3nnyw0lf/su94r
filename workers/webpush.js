@@ -13,6 +13,8 @@
 //
 // Table: migration 20261002p_su94r_app_push_treat.sql.
 
+import { inLanguage } from './night.js';
+
 const enc = new TextEncoder();
 
 export function b64u(bytes) {
@@ -155,12 +157,12 @@ export function pushStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     },
     add: (screenId, sub) => call('su94r_push', '?on_conflict=endpoint', {
       method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({ screen_id: screenId, endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, failures: 0 }),
+      body: JSON.stringify({ screen_id: screenId, endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, failures: 0, lang: sub.lang === 'es' ? 'es' : 'en' }),
     }),
     remove: (screenId, endpoint) => call('su94r_push', `?screen_id=eq.${q(screenId)}&endpoint=eq.${q(endpoint)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
-    forScreen: (screenId) => call('su94r_push', `?select=id,endpoint,p256dh,auth,failures&screen_id=eq.${q(screenId)}`),
+    forScreen: (screenId) => call('su94r_push', `?select=id,endpoint,p256dh,auth,failures,lang&screen_id=eq.${q(screenId)}`),
     /** Subscriptions of linked phones with this role ('me' or 'family') that are still linked. */
-    forRole: (role) => call('su94r_push', `?select=id,endpoint,p256dh,auth,failures,su94r_screens!inner(role,revoked)&su94r_screens.role=eq.${q(role)}&su94r_screens.revoked=is.false`),
+    forRole: (role) => call('su94r_push', `?select=id,endpoint,p256dh,auth,failures,lang,su94r_screens!inner(role,revoked)&su94r_screens.role=eq.${q(role)}&su94r_screens.revoked=is.false`),
     gone: (id) => call('su94r_push', `?id=eq.${q(id)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
     ok: (id) => call('su94r_push', `?id=eq.${q(id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ failures: 0, last_ok_at: new Date().toISOString() }) }),
     failed: (id, n) => call('su94r_push', `?id=eq.${q(id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ failures: n }) }),
@@ -171,8 +173,10 @@ export function pushStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
 export async function pushTo(store, subs, msg, opts = {}) {
   if (!store?.ready || !subs.length) return 0;
   const keys = await store.keys();
-  const note = notificationFor(msg);
-  const results = await Promise.allSettled(subs.map((s) => sendPush(s, note, keys, { ...opts, urgency: note.urgent || note.tag === 'su94r-alert' ? 'high' : 'normal' })));
+  const results = await Promise.allSettled(subs.map((s) => {
+    const note = notificationFor(inLanguage(msg, s.lang));
+    return sendPush(s, note, keys, { ...opts, urgency: note.urgent || note.tag === 'su94r-alert' ? 'high' : 'normal' });
+  }));
   let delivered = 0;
   await Promise.all(results.map(async (r, i) => {
     const sub = subs[i];

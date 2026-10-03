@@ -189,6 +189,9 @@ describe('proxy keeps link secrets out of request logs', () => {
     h = new Headers();
     expect(moveSecrets(new URL(`https://p.test/screen/glance?token=${s}&n=1`), h)).toBe('/screen/glance?n=1');
     expect(h.get('authorization')).toBe(`Bearer ${s}`);
-    expect(moveSecrets(new URL('https://p.test/display/data?key=abc'), new Headers())).toBe('/display/data?key=abc');
+    // su94r Mini's key and display keys too (they were showing up in the server's request logs).
+    h = new Headers();
+    expect(moveSecrets(new URL('https://p.test/display/data?key=abc&x=1'), h)).toBe('/display/data?x=1');
+    expect(h.get('x-su94r-key')).toBe('abc');
   });
 });
