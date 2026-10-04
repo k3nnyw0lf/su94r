@@ -16,6 +16,7 @@ import { agp } from '../extension/agp.js';
 import { asMarkers } from './doses.js';
 import { labsForReport } from './labs.js';
 import { findPatterns } from '../extension/patterns.js';
+import { notesForReport } from './notes.js';
 
 const DAY = 864e5;
 const clean = (s, max = 40) => String(s || '').replace(/[^\p{L}\p{N} '.,()-]/gu, '').trim().slice(0, max);
@@ -38,17 +39,19 @@ export async function doctorNew(request, store, snapshot) {
 }
 
 /** The 14-day report numbers for one person, from the server's history and logged doses. */
-export async function reportFor(pid, { history, doses, snapshot, labs = null, tz = 'America/New_York', now = Date.now(), lang = 'en' }) {
+export async function reportFor(pid, { history, doses, snapshot, labs = null, notes = null, tz = 'America/New_York', now = Date.now(), lang = 'en' }) {
   let person = null;
   try { person = (await snapshot()).people?.find((p) => p.pid === pid) || null; } catch { /* history only */ }
   const from = now - 14 * DAY;
   const points = history?.ready ? await history.range(pid, from, now + 60e3) : [];
   let events = [];
   try { if (doses?.ready) events = asMarkers(await doses.between(pid, from, now)); } catch { /* none */ }
+  let noted = [];
+  try { if (notes?.ready) noted = await notes.between(pid, from, now + 60e3); } catch { /* without notes */ }
   const low = person?.low ?? 70, high = person?.high ?? 180;
   const r = agp(points, events, { from, to: now, low, high });
   const mmol = person?.units === 'mmol/L';
-  const found = findPatterns(points, events, { now, tz, low, high, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang });
+  const found = findPatterns(points, events, { now, tz, low, high, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang, notes: noted });
   let lab = { labs: [], a1c: null };
   try { if (labs?.ready) lab = labsForReport(await labs.list(pid), now); } catch { /* without labs */ }
   return {
@@ -57,15 +60,15 @@ export async function reportFor(pid, { history, doses, snapshot, labs = null, tz
     from, to: now, days: r.days,
     readings: r.n, coverage: r.coverage, mean: r.mean, gmi: r.gmi, cv: r.cv,
     ranges: { veryLow: r.veryLow, low: r.low, inRange: r.inRange, high: r.high, veryHigh: r.veryHigh },
-    profile: r.profile, insulin: r.insulin, meals: r.meals, labs: lab.labs, a1c: lab.a1c, patterns: found.patterns.map((p) => p.text),
+    profile: r.profile, insulin: r.insulin, meals: r.meals, labs: lab.labs, a1c: lab.a1c, patterns: found.patterns.map((p) => p.text), notes: notesForReport(noted),
   };
 }
 
 /** The report numbers for a doctor link's token, or null when the link is unknown, removed or expired. */
-export async function doctorData(screen, { history, doses, snapshot, labs = null, tz, now = Date.now() }) {
+export async function doctorData(screen, { history, doses, snapshot, labs = null, notes = null, tz, now = Date.now() }) {
   if (!screen || screen.kind !== 'doctor' || !screen.pid || Date.parse(screen.expires_at) <= now) return null;
   const lang = screen.lang === 'es' ? 'es' : 'en';
-  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, tz, now, lang })), expiresAt: screen.expires_at, label: screen.name, lang };
+  return { ...(await reportFor(screen.pid, { history, doses, snapshot, labs, notes, tz, now, lang })), expiresAt: screen.expires_at, label: screen.name, lang };
 }
 
 /** The report as HTML in the browser: esc, pct, day, val, stat, chart and reportHtml(d). Plain ES2017,
@@ -73,7 +76,7 @@ export async function doctorData(screen, { history, doses, snapshot, labs = null
 export const REPORT_SCRIPT = `function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
 function pct(x){return Math.round((x||0)*100)+'%'}
 var RL='en';
-var RES={'Glucose report':'Informe de glucosa','(14 days)':'(14 días)','For':'Para','always the latest 14 days':'siempre los últimos 14 días','link expires':'el enlace vence','Always the latest 14 days':'Siempre los últimos 14 días','From su94r (FreeStyle Libre via LibreLinkUp). Not a medical device.':'De su94r (FreeStyle Libre vía LibreLinkUp). No es un dispositivo médico.','Average glucose':'Glucosa promedio','GMI':'GMI','estimated from the average':'estimado a partir del promedio','Variability (CV)':'Variabilidad (CV)','target ≤36%':'meta ≤36%','Sensor data':'Datos del sensor','below the 70% advised for a reliable report':'menos del 70% recomendado para un informe confiable','of the period':'del periodo','Time in ranges':'Tiempo en rangos','Very high (&gt;250)':'Muy alta (&gt;250)','target &lt;5%':'meta &lt;5%','High':'Alta','target &lt;25% with very high':'meta &lt;25% con muy alta','In range':'En rango','target &gt;70%':'meta &gt;70%','Low':'Baja','target &lt;4% with very low':'meta &lt;4% con muy baja','Very low (&lt;54)':'Muy baja (&lt;54)','target &lt;1%':'meta &lt;1%','Glucose by time of day':'Glucosa según la hora del día','Median line, 25–75% band and 5–95% band of all days; target range shaded.':'Línea de la mediana, franja del 25–75% y del 5–95% de todos los días; el rango meta está sombreado.','Patterns':'Patrones','What repeated in these 14 days. It describes; it does not advise.':'Lo que se repitió en estos 14 días. Describe; no aconseja.','Logged insulin and meals':'Insulina y comidas registradas','Insulin':'Insulina','Doses':'Dosis','Units per day':'Unidades por día','No insulin logged on the server in this period.':'No hay insulina registrada en el servidor en este periodo.','meals logged. Logged markers are what was entered and may be incomplete.':'comidas registradas. Los registros son lo que se anotó y pueden estar incompletos.','Lab results (last 12 months)':'Resultados de laboratorio (últimos 12 meses)','Latest A1c':'A1c más reciente','GMI over these 14 days':'GMI de estos 14 días','not enough readings':'faltan lecturas','They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.':'Suelen diferir por unas décimas: el GMI abarca 14 días y la A1c unos 3 meses.','Date':'Fecha','Test':'Prueba','Result':'Resultado','Typed in by the patient.':'Anotado por el paciente.','rapid':'rápida','short':'regular','intermediate':'NPH','basal':'acción prolongada','mix':'premezclada'};
+var RES={'Glucose report':'Informe de glucosa','(14 days)':'(14 días)','For':'Para','always the latest 14 days':'siempre los últimos 14 días','link expires':'el enlace vence','Always the latest 14 days':'Siempre los últimos 14 días','From su94r (FreeStyle Libre via LibreLinkUp). Not a medical device.':'De su94r (FreeStyle Libre vía LibreLinkUp). No es un dispositivo médico.','Average glucose':'Glucosa promedio','GMI':'GMI','estimated from the average':'estimado a partir del promedio','Variability (CV)':'Variabilidad (CV)','target ≤36%':'meta ≤36%','Sensor data':'Datos del sensor','below the 70% advised for a reliable report':'menos del 70% recomendado para un informe confiable','of the period':'del periodo','Time in ranges':'Tiempo en rangos','Very high (&gt;250)':'Muy alta (&gt;250)','target &lt;5%':'meta &lt;5%','High':'Alta','target &lt;25% with very high':'meta &lt;25% con muy alta','In range':'En rango','target &gt;70%':'meta &gt;70%','Low':'Baja','target &lt;4% with very low':'meta &lt;4% con muy baja','Very low (&lt;54)':'Muy baja (&lt;54)','target &lt;1%':'meta &lt;1%','Glucose by time of day':'Glucosa según la hora del día','Median line, 25–75% band and 5–95% band of all days; target range shaded.':'Línea de la mediana, franja del 25–75% y del 5–95% de todos los días; el rango meta está sombreado.','Patterns':'Patrones','What repeated in these 14 days. It describes; it does not advise.':'Lo que se repitió en estos 14 días. Describe; no aconseja.','Logged insulin and meals':'Insulina y comidas registradas','Insulin':'Insulina','Doses':'Dosis','Units per day':'Unidades por día','No insulin logged on the server in this period.':'No hay insulina registrada en el servidor en este periodo.','meals logged. Logged markers are what was entered and may be incomplete.':'comidas registradas. Los registros son lo que se anotó y pueden estar incompletos.','Lab results (last 12 months)':'Resultados de laboratorio (últimos 12 meses)','Latest A1c':'A1c más reciente','GMI over these 14 days':'GMI de estos 14 días','not enough readings':'faltan lecturas','They often differ by a few tenths: GMI covers 14 days, A1c about 3 months.':'Suelen diferir por unas décimas: el GMI abarca 14 días y la A1c unos 3 meses.','Date':'Fecha','Test':'Prueba','Result':'Resultado','Typed in by the patient.':'Anotado por el paciente.','Notes':'Notas','rapid':'rápida','short':'regular','intermediate':'NPH','basal':'acción prolongada','mix':'premezclada'};
 function L(s){return RL==='es'&&RES[s]?RES[s]:s}
 function day(t){return new Date(t).toLocaleDateString(RL==='es'?'es-US':'en-US',{month:'short',day:'numeric',year:'numeric'})}
 function val(mg,u){return u==='mmol/L'?(mg/18.0182).toFixed(1):String(Math.round(mg))}
@@ -106,7 +109,13 @@ function reportHtml(d,lang){
     (d.patterns&&d.patterns.length?'<h2>'+L('Patterns')+'</h2><ul class="pat">'+d.patterns.map(function(t){return '<li>'+esc(t)+'</li>'}).join('')+'</ul><p class="muted small">'+L('What repeated in these 14 days. It describes; it does not advise.')+'</p>':'')+
     '<h2>'+L('Logged insulin and meals')+'</h2>'+(ins?'<table><tr><th>'+L('Insulin')+'</th><th class="num">'+L('Doses')+'</th><th class="num">'+L('Units per day')+'</th></tr>'+ins+'</table>':'<p class="muted">'+L('No insulin logged on the server in this period.')+'</p>')+
     '<p class="muted small">'+(d.meals?d.meals.count:0)+' '+L('meals logged. Logged markers are what was entered and may be incomplete.')+'</p>'+
-    labsHtml(d);
+    labsHtml(d)+notesHtml(d);
+}
+function notesHtml(d){
+  var n=d.notes;if(!n||!n.count)return '';
+  var TW=RL==='es'?{exercise:'ejercicio',stress:'estrés',sick:'enfermedad',alcohol:'alcohol',period:'menstruación',travel:'viaje','eating-out':'comer fuera'}:{exercise:'exercise',stress:'stress',sick:'sick',alcohol:'alcohol',period:'period',travel:'travel','eating-out':'eating out'};
+  var tags=Object.keys(n.tags).sort(function(a,b){return n.tags[b]-n.tags[a]}).map(function(k){return esc(TW[k]||k)+' ×'+n.tags[k]}).join(' · ');
+  return '<h2>'+L('Notes')+'</h2>'+(tags?'<p class="small">'+tags+'</p>':'')+'<table>'+n.recent.map(function(x){return '<tr><td class="muted small" style="white-space:nowrap">'+new Date(x.t).toLocaleString(RL==='es'?'es-US':'en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+'</td><td>'+esc(x.text)+(x.tags.length?' <span class="muted small">'+x.tags.map(function(k){return esc(TW[k]||k)}).join(', ')+'</span>':'')+'</td></tr>'}).join('')+'</table><p class="muted small">'+L('Typed in by the patient.')+'</p>';
 }
 function labsHtml(d){
   if(!d.labs||!d.labs.length)return '';

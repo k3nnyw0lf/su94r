@@ -3,7 +3,9 @@
 // phone-sized screen without sideways scrolling; a dose logs after the confirm sheet; a second
 // dose shows the double-dose warning; Undo works; a meal photo fills in the carbs; a family
 // member's phone cannot log; exercise mode turns on and off; the bedside screen turns red for a
-// low and "I'm OK" stops it; the owner's emergency card saves, gets a QR picture and its page shows.
+// low and "I'm OK" stops it; the owner's emergency card saves, gets a QR picture and its page shows;
+// a typed barcode fills in the carbs and the meal becomes a favorite; a note shows on the graph; an
+// entry is changed; a dose logged with no signal waits on the phone and goes out when it is back.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
 import path from 'node:path';
@@ -25,6 +27,7 @@ let forceLow = false;
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init) => {
   const u = new URL(url);
+  if (u.host.includes('openfoodfacts')) return new Response(JSON.stringify({ status: 1, product: { product_name: 'Orange juice', brands: 'Grove', serving_size: '240 ml', serving_quantity: 240, nutriments: { carbohydrates_100g: 10, carbohydrates_serving: 24 } } }), { headers: { 'Content-Type': 'application/json' } });
   if (!u.host.includes('libreview')) return realFetch(url, init);
   const res = (b) => new Response(JSON.stringify(b), { headers: { 'Content-Type': 'application/json' } });
   if (u.pathname === '/llu/auth/login') return res({ status: 0, data: { user: { id: 'user-1' }, authTicket: { token: 'a.eyJpZCI6InVzZXItMSJ9.c', expires: 1900000000 } } });
@@ -66,7 +69,11 @@ let supplyRows = [];
 const supplies = { ready: true, async list() { return supplyRows; }, async save(r) { supplyRows = supplyRows.filter((x) => x.item !== r.item).concat([r]); }, async remove(pid, item) { supplyRows = supplyRows.filter((x) => x.item !== item); } };
 let labRows = [];
 const labs = { ready: true, async list() { return labRows.map((r, i) => ({ id: String(i), ...r })); }, async add(r) { labRows.push(r); }, async remove(pid, id) { labRows.splice(Number(id), 1); } };
-const deps = { screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
+let mealRows = [];
+const meals = { ready: true, async list() { return mealRows.slice().sort((a, b) => b.uses - a.uses); }, async use(pid, name, carbs) { const m = mealRows.find((x) => x.name.toLowerCase() === name.toLowerCase()); if (m) { m.carbs = carbs; m.uses += 1; } else mealRows.push({ id: 'm' + mealRows.length, pid, name, carbs, uses: 1 }); return name; }, async remove(pid, id) { mealRows = mealRows.filter((x) => x.id !== id); } };
+let noteRows = [];
+const notes = { ready: true, async between(pid, from, to) { return noteRows.filter((n) => !n.deleted && n.pid === pid && Date.parse(n.t) >= from && Date.parse(n.t) < to).map((n) => ({ ...n, t: Date.parse(n.t) })); }, async get(id) { const n = noteRows.find((x) => x.id === id && !x.deleted); return n ? { ...n, t: Date.parse(n.t) } : null; }, async add(row) { if (!noteRows.some((x) => x.id === row.id)) noteRows.push({ ...row }); }, async remove(id) { const n = noteRows.find((x) => x.id === id); if (n) n.deleted = true; } };
+const deps = { meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -92,7 +99,7 @@ const checks = {};
 const errors = [];
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
+let page = await ctx.newPage();
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !/service worker|sw\.js|favicon/i.test(m.text())) errors.push(m.text()); });
 const noSideScroll = () => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
@@ -139,8 +146,10 @@ checks.doubleDoseWarning = (await page.textContent('.warnbox')).includes('You al
 await shot('7-warning');
 await page.click('#sheet button[data-b="1"]');
 checks.notLoggedTwice = doseRows.filter((d) => d.source === 'phone' && !d.deleted).length === 1;
-await page.click('button[data-undo]');
-await page.waitForTimeout(400);
+// Removing it from the list: Edit, then Remove.
+await page.click('button[data-edit]');
+await page.click('#sheet button[data-b="1"]');
+await page.waitForSelector('#toast >> text=Removed.');
 checks.undone = doseRows.filter((d) => d.source === 'phone' && !d.deleted).length === 0;
 await page.click('button[data-kind="carbs"]');
 await page.setInputFiles('#photo', path.join(import.meta.dirname, '..', 'workers', 'app', 'icon-512.png'));
@@ -325,6 +334,78 @@ await cardPage.click('#lang');
 checks.cardPageEs = (await cardPage.textContent('main')).includes('Llamar al 911');
 await cardPage.screenshot({ path: path.join(OUT, 'app-26-emergency-page-es.png'), fullPage: true });
 await cardPage.close();
+
+// A typed barcode fills in the carbs; logging it with its name makes a favorite.
+await page.close();
+const p3 = await ctx.newPage();
+p3.on('pageerror', (e) => errors.push(e.message));
+await p3.goto(`http://localhost:${PORT}/app/#join=${await share('me', 'Alex phone 2')}`);
+await p3.waitForSelector('text=This phone is linked');
+await p3.click('#tabs button[data-tab="log"]');
+await p3.waitForSelector('button[data-kind="carbs"]');
+await p3.click('button[data-kind="carbs"]');
+await p3.click('#scanBtn');
+await p3.fill('#scanCode', '0 12345 67890 5');
+await p3.click('#sheet button[data-b="0"]');
+await p3.waitForSelector('#sheet >> text=Grove · Orange juice');
+await p3.click('#sheet button[data-serv="2"]');
+await p3.waitForSelector('#sheet button[data-b="0"] >> text=Use 48 g');
+await p3.screenshot({ path: path.join(OUT, 'app-27-barcode.png') });
+await p3.click('#sheet button[data-b="0"]');
+await p3.waitForSelector('#amt >> text=48');
+checks.barcodeFilled = true;
+await p3.click('#logBtn');
+checks.mealNamePrefilled = (await p3.inputValue('#mealName')) === 'Grove · Orange juice';
+await p3.fill('#mealName', 'OJ');
+await p3.click('#sheet button[data-b="0"]');
+await p3.waitForSelector('#toast');
+checks.favoriteSaved = mealRows.some((m) => m.name === 'OJ' && m.carbs === 48);
+await p3.click('button[data-kind="rapid"]');
+await p3.click('button[data-kind="carbs"]');
+await p3.waitForSelector('button[data-fav="0"] >> text=OJ · 48 g');
+checks.favoriteChip = true;
+await p3.screenshot({ path: path.join(OUT, 'app-28-favorites.png'), fullPage: true });
+
+// A note with a tag: in the list and as a diamond on the Now graph.
+await p3.click('button[data-kind="note"]');
+await p3.click('button[data-tag="exercise"]');
+await p3.fill('#noteText', 'Walked 30 minutes');
+await p3.click('#noteBtn');
+await p3.waitForSelector('.list >> text=Walked 30 minutes · Exercise');
+checks.noteSaved = noteRows.some((n) => n.text === 'Walked 30 minutes' && n.tags[0] === 'exercise');
+await p3.screenshot({ path: path.join(OUT, 'app-29-note.png'), fullPage: true });
+await p3.click('#tabs button[data-tab="now"]');
+await p3.waitForSelector('svg.g rect[transform^="rotate(45"]');
+checks.noteOnGraph = true;
+
+// Change an entry: the juice becomes 40 g.
+await p3.click('#tabs button[data-tab="log"]');
+const juice = doseRows.find((d) => d.kind === 'carbs' && d.amount === 48 && !d.deleted);
+await p3.click(`button[data-edit="${juice.id}"]`);
+await p3.fill('#edAmt', '40');
+await p3.click('#sheet button[data-b="0"]');
+await p3.waitForSelector('#toast >> text=Changed to 40 g of carbs.');
+checks.edited = juice.deleted === true && doseRows.some((d) => d.kind === 'carbs' && d.amount === 40 && !d.deleted);
+
+// No signal: the dose waits on the phone, then goes out when the phone is back online.
+await p3.click('button[data-kind="rapid"]');
+await p3.click('button[data-amount="1"]');
+await ctx.setOffline(true);
+await p3.click('#logBtn');
+await p3.click('#sheet button[data-b="0"]');
+await p3.waitForSelector('text=No signal: saved on this phone');
+await p3.waitForSelector('.list >> text=waiting to send');
+checks.queuedOffline = !doseRows.some((d) => d.kind === 'rapid' && d.amount === 1 && d.source === 'phone');
+await p3.screenshot({ path: path.join(OUT, 'app-30-offline.png'), fullPage: true });
+await ctx.setOffline(false);
+await p3.evaluate(() => window.dispatchEvent(new Event('online')));
+await p3.waitForFunction(() => !(JSON.parse(localStorage.getItem('su94rAppQueue') || '[]')).length, null, { timeout: 15000 });
+// A dose already logged a little earlier: the double-dose question comes up for the waiting one too.
+if (await p3.$('#sheet >> text=Saved while offline')) { checks.offlineAsksFirst = true; await p3.click('#sheet button[data-b="0"]'); await p3.waitForSelector('#toast'); }
+const sentLater = doseRows.filter((d) => d.kind === 'rapid' && d.amount === 1 && d.source === 'phone' && !d.deleted);
+checks.sentWhenBack = sentLater.length === 1 && Date.now() - sentLater[0].t > 0;
+checks.everydayFits = await p3.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+page = p3;
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

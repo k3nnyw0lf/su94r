@@ -1120,6 +1120,19 @@ async function syncVoice(settings) {
         await local.set({ events: [...events, ...fresh].sort((a, b) => a.t - b.t) });
         await sendOut({ upsert: fresh });
       }
+      // Doses deleted on the server (changed or removed in the phone app, undone in Telegram) go
+      // here too, and to the other computers. Only ones that came from the server.
+      const deletedThere = new Set((r.deleted || []).map(String));
+      if (deletedThere.size) {
+        const { events: mine = [] } = await local.get('events');
+        const gone = mine.filter((e) => deletedThere.has(e.id) && (e.source === 'alexa' || e.source === 'telegram' || e.source === 'phone'));
+        if (gone.length) {
+          const drop = new Set(gone.map((e) => e.id));
+          await local.set({ events: mine.filter((e) => !drop.has(e.id)) });
+          await rememberDeleted(gone.map((e) => ({ id: e.id, t: e.t })));
+          await sendOut({ remove: gone });
+        }
+      }
     });
     await local.remove('voiceError');
   } catch (e) {

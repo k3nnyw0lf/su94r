@@ -8,9 +8,18 @@
 //   a rise before waking (3 to 7 AM, median of 5 or more nights, 25 mg/dL or more),
 //   how much glucose rises after each meal time (logged carbs or rapid insulin, 3 or more each),
 //   weekdays against weekends (10 points of time in range apart),
-//   the steadiest and the hardest part of the day (15 points apart).
+//   the steadiest and the hardest part of the day (15 points apart),
+//   what follows a note's tag (the phone app's notes): a low, or a high above 250, within 6 hours
+//   of at least half of 3 or more notes with that tag.
 
 const MIN = 60e3, DAY = 864e5;
+
+/** The tags a note can have (workers/notes.js), and their words. */
+export const NOTE_TAGS = ['exercise', 'stress', 'sick', 'alcohol', 'period', 'travel', 'eating-out'];
+export const TAG_WORDS = {
+  en: { exercise: 'exercise', stress: 'stress', sick: 'sick', alcohol: 'alcohol', period: 'period', travel: 'travel', 'eating-out': 'eating out' },
+  es: { exercise: 'ejercicio', stress: 'estrés', sick: 'enfermedad', alcohol: 'alcohol', period: 'menstruación', travel: 'viaje', 'eating-out': 'comer fuera' },
+};
 
 function partsIn(tz) {
   const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
@@ -32,7 +41,7 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const SLOTS = [['breakfast', 300, 630], ['lunch', 660, 900], ['dinner', 1020, 1290]];
 
 /** { patterns: [{ kind, text }], days, note } — at most 5 patterns, the most useful first. */
-export function findPatterns(points, events = [], { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, unit = 'mg/dL', lang = 'en' } = {}) {
+export function findPatterns(points, events = [], { now = Date.now(), tz = 'America/New_York', low = 70, high = 180, fmt = (mg) => `${Math.round(mg)}`, unit = 'mg/dL', lang = 'en', notes = [] } = {}) {
   const es = lang === 'es';
   const localParts = partsIn(tz);
   const pts = points.filter((p) => p.t > now - 14 * DAY && p.t <= now && Number.isFinite(p.mg)).sort((a, b) => a.t - b.t)
@@ -99,6 +108,22 @@ export function findPatterns(points, events = [], { now = Date.now(), tz = 'Amer
     const less = meals.length > 1 && m.rise - last.rise >= 30;
     const other = less ? (es ? ` Sube menos después de ${SLOT_ES[last.slot]} (unos ${amount(last.rise)}).` : ` Less after ${last.slot} (about ${amount(last.rise)}).`) : '';
     out.push({ kind: 'meals', w: 60, text: es ? `Después de ${SLOT_ES[m.slot]}, la glucosa sube unos ${amount(m.rise)} (la mediana de ${m.k} comidas), con el pico unos ${when} después.${other}` : `After ${m.slot}, glucose rises about ${amount(m.rise)} (the middle of ${m.k} meals), peaking about ${when} later.${other}` });
+  }
+
+  // What follows a note's tag: only notes whose 6 hours are over count.
+  const byTag = {};
+  for (const nt of notes) {
+    if (!(nt.t > now - 14 * DAY && nt.t <= now - 6 * 60 * MIN)) continue;
+    for (const tag of nt.tags || []) if (NOTE_TAGS.includes(tag)) (byTag[tag] = byTag[tag] || []).push(nt.t);
+  }
+  for (const [tag, ts] of Object.entries(byTag)) {
+    if (ts.length < 3) continue;
+    const after = (t) => use.filter((x) => x.t > t && x.t <= t + 6 * 60 * MIN);
+    const lows = ts.filter((t) => after(t).some((x) => x.mg < low)).length;
+    const highs = ts.filter((t) => after(t).some((x) => x.mg > 250)).length;
+    const word = TAG_WORDS[es ? 'es' : 'en'][tag];
+    if (lows >= 2 && lows / ts.length >= 0.5) out.push({ kind: 'tag-low', w: 90 + lows, text: es ? `Después de las notas de “${word}”, hubo una baja en las 6 horas siguientes ${lows} de ${ts.length} veces.` : `After “${word}” notes, a low followed within 6 hours ${lows} of ${ts.length} times.` });
+    else if (highs >= 2 && highs / ts.length >= 0.5) out.push({ kind: 'tag-high', w: 75 + highs, text: es ? `Después de las notas de “${word}”, la glucosa pasó de ${amount(250)} en las 6 horas siguientes ${highs} de ${ts.length} veces.` : `After “${word}” notes, glucose went above ${amount(250)} within 6 hours ${highs} of ${ts.length} times.` });
   }
 
   // Weekdays and weekends.

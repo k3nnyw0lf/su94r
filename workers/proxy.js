@@ -54,7 +54,8 @@ const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest',
   '/app/push/key', '/app/push/subscribe', '/app/push/unsubscribe', '/app/push/test', '/app/treat',
   '/app/supplies', '/app/supplies/save', '/app/supplies/remove', '/doses/import',
   '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/patterns', '/app/mode', '/app/ack',
-  '/app/emergency', '/app/emergency/save', '/app/emergency/new', '/app/emergency/remove']);
+  '/app/emergency', '/app/emergency/save', '/app/emergency/new', '/app/emergency/remove',
+  '/app/edit', '/app/remove', '/app/food', '/app/meals', '/app/meals/remove', '/app/notes', '/app/note', '/app/notes/remove']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 

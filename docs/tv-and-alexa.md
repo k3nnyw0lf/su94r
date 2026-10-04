@@ -76,6 +76,16 @@ Each code works once, for 10 minutes. Linked phones appear with the other screen
 
 **Log by voice** (app → Log → 🎤): say "4 units rapid", "18 Lantus 30 minutes ago" or "40 grams"; the phone's own speech recognition writes it down, the server reads it like a Telegram message (`app/parse`), and the usual confirm and double-dose check follow. Nothing is saved before **Log it**.
 
+**Barcode** (app → Log → Carbs → 📦 Scan a barcode): the camera reads the barcode where the browser can (Chrome on Android); on other phones type the numbers under it. Only the barcode goes to Open Food Facts, the free open food database (`app/food`, `workers/food.js`); pick the servings, or the grams for foods listed per 100 g, and the carbs fill in. Always check the label.
+
+**Favorite meals**: name a meal in the confirm sheet ("Oatmeal") and it is kept with its carbs; it shows as a one-tap button under Carbs, the most used first (`su94r_meals`). A barcode fills in the product's name for you.
+
+**Notes** (app → Log → Note): tags (exercise, stress, sick, alcohol, period, travel, eating out) and a few words. They show as small diamonds on the graphs, in the 14-day report and the doctor's link, and the pattern finder looks at what follows each tag ("After exercise notes, a low followed within 6 hours 3 of 4 times."). Code: `workers/notes.js`, table `su94r_notes`.
+
+**Change or remove an entry** (app → Log → Edit): a phone changes what it logged in the last 24 hours; your own phone also anything logged by a phone, Alexa or Telegram in the last 48 hours (`app/edit`, `app/remove`). Doses logged in su94r Mini are changed in su94r Mini. A change on the server reaches every computer: su94r Mini 2.21.0 drops doses deleted on the server (`voice/sync` returns them as `deleted`).
+
+**No signal**: a dose, meal or note logged without a connection waits on the phone ("waiting to send") and goes out by itself when the phone is back online, at the time it was logged. Each carries an id made on the phone, so sending it twice saves it once; if a dose was logged elsewhere meanwhile, the double-dose question comes up first.
+
 **Lab results** (app → Report): type in an A1c or any other result; the report and the doctor's link show the last 12 months and put the latest A1c next to the GMI. Code: `workers/labs.js`.
 
 **Supplies** (app → More): insulin and sensors on hand count down as doses are logged (pen priming is not counted) and as new sensors start; su94r reminds you by day when one runs low or a refill date is near. The app also says when the sensor ends. Code: `workers/supplies.js`.

@@ -6,7 +6,16 @@
 //   GET  app/history?days=14        readings from the server's own history (history.js), 1–90 days
 //   GET  app/report?pid=            the 14-day report (doctor.js reportFor)
 //   GET  app/recent                 doses and meals of the last 48 hours, and fresh estimates
-//   POST app/log                    { kind, amount, minutesAgo, pid, confirm } → logs, or asks to confirm
+//   POST app/log                    { kind, amount, minutesAgo | at, pid, confirm, cid, meal } → logs, or asks to
+//                                   confirm; cid (made on the phone) makes a resend after lost signal harmless;
+//                                   meal (a name, with carbs) keeps it as a favorite
+//   POST app/edit                   { id, amount, kind, minutesAgo } changes a logged dose or meal
+//   POST app/remove                 { id } removes one (this phone's own of the last 24 hours; the owner's
+//                                   phone also any from a phone, Alexa or Telegram of the last 48 hours)
+//   GET  app/food?barcode=          carbs from a barcode (food.js, Open Food Facts)
+//   GET  app/meals?pid=             favorite meals; POST app/meals/remove { id }
+//   GET  app/notes?pid=&days=       notes with tags (notes.js); POST app/note { text, tags, minutesAgo | at, cid },
+//                                   app/notes/remove { id }
 //   POST app/undo                   { id } → removes a dose this phone logged in the last 30 minutes
 //   GET  app/phones                 (owner's phone) the family phones and whether each may log
 //   POST app/phones/allow           (owner's phone) { id, canLog }
@@ -43,11 +52,14 @@ import { labRow } from './labs.js';
 import { parseLog } from './tglog.js';
 import { findPatterns } from '../extension/patterns.js';
 import { asMarkers as markersOf } from './doses.js';
+import { foodByBarcode } from './food.js';
+import { noteRow } from './notes.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
   'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns', 'app/mode', 'app/ack',
-  'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove']);
+  'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
+  'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -55,7 +67,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, fetchImpl, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -99,7 +111,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
     let tz;
     try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
-    return json(await reportFor(pid, { history, doses, snapshot, labs, tz, now, lang: es ? 'es' : 'en' }));
+    return json(await reportFor(pid, { history, doses, snapshot, labs, notes, tz, now, lang: es ? 'es' : 'en' }));
   }
 
   if (path === 'app/recent') {
@@ -131,9 +143,14 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       if (tr && now - tr.t < 3 * 60 * MIN) treating[p.pid] = { t: tr.t, grams: tr.grams, by: tr.by || '', recheckAt: tr.recheckAt, done: Boolean(tr.done) };
     }
     const plan = { grams: row?.treat_grams ?? NIGHT_DEFAULTS.treat_grams, minutes: row?.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, text: row?.treat_plan || '' };
+    let recentNotes = [];
+    try { if (notes?.ready) for (const p of l) recentNotes.push(...await notes.between(p.pid, now - 2 * DAY, now + MIN)); } catch { recentNotes = []; }
+    const noteMine = `note-${screen.id.slice(0, 8)}-`;
     const mode = activeMode(row, now);
-    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
-      mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null, at: now });
+    const canEdit = (e) => canLog && ((e.id.startsWith(mine) && now - createdAt(e.id) < DAY) || (owner && e.source !== 'extension'));
+    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS, edit: canEdit(e) })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
+      mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
+      notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), at: now });
   }
 
   // The emergency card: the owner's own phone keeps it up to date (emergency.js).
@@ -166,8 +183,35 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const points = await history.range(pid, now - 14 * DAY, now + MIN);
     let events = [];
     try { if (doses?.ready) events = markersOf(await doses.between(pid, now - 14 * DAY, now)); } catch { /* none */ }
+    let noted = [];
+    try { if (notes?.ready) noted = await notes.between(pid, now - 14 * DAY, now + MIN); } catch { /* without notes */ }
     const mmol = person.units === 'mmol/L';
-    return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en' }));
+    return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en', notes: noted }));
+  }
+
+  if (path === 'app/food') {
+    let r;
+    try { r = await foodByBarcode(url.searchParams.get('barcode'), { es, ...(fetchImpl ? { fetchImpl } : {}) }); } catch { return json({ error: T('The food database did not answer. Try again, or type the carbs.', 'La base de datos de alimentos no respondió. Intenta otra vez o escribe los carbohidratos.') }, 502); }
+    if (r.error) return json({ error: T('A barcode is 8 to 14 digits.', 'Un código de barras tiene de 8 a 14 dígitos.') }, 400);
+    return json(r);
+  }
+
+  if (path === 'app/meals' && request.method === 'GET') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    let list = [];
+    try { if (meals?.ready && pid) list = await meals.list(pid); } catch { /* none */ }
+    return json({ meals: list.map((m) => ({ id: m.id, name: m.name, carbs: m.carbs, uses: m.uses })) });
+  }
+
+  if (path === 'app/notes' && request.method === 'GET') {
+    if (!notes?.ready) return json({ notes: [] });
+    const days = Math.min(90, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 2)));
+    const known = await people();
+    const want = url.searchParams.get('pid');
+    const list = [];
+    for (const p of known) if (!want || p.pid === want) list.push(...await notes.between(p.pid, now - days * DAY, now + MIN));
+    const mineNote = `note-${screen.id.slice(0, 8)}-`;
+    return json({ notes: list.map((n) => ({ ...n, mine: n.id.startsWith(mineNote) || owner })) });
   }
 
   if (path === 'app/labs') {
@@ -255,6 +299,68 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (!doses?.ready) return json({ error: 'The dose store is not set up' }, 503);
   const body = await request.json().catch(() => ({}));
 
+  // An id made on the phone (base 36 of when it was made) and a time: a log sent again after
+  // losing signal is saved once, at the time it happened.
+  const cid = /^[0-9a-z]{7,10}$/.test(String(body.cid || '')) ? String(body.cid) : null;
+  if (cid && !(parseInt(cid, 36) > now - DAY && parseInt(cid, 36) <= now + 5 * MIN)) return json({ ok: false, error: T('That entry waited too long on the phone (over a day); log it again.', 'Ese registro esperó demasiado en el teléfono (más de un día); regístralo otra vez.') }, 400);
+  const stamp = cid || now.toString(36);
+  const atOk = body.at != null && Number.isFinite(Number(body.at));
+  if (atOk && !(Number(body.at) > now - DAY && Number(body.at) <= now + 5 * MIN)) return json({ ok: false, error: T('The time must be within the last 24 hours.', 'La hora debe estar dentro de las últimas 24 horas.') }, 400);
+
+  if (path === 'app/note' || path === 'app/notes/remove') {
+    if (!notes?.ready) return json({ ok: false, error: 'Notes are not set up on the server.' }, 503);
+    if (path === 'app/notes/remove') {
+      const id = String(body.id || '');
+      const n = /^[\w-]{1,80}$/.test(id) ? await notes.get(id) : null;
+      if (!n) return json({ ok: false, error: T('That note is already gone.', 'Esa nota ya no está.') }, 404);
+      if (!owner && !id.startsWith(`note-${screen.id.slice(0, 8)}-`)) return json({ ok: false, error: T('Only the phone that wrote it, or the owner\'s phone, can remove it.', 'Solo el teléfono que la escribió, o el del dueño, la puede quitar.') }, 403);
+      await notes.remove(id);
+      return json({ ok: true });
+    }
+    const pid = await pidFor(String(body.pid || ''));
+    if (!pid) return json({ ok: false, error: 'No one to write a note for yet.' }, 400);
+    const t = atOk ? Number(body.at) : now - Math.round(Number(body.minutesAgo) || 0) * MIN;
+    const row = noteRow({ id: `note-${screen.id.slice(0, 8)}-${stamp}`, pid, t, text: body.text, tags: body.tags, by: screen.name }, now);
+    if (row.error) return json({ ok: false, error: es ? (NOTE_ES[row.error] || row.error) : row.error }, 400);
+    await notes.add(row);
+    return json({ ok: true, id: row.id, text: T('Note saved.', 'Nota guardada.') });
+  }
+
+  if (path === 'app/meals/remove') {
+    if (!meals?.ready) return json({ ok: false, error: 'Favorite meals are not set up on the server.' }, 503);
+    const pid = await pidFor(String(body.pid || ''));
+    await meals.remove(pid, String(body.id || ''));
+    return json({ ok: true });
+  }
+
+  if (path === 'app/edit' || path === 'app/remove') {
+    const id = String(body.id || '');
+    const d = (await doses.recent(null, now)).find((x) => x.id === id);
+    if (!d) return json({ ok: false, error: T('That entry is not in the last 48 hours, or was already removed.', 'Ese registro no está en las últimas 48 horas, o ya se quitó.') }, 404);
+    // This phone's own of the last 24 hours; the owner's phone also any that did not come from a
+    // computer (su94r Mini's own are changed in su94r Mini, which keeps them).
+    const own = id.startsWith(`app-${screen.id.slice(0, 8)}-`) && now - createdAt(id) < DAY;
+    if (!own && !(owner && d.source !== 'extension')) {
+      return json({ ok: false, error: d.source === 'extension' ? T('That one was logged in su94r Mini: change it there.', 'Ese se registró en su94r Mini: cámbialo allí.') : T('Only the phone that logged it, or the owner\'s phone, can change it.', 'Solo el teléfono que lo registró, o el del dueño, lo puede cambiar.') }, 403);
+    }
+    if (path === 'app/remove') { await doses.markDeleted([id]); return json({ ok: true, text: T('Removed.', 'Quitado.') }); }
+    const carbs = d.kind === 'carbs';
+    const kind = carbs ? 'carbs' : (KINDS.has(String(body.kind)) && body.kind !== 'carbs' ? String(body.kind) : d.kind);
+    const raw = Number(body.amount ?? d.amount);
+    const amount = carbs ? Math.round(raw) : Math.round(raw * 2) / 2;
+    if (!(amount > 0) || amount > (carbs ? APP_MAX_GRAMS : APP_MAX_UNITS)) return json({ ok: false, error: carbs ? T(`Carbs must be between 1 and ${APP_MAX_GRAMS} g.`, `Los carbohidratos deben estar entre 1 y ${APP_MAX_GRAMS} g.`) : T(`Insulin must be between 0.5 and ${APP_MAX_UNITS} units.`, `La insulina debe estar entre 0.5 y ${APP_MAX_UNITS} unidades.`) }, 400);
+    let t = d.t;
+    if (body.minutesAgo != null && body.minutesAgo !== '') {
+      const m = Math.round(Number(body.minutesAgo));
+      if (!(m >= 0 && m <= 24 * 60)) return json({ ok: false, error: T('The time must be within the last 24 hours.', 'La hora debe estar dentro de las últimas 24 horas.') }, 400);
+      t = now - m * MIN;
+    }
+    const nid = `app-${screen.id.slice(0, 8)}-${now.toString(36)}`;
+    await doses.upsert([{ id: nid, pid: d.pid, t, kind, amount, source: 'phone' }]);
+    await doses.markDeleted([id]);
+    return json({ ok: true, id: nid, text: T(`Changed to ${whatEn(kind, amount)}.`, `Cambiado a ${whatEs(kind, amount)}.`) });
+  }
+
   if (path === 'app/log') {
     const kind = String(body.kind || '');
     const carbs = kind === 'carbs';
@@ -268,18 +374,20 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (minutesAgo < 0 || minutesAgo > 24 * 60) return json({ ok: false, error: T('The time must be within the last 24 hours.', 'La hora debe estar dentro de las últimas 24 horas.') }, 400);
     const pid = await pidFor(String(body.pid || ''));
     if (!pid) return json({ ok: false, error: 'No one to log for yet.' }, 400);
-    const t = now - minutesAgo * MIN;
+    const t = atOk ? Number(body.at) : now - minutesAgo * MIN;
+    const id = `app-${screen.id.slice(0, 8)}-${stamp}`;
+    const recentDoses = await doses.recent(pid, now).catch(() => []);
+    const ago = Math.max(0, Math.round((now - t) / MIN));
+    // Sent again after losing signal, and already saved: nothing more to do.
+    if (cid && recentDoses.some((d) => d.id === id)) return json({ ok: true, id, t, again: true, text: T(`Logged ${whatEn(kind, amount)}.`, `Registrado: ${whatEs(kind, amount)}.`) });
     if (!carbs && body.confirm !== true) {
       let warning = null;
-      try { warning = doubleDoseWarning(asMarkers(await doses.recent(pid, now)), pid, { t, kind }, {}, now, es ? 'es' : 'en'); } catch { /* a warning, never a block */ }
+      try { warning = doubleDoseWarning(asMarkers(recentDoses.filter((d) => d.id !== id)), pid, { t, kind }, {}, now, es ? 'es' : 'en'); } catch { /* a warning, never a block */ }
       if (warning) return json({ ok: false, confirm: true, warning });
     }
-    const id = `app-${screen.id.slice(0, 8)}-${now.toString(36)}`;
     await doses.upsert([{ id, pid, t, kind, amount, source: 'phone' }]);
-    const what = carbs ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`;
-    const kindEs = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' }[kind];
-    const que = carbs ? `${amount} g de carbohidratos` : `${amount} ${amount === 1 ? 'unidad' : 'unidades'} de insulina ${kindEs}`;
-    return json({ ok: true, id, t, text: T(`Logged ${what}${minutesAgo ? `, ${minutesAgo} min ago` : ''}.`, `Registrado: ${que}${minutesAgo ? `, hace ${minutesAgo} min` : ''}.`) });
+    if (carbs && body.meal && meals?.ready) await meals.use(pid, String(body.meal), amount, now).catch(() => {});
+    return json({ ok: true, id, t, text: T(`Logged ${whatEn(kind, amount)}${ago ? `, ${ago} min ago` : ''}.`, `Registrado: ${whatEs(kind, amount)}${ago ? `, hace ${ago} min` : ''}.`) });
   }
 
   if (path === 'app/treat') {
@@ -336,6 +444,13 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   return json({ error: 'not found' }, 404);
 }
 
+const whatEn = (kind, amount) => (kind === 'carbs' ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`);
+const KIND_ES = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' };
+const whatEs = (kind, amount) => (kind === 'carbs' ? `${amount} g de carbohidratos` : `${amount} ${amount === 1 ? 'unidad' : 'unidades'} de insulina ${KIND_ES[kind]}`);
+const NOTE_ES = {
+  'Write a note or pick a tag.': 'Escribe una nota o elige una etiqueta.',
+  'The time must be within the last 24 hours.': 'La hora debe estar dentro de las últimas 24 horas.',
+};
 const SUPPLY_ES = {
   'Pick insulin or sensors.': 'Elige insulina o sensores.',
   'Type how many you have on hand.': 'Escribe cuántos tienes.',

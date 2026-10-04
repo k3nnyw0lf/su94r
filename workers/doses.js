@@ -57,6 +57,13 @@ export function doseStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
       await call('?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
       return rows.length;
     },
+    /** Ids of doses deleted on the server in the last 48 hours that did not come from a computer
+     *  (an edit or removal in the phone app, an undo in Telegram), so su94r Mini drops them too. */
+    async deletedRecent(now = Date.now()) {
+      const since = new Date(now - WINDOW_MS).toISOString();
+      const rows = await call(`?select=id&deleted=is.true&source=in.(alexa,telegram,phone)&t=gte.${encodeURIComponent(since)}&limit=500`);
+      return (rows || []).map((r) => r.id);
+    },
     async markDeleted(ids) {
       const list = ids.map(String).filter((id) => /^[\w-]{1,80}$/.test(id));
       if (!list.length) return;

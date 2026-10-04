@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -154,6 +154,22 @@
     'The card link is ready.': 'El enlace de la tarjeta está listo.', 'Make a new card link?': '¿Crear un enlace nuevo?', 'The old QR code stops working. Replace it wherever you saved or printed it.': 'El código QR anterior deja de funcionar. Reemplázalo donde lo hayas guardado o impreso.',
     'Turn the card off?': '¿Apagar la tarjeta?', 'Its QR code stops working at once. You can make a new one later.': 'Su código QR deja de funcionar enseguida. Puedes crear uno nuevo después.', 'The card is off.': 'La tarjeta está apagada.',
     'MEDICAL INFORMATION': 'INFORMACIÓN MÉDICA', 'Scan for what to do': 'Escanea para saber qué hacer',
+    // barcode, favorites, notes, edit, offline
+    '📦 Scan a barcode': '📦 Escanear un código de barras', 'Scan a barcode': 'Escanear un código de barras', 'Point the camera at the barcode.': 'Apunta la cámara al código de barras.',
+    'This phone cannot scan in the browser. Type the numbers under the barcode.': 'Este teléfono no puede escanear en el navegador. Escribe los números debajo del código.',
+    'Barcode number': 'Número del código de barras', 'Look it up': 'Buscar', 'Looking it up…': 'Buscando…', 'Not found': 'No se encontró', 'No carbs listed': 'Sin carbohidratos en la lista',
+    'A barcode is 8 to 14 digits.': 'Un código de barras tiene de 8 a 14 dígitos.',
+    '{name} has no carbs listed in Open Food Facts. Type the carbs from the label.': '{name} no tiene carbohidratos en Open Food Facts. Escribe los carbohidratos de la etiqueta.',
+    'That barcode is not in Open Food Facts yet. Type the carbs from the label.': 'Ese código todavía no está en Open Food Facts. Escribe los carbohidratos de la etiqueta.',
+    '{g} g of carbs per serving ({size})': '{g} g de carbohidratos por porción ({size})', '{g} g of carbs per 100 g': '{g} g de carbohidratos por cada 100 g',
+    'Servings': 'Porciones', 'How many grams did you eat?': '¿Cuántos gramos comiste?', 'Use {g} g': 'Usar {g} g', 'From Open Food Facts. Check the label.': 'De Open Food Facts. Revisa la etiqueta.',
+    'Favorites': 'Favoritas', 'Name it to keep it as a favorite (optional)': 'Ponle nombre para guardarla como favorita (opcional)', 'Remove from favorites': 'Quitar de favoritas', '★ {name}': '★ {name}',
+    'Note': 'Nota', 'What happened? (optional with a tag)': '¿Qué pasó? (opcional con una etiqueta)', 'Save note': 'Guardar nota', 'Tags': 'Etiquetas',
+    'Exercise': 'Ejercicio', 'Stress': 'Estrés', 'Sick': 'Enfermedad', 'Alcohol': 'Alcohol', 'Period': 'Menstruación', 'Travel': 'Viaje', 'Eating out': 'Comer fuera',
+    'Notes show on the graph, in the report and in the patterns: su94r looks at what follows each tag.': 'Las notas salen en la gráfica, en el informe y en los patrones: su94r mira qué pasa después de cada etiqueta.',
+    'Change this entry': 'Cambiar este registro', 'Carbs (grams)': 'Carbohidratos (gramos)', 'Insulin (units)': 'Insulina (unidades)', 'Kind': 'Tipo', 'Minutes ago': 'Hace cuántos minutos',
+    'waiting to send': 'esperando para enviar', 'No signal: saved on this phone; it sends by itself when back online.': 'Sin señal: guardado en este teléfono; se envía solo cuando vuelva la conexión.',
+    'Saved while offline: {what}.': 'Guardado sin conexión: {what}.', 'Do not log': 'No registrar', 'Could not send a saved entry: {e}': 'No se pudo enviar un registro guardado: {e}', 'note': 'nota',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -161,7 +177,7 @@
     tab: store.get(K.tab) || 'now', pid: store.get(K.pid), range: Number(store.get(K.range)) || 6,
     days: Number(store.get(K.days)) || 14, hist: {}, report: {}, extras: null, dayView: null,
     log: { kind: 'rapid', amount: 0, ago: 0, meal: null }, installEvt: null, justLinked: false,
-    pendingAck: null, treatGrams: null,
+    pendingAck: null, treatGrams: null, meals: null, food: null, scan: null, note: { tags: [], text: '' },
     lang: store.get(K.lang) || (/^es/i.test(navigator.language || '') ? 'es' : 'en'),
   };
   /** The text in this phone's language, with {name} filled in. */
@@ -296,7 +312,7 @@
   }
   async function refreshRecent() {
     if (!store.get(K.token)) return;
-    try { S.recent = await api('app/recent'); } catch (e) { /* keep the last */ }
+    try { S.recent = await api('app/recent'); if ((readJson(K.queue) || []).length && !flushing) setTimeout(flushQueue, 0); } catch (e) { /* keep the last */ }
     if (S.tab === 'now') renderNow();
   }
   function status() {
@@ -361,6 +377,11 @@
       s += '<polyline points="' + P.map((q) => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ') + '" fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>';
     }
     if (to > Date.now() - MIN && from < Date.now()) s += '<line x1="' + X(Date.now()) + '" x2="' + X(Date.now()) + '" y1="' + pt + '" y2="' + (h - pb) + '" style="stroke:var(--muted)" stroke-dasharray="2 3"/>';
+    // Notes (a small diamond under the carbs)
+    (o.notes || []).filter((n) => n.t >= from && n.t <= to).forEach((n) => {
+      const x = X(n.t), y = pt + 28;
+      s += '<rect x="' + (x - 5).toFixed(1) + '" y="' + (y - 5) + '" width="10" height="10" transform="rotate(45 ' + x.toFixed(1) + ' ' + y + ')" style="fill:var(--muted)"><title>' + esc(noteLine(n)) + '</title></rect>';
+    });
     // Logged insulin (bottom) and carbs (top)
     (o.events || []).filter((e) => e.t >= from && e.t <= to).forEach((e) => {
       const x = X(e.t).toFixed(1);
@@ -369,7 +390,10 @@
     });
     return s + '</svg>';
   }
-  const legend = () => '<div class="legend"><span><i style="background:var(--in)"></i>' + t('in range') + '</span><span><i style="background:var(--l)"></i>' + t('low') + '</span><span><i style="background:var(--h)"></i>' + t('high') + '</span><span><i style="background:var(--accent)"></i>' + t('insulin') + '</span><span><i style="background:var(--h);border-radius:50%"></i>' + t('carbs') + '</span></div>';
+  const TAGS = () => [['exercise', t('Exercise')], ['stress', t('Stress')], ['sick', t('Sick')], ['alcohol', t('Alcohol')], ['period', t('Period')], ['travel', t('Travel')], ['eating-out', t('Eating out')]];
+  const tagWord = (k) => (TAGS().find((x) => x[0] === k) || [k, k])[1];
+  const noteLine = (n) => [n.text, (n.tags || []).map(tagWord).join(', ')].filter(Boolean).join(' · ');
+  const legend = () => '<div class="legend"><span><i style="background:var(--in)"></i>' + t('in range') + '</span><span><i style="background:var(--l)"></i>' + t('low') + '</span><span><i style="background:var(--h)"></i>' + t('high') + '</span><span><i style="background:var(--accent)"></i>' + t('insulin') + '</span><span><i style="background:var(--h);border-radius:50%"></i>' + t('carbs') + '</span><span><i style="background:var(--muted);transform:rotate(45deg) scale(.8)"></i>' + t('note') + '</span></div>';
 
   // ---------- Now ----------
   function renderNow() {
@@ -417,7 +441,8 @@
     if (l && !stale && l.mg < L.low) top += '<div class="banner low">' + esc(t('{what}: below {v} {u}', { what: t(l.mg < 55 ? 'Urgent low' : 'Low'), v: fmt(L.low, units), u: units })) + '</div>';
     if (stale && l) top += '<div class="banner stale">' + esc(t('No new reading for {t}. The sensor or the phone running LibreLink may be out of range.', { t: ago(l.t).replace(' ago', '').replace('hace ', '') })) + '</div>';
     top += '<div class="segm" role="group" aria-label="' + t('Hours shown') + '" style="margin-top:14px">' + [3, 6, 12].map((hh) => '<button data-range="' + hh + '" aria-pressed="' + (S.range === hh) + '">' + hh + ' h</button>').join('') + '</div>';
-    top += chart({ pts: hist, from, to, low: L.low, high: L.high, units, events, est, last: l, label: t('Glucose for the last {n} hours', { n: S.range }) }) + legend();
+    const nowNotes = S.recent && S.recent.notes ? S.recent.notes.filter((n) => !c.pid || n.pid === c.pid) : [];
+    top += chart({ pts: hist, from, to, low: L.low, high: L.high, units, events, notes: nowNotes, est, last: l, label: t('Glucose for the last {n} hours', { n: S.range }) }) + legend();
     html += card(top);
     if (est && (est.h30 || est.h60)) {
       const part = (q, when) => (q ? t('<b>{when}</b>: about {v} ({lo}–{hi})', { when, v: fmt(q.mg, units), lo: fmt(q.lo, units), hi: fmt(q.hi, units) }) : '');
@@ -465,7 +490,10 @@
     const cached = S.hist[days];
     if (!cached || Date.now() - cached.at > 5 * MIN) {
       main(html + card('<p class="muted">' + (days === 1 ? t('Loading 1 day of readings…') : t('Loading {n} days of readings…', { n: days })) + '</p>'));
-      try { S.hist[days] = { at: Date.now(), data: await api('app/history?days=' + days) }; } catch (e) { main(html + card('<p>' + esc(e.message) + '</p>')); return; }
+      try {
+        const [data, nts] = await Promise.all([api('app/history?days=' + days), api('app/notes?days=' + days).catch(() => ({ notes: [] }))]);
+        S.hist[days] = { at: Date.now(), data, notes: nts.notes || [] };
+      } catch (e) { main(html + card('<p>' + esc(e.message) + '</p>')); return; }
       if (S.tab !== 'history' || S.days !== days) return;
     }
     const info = c.info || {};
@@ -474,6 +502,7 @@
     const now = Date.now();
     if (!pts.length) { main(html + card('<p class="muted">' + t('The server has no readings for this period yet. It saves every reading from now on, and su94r Mini on your computer copies its own history once.') + '</p>')); return; }
     const events = S.recent ? S.recent.events.filter((e) => !c.pid || e.p === c.pid) : [];
+    const histNotes = (S.hist[days].notes || []).filter((n) => !c.pid || n.pid === c.pid);
     if (S.dayView) {
       const start = new Date(S.dayView); start.setHours(0, 0, 0, 0);
       const end = Math.min(now, start.getTime() + DAY);
@@ -481,7 +510,7 @@
       const s = stats(dp, low, high);
       html += card('<div class="row"><button class="btn ghost" data-back="1">' + t('‹ Back') + '</button><h2 style="margin:0">' + esc(dayLabel(start.getTime())) + '</h2></div>' +
         (s ? kv([[pct(s.inr), t('in range')], [fmt(s.mean, units), t('average')], [fmt(s.min, units), t('lowest')], [fmt(s.max, units), t('highest')]]) : '') +
-        chart({ pts: dp, from: start.getTime(), to: start.getTime() + DAY, low, high, units, events, label: t('Glucose on {day}', { day: dayLabel(start.getTime()) }) }) + legend());
+        chart({ pts: dp, from: start.getTime(), to: start.getTime() + DAY, low, high, units, events, notes: histNotes, label: t('Glucose on {day}', { day: dayLabel(start.getTime()) }) }) + legend());
       main(html);
       return;
     }
@@ -491,7 +520,7 @@
     html += card(kv([[pct(s.inr), t('in range')], [fmt(s.mean, units), t('average')], [s.gmi.toFixed(1) + '%', t('GMI')], [s.lows, t('lows')]]) +
       '<div style="margin-top:12px">' + rangeBar(s) + '</div>' +
       '<p class="muted small" style="margin:6px 0 0">' + esc(t('{b} below · {a} above · readings for {c} of the time', { b: pct(s.vl + s.lo), a: pct(s.hi + s.vh), c: pct(coverage) })) + '</p>' +
-      chart({ pts, from, to: now, low, high, units, events: days <= 2 ? events : [], label: t('Glucose for the last {n} days', { n: days }) }) +
+      chart({ pts, from, to: now, low, high, units, events: days <= 2 ? events : [], notes: days <= 7 ? histNotes : [], label: t('Glucose for the last {n} days', { n: days }) }) +
       (coverage < 0.7 ? '<p class="note">' + esc(t('The server has readings from {day}. Each day fills in more; su94r Mini on your computer also copies the history it has kept.', { day: dayLabel(pts[0][0]) })) + '</p>' : ''));
     if (days >= 7) {
       const pr = S.patterns && S.patterns.pid === c.pid && S.patterns.lang === S.lang && Date.now() - S.patterns.at < 10 * MIN ? S.patterns : null;
@@ -513,11 +542,17 @@
   // ---------- Log ----------
   function recentList(editable) {
     const c = cur();
-    const ev = S.recent ? S.recent.events.filter((e) => !c.pid || e.p === c.pid).sort((a, b) => b.t - a.t) : [];
-    if (!ev.length) return '<p class="muted">' + t('Nothing logged in the last 48 hours.') + '</p>';
+    const when = (ms) => esc(dateKey(ms) === dateKey(Date.now()) ? clock(ms) : dayLabel(ms) + ' ' + clock(ms));
+    const items = (S.recent ? S.recent.events.filter((e) => !c.pid || e.p === c.pid) : []).map((e) => ({ t: e.t, e }))
+      .concat((S.recent && S.recent.notes ? S.recent.notes.filter((n) => !c.pid || n.pid === c.pid) : []).map((n) => ({ t: n.t, n })))
+      .sort((a, b) => b.t - a.t);
+    const waiting = (readJson(K.queue) || []).filter((q) => !c.pid || q.body.pid === c.pid);
+    if (!items.length && !waiting.length) return '<p class="muted">' + t('Nothing logged in the last 48 hours.') + '</p>';
     const src = SOURCE();
-    return '<ul class="list">' + ev.slice(0, 30).map((e) => '<li><span class="t">' + esc(dateKey(e.t) === dateKey(Date.now()) ? clock(e.t) : dayLabel(e.t) + ' ' + clock(e.t)) + '</span><span>' + esc(short(e)) + '</span>' +
-      '<span class="src">' + esc((src[e.source] || e.source || '') + (e.by ? ' · ' + e.by : '')) + '</span>' + (editable && e.mine ? '<button data-undo="' + esc(e.id) + '">' + t('Undo') + '</button>' : '') + '</li>').join('') + '</ul>';
+    return '<ul class="list">' + waiting.map((q) => '<li><span class="t">' + when(q.body.at) + '</span><span>' + esc(q.path === 'app/note' ? '✎ ' + noteLine(q.body) : what(q.body.kind, q.body.amount)) + '</span><span class="src" style="color:var(--h)">' + t('waiting to send') + '</span></li>').join('') +
+      items.slice(0, 40).map((x) => (x.e ? '<li><span class="t">' + when(x.t) + '</span><span>' + esc(short(x.e)) + '</span>' +
+        '<span class="src">' + esc((src[x.e.source] || x.e.source || '') + (x.e.by ? ' · ' + x.e.by : '')) + '</span>' + (editable && x.e.edit ? '<button data-edit="' + esc(x.e.id) + '">' + t('Edit') + '</button>' : '') + '</li>'
+        : '<li><span class="t">' + when(x.t) + '</span><span>' + esc('✎ ' + noteLine(x.n)) + '</span><span class="src">' + esc(x.n.by || '') + '</span>' + (editable && x.n.mine ? '<button data-notedel="' + esc(x.n.id) + '">' + t('Remove') + '</button>' : '') + '</li>')).join('') + '</ul>';
   }
   function renderLog() {
     const canLog = S.me && S.me.canLog;
@@ -539,7 +574,26 @@
         (L.meal.items.length ? ': ' + L.meal.items.map((x) => esc(x.name) + (x.carbs != null ? ' ' + esc(t('about {g} g', { g: x.carbs })) : '')).join(', ') : '') + '.<br><span class="muted small">' + t('Photo estimates are rough: check the number before logging.') + '</span></div>';
     }
     const mic = (window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" id="micBtn" style="display:block;width:100%;margin-bottom:12px">' + esc(t('🎤 Say it: "4 units rapid" or "40 grams"')) + '</button>' + (S.heard ? '<p class="note" style="margin-top:-6px">' + esc(S.heard) + '</p>' : '') : '';
-    const html = card('<h2>' + t('Log') + '</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + '</div>' + m +
+    if (L.kind === 'note') {
+      const N = S.note;
+      main(card('<h2>' + t('Log') + '</h2><div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' +
+        '<div class="muted small" style="margin-top:12px">' + t('Tags') + '</div><div class="when">' + TAGS().map((x) => '<button data-tag="' + x[0] + '" aria-pressed="' + (N.tags.indexOf(x[0]) >= 0) + '">' + esc(x[1]) + '</button>').join('') + '</div>' +
+        '<textarea id="noteText" class="note-text" rows="2" maxlength="280" placeholder="' + esc(t('What happened? (optional with a tag)')) + '">' + esc(N.text) + '</textarea>' +
+        '<div class="muted small">' + t('When') + '</div><div class="when">' + whens.map((w) => '<button data-ago="' + w[0] + '" aria-pressed="' + (L.ago === w[0]) + '">' + w[1] + '</button>').join('') + '</div>' +
+        '<button class="btn wide" id="noteBtn"' + (N.tags.length || N.text.trim() ? '' : ' disabled') + '>' + t('Save note') + '</button>' +
+        '<p class="note">' + t('Notes show on the graph, in the report and in the patterns: su94r looks at what follows each tag.') + '</p>') +
+        card('<h2>' + t('Last 48 hours') + '</h2>' + recentList(true)));
+      return;
+    }
+    if (carbs) {
+      const favs = S.meals && S.meals.pid === cur().pid ? S.meals.list : null;
+      if (!favs) loadMeals();
+      m += '<button class="btn ghost" id="scanBtn" style="display:block;width:100%;margin-top:8px">' + t('📦 Scan a barcode') + '</button>';
+      if (favs && favs.length) m += '<div class="muted small" style="margin-top:10px">' + t('Favorites') + '</div><div class="quick" style="justify-content:flex-start">' + favs.map((f, k) => '<button data-fav="' + k + '"' + (L.mealName === f.name ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + esc(f.name) + ' · ' + f.carbs + ' g</button>').join('') + '</div>';
+      const chosen = favs && favs.find((f) => f.name === L.mealName);
+      if (chosen) m += '<p class="small">' + esc(t('★ {name}', { name: chosen.name })) + ' <button class="btn ghost" style="padding:4px 10px" data-favdel="' + esc(chosen.id) + '">' + t('Remove from favorites') + '</button></p>';
+    }
+    const html = card('<h2>' + t('Log') + '</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + m +
       '<div class="row" style="margin-top:10px"><label class="muted small" for="otherKind">' + t('Other insulin') + '</label><select id="otherKind"><option value="">—</option>' +
       [['short', t('Regular')], ['intermediate', 'NPH'], ['mix', t('Pre-mixed')]].map((o) => '<option value="' + o[0] + '"' + (L.kind === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>' +
       '<div class="amount"><button data-step="-1" aria-label="' + t('Less') + '">−</button><output id="amt" aria-live="polite">' + (L.amount || 0) + '<small>' + (carbs ? t('grams') : t('units')) + '</small></output><button data-step="1" aria-label="' + t('More') + '">+</button></div>' +
@@ -571,7 +625,7 @@
     document.body.appendChild(bg);
     const first = bg.querySelector('button'); if (first) first.focus();
   }
-  function closeSheet() { const s = $('sheet'); if (s) s.remove(); }
+  function closeSheet() { stopScan(); const s = $('sheet'); if (s) s.remove(); }
   let toastTimer = null;
   function toast(text, action, fn) {
     const old = $('toast'); if (old) old.remove();
@@ -615,22 +669,29 @@
   function askToLog() {
     const L = S.log, c = cur();
     const when = L.ago ? t('{m} min ago', { m: L.ago }) : t('now');
-    sheet('<h3>' + esc(t('Log {what}, {when}?', { what: what(L.kind, L.amount), when })) + '</h3>' + (c.info && c.info.name ? '<p class="muted">' + esc(t('For {name}.', { name: c.info.name })) + '</p>' : ''),
+    L.cid = Date.now().toString(36); L.at = Date.now() - L.ago * MIN;
+    sheet('<h3>' + esc(t('Log {what}, {when}?', { what: what(L.kind, L.amount), when })) + '</h3>' + (c.info && c.info.name ? '<p class="muted">' + esc(t('For {name}.', { name: c.info.name })) + '</p>' : '') +
+      (L.kind === 'carbs' ? '<label for="mealName">' + t('Name it to keep it as a favorite (optional)') + '</label><input id="mealName" maxlength="40" autocomplete="off" value="' + esc(L.mealName || '') + '">' : ''),
       [[t('Log it'), 'btn', () => send(false)], [t('Cancel'), 'btn ghost', closeSheet]]);
   }
   async function send(confirm) {
     const L = S.log, c = cur();
     document.querySelectorAll('#sheet button').forEach((b) => { b.disabled = true; });
+    if ($('mealName')) L.mealName = $('mealName').value.trim();
+    const body = { kind: L.kind, amount: L.amount, at: L.at || Date.now() - L.ago * MIN, pid: c.pid, confirm, cid: L.cid || Date.now().toString(36), meal: L.kind === 'carbs' ? L.mealName || '' : '' };
     let r;
-    try { r = await api('app/log', { method: 'POST', body: { kind: L.kind, amount: L.amount, minutesAgo: L.ago, pid: c.pid, confirm } }); }
-    catch (e) { sheet('<h3>' + t('Not logged') + '</h3><p>' + esc(e.message) + '</p>', [[t('Close'), 'btn ghost', closeSheet]]); return; }
+    try { r = await api('app/log', { method: 'POST', body }); }
+    catch (e) {
+      if (e instanceof TypeError) { enqueue('app/log', body); closeSheet(); S.log.amount = 0; S.log.meal = null; S.log.mealName = ''; toast(t('No signal: saved on this phone; it sends by itself when back online.')); if (S.tab === 'log') renderLog(); return; }
+      sheet('<h3>' + t('Not logged') + '</h3><p>' + esc(e.message) + '</p>', [[t('Close'), 'btn ghost', closeSheet]]); return;
+    }
     if (r.confirm) {
       sheet('<h3>' + esc(t('Log {what} anyway?', { what: what(L.kind, L.amount) })) + '</h3><div class="warnbox">' + esc(r.warning) + '</div><p class="muted small">' + t('Check before logging a second dose.') + '</p>',
         [[t('Log anyway'), 'btn warn', () => send(true)], [t('Cancel'), 'btn ghost', closeSheet]]);
       return;
     }
     closeSheet();
-    S.log.amount = 0; S.log.meal = null;
+    S.log.amount = 0; S.log.meal = null; S.log.mealName = ''; S.log.cid = null; S.log.at = null; S.meals = null;
     toast(r.text, t('Undo'), () => undo(r.id));
     await refreshRecent();
     if (S.tab === 'log') renderLog();
@@ -641,6 +702,153 @@
     await refreshRecent();
     if (S.tab === 'log') renderLog();
   }
+  // ---------- offline queue: logs and notes made without signal go out when it is back ----------
+  function enqueue(path, body) {
+    const q = readJson(K.queue) || [];
+    if (!q.some((x) => x.body.cid === body.cid && x.path === path)) q.push({ path, body });
+    store.set(K.queue, JSON.stringify(q.slice(-50)));
+  }
+  function dropQueued(path, cid) { store.set(K.queue, JSON.stringify((readJson(K.queue) || []).filter((x) => !(x.path === path && x.body.cid === cid)))); }
+  let flushing = false;
+  async function flushQueue() {
+    const q = readJson(K.queue) || [];
+    if (flushing || !q.length || !store.get(K.token)) return;
+    flushing = true;
+    let asked = null;
+    try {
+      for (const item of q) {
+        let r;
+        try { r = await api(item.path, { method: 'POST', body: item.body }); }
+        catch (e) { if (e instanceof TypeError) break; dropQueued(item.path, item.body.cid); toast(t('Could not send a saved entry: {e}', { e: e.message })); continue; }
+        dropQueued(item.path, item.body.cid);
+        if (r.confirm) { asked = { item, warning: r.warning }; break; }
+      }
+    } finally { flushing = false; }
+    await refreshRecent();
+    if (S.tab === 'log') renderLog();
+    if (asked) {
+      const b = asked.item.body;
+      sheet('<h3>' + esc(t('Saved while offline: {what}.', { what: what(b.kind, b.amount) })) + '</h3><div class="warnbox">' + esc(asked.warning) + '</div>',
+        [[t('Log anyway'), 'btn warn', async () => {
+          closeSheet();
+          try { const r = await api('app/log', { method: 'POST', body: Object.assign({}, b, { confirm: true }) }); toast(r.text); }
+          catch (e) { if (e instanceof TypeError) enqueue('app/log', Object.assign({}, b, { confirm: true })); else toast(e.message); }
+          await refreshRecent(); if (S.tab === 'log') renderLog();
+        }], [t('Do not log'), 'btn ghost', closeSheet]]);
+    }
+  }
+
+  // ---------- notes ----------
+  async function saveNote() {
+    const L = S.log, c = cur();
+    const text = ($('noteText') || { value: S.note.text }).value;
+    const body = { pid: c.pid, text, tags: S.note.tags.slice(), at: Date.now() - L.ago * MIN, cid: Date.now().toString(36) };
+    try { const r = await api('app/note', { method: 'POST', body }); toast(r.text); }
+    catch (e) {
+      if (!(e instanceof TypeError)) { toast(e.message); return; }
+      enqueue('app/note', body); toast(t('No signal: saved on this phone; it sends by itself when back online.'));
+    }
+    S.note = { tags: [], text: '' };
+    await refreshRecent();
+    if (S.tab === 'log') renderLog();
+  }
+  async function removeNote(id) {
+    try { await api('app/notes/remove', { method: 'POST', body: { id } }); toast(t('Removed.')); } catch (e) { toast(e.message); }
+    await refreshRecent(); if (S.tab === 'log') renderLog();
+  }
+
+  // ---------- changing a logged entry ----------
+  function editEntry(id) {
+    const e = S.recent && S.recent.events.find((x) => x.id === id); if (!e) return;
+    const carbs = e.type === 'meal';
+    const ago0 = Math.round((Date.now() - e.t) / MIN);
+    sheet('<h3>' + t('Change this entry') + '</h3><p class="muted small">' + esc(clock(e.t) + ' · ' + short(e)) + '</p>' +
+      '<label for="edAmt">' + t(carbs ? 'Carbs (grams)' : 'Insulin (units)') + '</label><input id="edAmt" type="number" inputmode="decimal" step="' + (carbs ? 1 : 0.5) + '" min="0" value="' + (e.amount || '') + '">' +
+      (carbs ? '' : '<label for="edKind">' + t('Kind') + '</label><select id="edKind">' + ['rapid', 'basal', 'short', 'intermediate', 'mix'].map((k) => '<option value="' + k + '"' + (e.kind === k ? ' selected' : '') + '>' + esc(KIND()[k]) + '</option>').join('') + '</select>') +
+      '<label for="edAgo">' + t('Minutes ago') + '</label><input id="edAgo" type="number" inputmode="numeric" min="0" max="1440" value="' + ago0 + '">',
+      [[t('Save'), 'btn', async () => {
+        const body = { id, amount: Number($('edAmt').value) };
+        if ($('edKind')) body.kind = $('edKind').value;
+        if (Number($('edAgo').value) !== ago0) body.minutesAgo = Number($('edAgo').value);
+        try { const r = await api('app/edit', { method: 'POST', body }); closeSheet(); toast(r.text); } catch (x) { toast(x.message); return; }
+        await refreshRecent(); if (S.tab === 'log') renderLog();
+      }], [t('Remove'), 'btn ghost', async () => {
+        try { await api('app/remove', { method: 'POST', body: { id } }); closeSheet(); toast(t('Removed.')); } catch (x) { toast(x.message); return; }
+        await refreshRecent(); if (S.tab === 'log') renderLog();
+      }], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+
+  // ---------- favorite meals ----------
+  async function loadMeals() {
+    const pid = cur().pid;
+    if (S.mealsLoading === pid) return;
+    S.mealsLoading = pid;
+    try { S.meals = { pid, list: (await api('app/meals?pid=' + encodeURIComponent(pid))).meals || [] }; } catch (e) { S.meals = { pid, list: [] }; }
+    S.mealsLoading = null;
+    if (S.tab === 'log' && S.log.kind === 'carbs' && !$('sheet')) renderLog();
+  }
+
+  // ---------- barcode: the camera where the browser can read barcodes, typing everywhere ----------
+  function stopScan() {
+    const sc = S.scan; if (!sc) return;
+    S.scan = null;
+    clearInterval(sc.timer);
+    if (sc.stream) sc.stream.getTracks().forEach((tr) => tr.stop());
+  }
+  async function scan() {
+    const can = 'BarcodeDetector' in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia;
+    sheet('<h3>' + t('Scan a barcode') + '</h3>' + (can ? '<video id="scanVideo" playsinline muted style="width:100%;max-height:45vh;border-radius:12px;background:#000"></video><p class="note">' + t('Point the camera at the barcode.') + '</p>' : '<p class="muted small">' + t('This phone cannot scan in the browser. Type the numbers under the barcode.') + '</p>') +
+      '<label for="scanCode">' + t('Barcode number') + '</label><input id="scanCode" inputmode="numeric" maxlength="16" autocomplete="off">',
+      [[t('Look it up'), 'btn', () => lookup($('scanCode').value)], [t('Cancel'), 'btn ghost', closeSheet]]);
+    if (!can) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+      const video = $('scanVideo');
+      if (!video) { stream.getTracks().forEach((tr) => tr.stop()); return; }
+      video.srcObject = stream; await video.play().catch(() => {});
+      const det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+      S.scan = { stream, timer: setInterval(async () => {
+        if (!S.scan || video.readyState < 2) return;
+        try { const found = await det.detect(video); if (found.length && S.scan) lookup(found[0].rawValue); } catch (e) { /* keep looking */ }
+      }, 350) };
+    } catch (e) { /* no camera: typing still works */ }
+  }
+  async function lookup(code) {
+    stopScan();
+    const c = String(code || '').replace(/\D/g, '');
+    if (c.length < 8 || c.length > 14) { toast(t('A barcode is 8 to 14 digits.')); return; }
+    sheet('<h3>' + t('Looking it up…') + '</h3>', [[t('Cancel'), 'btn ghost', closeSheet]]);
+    let r;
+    try { r = await api('app/food?barcode=' + c); } catch (e) { sheet('<h3>' + t('Not found') + '</h3><p>' + esc(e.message) + '</p>', [[t('Close'), 'btn ghost', closeSheet]]); return; }
+    if (!r.found || (r.per100 == null && r.perServing == null)) {
+      sheet('<h3>' + t(r.found ? 'No carbs listed' : 'Not found') + '</h3><p>' + esc(r.found ? t('{name} has no carbs listed in Open Food Facts. Type the carbs from the label.', { name: r.name }) : t('That barcode is not in Open Food Facts yet. Type the carbs from the label.')) + '</p>', [[t('Close'), 'btn ghost', closeSheet]]);
+      return;
+    }
+    S.food = r;
+    foodSheet(1, 100);
+  }
+  function foodSheet(servings, grams) {
+    const r = S.food;
+    const byServing = r.perServing != null;
+    const carbs = Math.round(byServing ? r.perServing * servings : (r.per100 * grams) / 100);
+    sheet('<h3>' + esc(r.name) + '</h3>' +
+      (byServing ? '<p>' + esc(t('{g} g of carbs per serving ({size})', { g: r.perServing, size: r.servingSize || '—' })) + '</p><div class="muted small">' + t('Servings') + '</div><div class="quick" style="justify-content:flex-start">' + [0.5, 1, 1.5, 2, 3].map((x) => '<button data-serv="' + x + '"' + (x === servings ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + x + '</button>').join('') + '</div>'
+        : '<p>' + esc(t('{g} g of carbs per 100 g', { g: r.per100 })) + '</p><label for="foodGrams">' + t('How many grams did you eat?') + '</label><input id="foodGrams" type="number" inputmode="numeric" min="1" max="2000" value="' + grams + '">') +
+      '<p class="note">' + t('From Open Food Facts. Check the label.') + '</p>',
+      [[t('Use {g} g', { g: carbs }), 'btn', () => {
+        const g = byServing ? carbs : Math.round((r.per100 * Number(($('foodGrams') || {}).value || grams)) / 100);
+        closeSheet();
+        S.log.kind = 'carbs'; S.log.amount = Math.max(0, Math.min(300, g)); S.log.mealName = r.name.slice(0, 40); S.log.meal = null;
+        renderLog();
+      }], [t('Cancel'), 'btn ghost', closeSheet]]);
+    const sh = $('sheet');
+    if (sh) {
+      sh.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('[data-serv]'); if (b) foodSheet(Number(b.dataset.serv), grams); });
+      const gi = $('foodGrams');
+      if (gi) gi.addEventListener('change', () => foodSheet(servings, Number(gi.value) || grams));
+    }
+  }
+
   function shrink(file, max) {
     return new Promise((ok, no) => {
       const img = new Image();
@@ -1076,11 +1284,18 @@
     else if (d.days) { S.days = Number(d.days); store.set(K.days, d.days); S.dayView = null; renderHistory(); }
     else if (d.day) { S.dayView = d.day; renderHistory(); }
     else if (d.back) { S.dayView = null; renderHistory(); }
-    else if (d.kind) { S.log.kind = d.kind; S.log.amount = 0; S.log.meal = null; renderLog(); }
+    else if (d.kind) { S.log.kind = d.kind; S.log.amount = 0; S.log.meal = null; S.log.mealName = ''; renderLog(); }
     else if (d.step) setAmount(S.log.amount + Number(d.step) * (S.log.kind === 'carbs' ? 5 : 0.5));
     else if (d.amount) setAmount(Number(d.amount));
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (el.id === 'logBtn') askToLog();
+    else if (el.id === 'noteBtn') saveNote();
+    else if (el.id === 'scanBtn') scan();
+    else if (d.tag) { const i = S.note.tags.indexOf(d.tag); if (i >= 0) S.note.tags.splice(i, 1); else S.note.tags.push(d.tag); if ($('noteText')) S.note.text = $('noteText').value; renderLog(); }
+    else if (d.fav !== undefined) { const f = S.meals && S.meals.list[Number(d.fav)]; if (f) { S.log.amount = f.carbs; S.log.mealName = f.name; S.log.meal = null; renderLog(); } }
+    else if (d.favdel) { api('app/meals/remove', { method: 'POST', body: { id: d.favdel, pid: cur().pid } }).then(() => { S.meals = null; S.log.mealName = ''; renderLog(); }).catch((x) => toast(x.message)); }
+    else if (d.edit) editEntry(d.edit);
+    else if (d.notedel) removeNote(d.notedel);
     else if (el.id === 'micBtn') listen(el);
     else if (el.id === 'labAdd') editLab();
     else if (d.labDel) removeLab(d.labDel);
@@ -1112,6 +1327,9 @@
         [[t('Unlink'), 'btn warn', () => { closeSheet(); [K.token, K.role, K.ns, K.last, K.me].forEach((k) => store.del(k)); welcome(); }], [t('Cancel'), 'btn ghost', closeSheet]]);
     } else if (d.copy && navigator.clipboard) navigator.clipboard.writeText(d.copy).then(() => { el.textContent = t('Copied'); }).catch(() => {});
   });
+  $('main').addEventListener('input', (e) => {
+    if (e.target.id === 'noteText') { S.note.text = e.target.value; const b = $('noteBtn'); if (b) b.disabled = !(S.note.tags.length || S.note.text.trim()); }
+  });
   $('main').addEventListener('change', (e) => {
     if (e.target.id === 'otherKind' && e.target.value) { S.log.kind = e.target.value; S.log.amount = 0; S.log.meal = null; renderLog(); }
     if (e.target.id === 'photo' && e.target.files && e.target.files[0]) photo(e.target.files[0]);
@@ -1141,6 +1359,7 @@
     setInterval(refreshRecent, 120e3);
     setInterval(() => { status(); if (S.tab === 'now' && !$('sheet')) renderNow(); }, 15e3);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { refreshLive(); refreshRecent(); } });
+    window.addEventListener('online', () => { flushQueue(); refreshLive(); });
   }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js', { scope: '/app/' }).catch(() => {});
   boot();

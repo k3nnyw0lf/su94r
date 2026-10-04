@@ -49,6 +49,8 @@ import { historyStore, historyRoute } from './history.js';
 import { doctorNew, doctorData } from './doctor.js';
 import { appRoute, APP_PATHS } from './app.js';
 import { emergencyRoute } from './emergency.js';
+import { mealStore } from './food.js';
+import { noteStore } from './notes.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
@@ -322,7 +324,9 @@ async function voiceSync(request, url, env, deps) {
   if (forecasts.length && fstore.ready) await fstore.save(forecasts).catch(() => {});
   // Doses that did not come from a computer: said to Alexa, logged in Telegram or in the phone app.
   const doses = (await store.recent(null, now)).filter((d) => d.source === 'alexa' || d.source === 'telegram' || d.source === 'phone');
-  return json({ doses: asMarkers(doses), at: now });
+  // And the ones deleted here (an edit or removal in the phone app), so su94r Mini drops them too.
+  const deleted = store.deletedRecent ? await store.deletedRecent(now).catch(() => []) : [];
+  return json({ doses: asMarkers(doses), deleted, at: now });
 }
 
 async function screensRoute(path, request, url, env, deps) {
@@ -349,7 +353,7 @@ async function screensRoute(path, request, url, env, deps) {
     const screen = await screenFor(request, store, '');
     let tz;
     try { const n = deps.night || nightStore(env); if (n.ready) tz = (await n.get()).time_zone; } catch { /* default */ }
-    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), tz, snapshot: () => snapshot(env) });
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), notes: deps.notes || noteStore(env), tz, snapshot: () => snapshot(env) });
     return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {
@@ -444,6 +448,7 @@ export async function handleCgm(path, request, env, deps = {}) {
         screens: deps.screens || screenStore(env), history: deps.history || historyStore(env), doses: deps.store || doseStore(env),
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
         night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env), labs: deps.labs || labStore(env),
+        meals: deps.meals || mealStore(env), notes: deps.notes || noteStore(env), fetchImpl: deps.fetchImpl,
         notify: (row, role, msg) => alertFanOut(env, row, {
           push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
           webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),
