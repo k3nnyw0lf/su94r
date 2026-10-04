@@ -107,7 +107,8 @@ export async function sendPush(sub, message, keys, { fetchImpl = (...a) => fetch
 
 /** What a night-check alert ({ title, message, priority, actions }) looks like as a notification. */
 export function notificationFor(msg) {
-  const ackUrl = (msg.actions || []).find((a) => a && a.url)?.url || null;
+  const action = (msg.actions || []).find((a) => a && a.url) || null;
+  const ackUrl = action?.url || null;
   let ack = null;
   if (ackUrl) { try { const u = new URL(ackUrl); if (/^\?t=[0-9a-f]{32}$/.test(u.search)) ack = `/night/ack${u.search}`; } catch { /* no button */ } }
   const alert = (msg.priority || 3) >= 4 || (msg.tags || []).includes('white_check_mark');
@@ -117,6 +118,7 @@ export function notificationFor(msg) {
     tag: alert ? 'su94r-alert' : 'su94r-info',     // a reminder or "Back up" replaces the alert before it
     urgent: (msg.priority || 3) >= 5,
     ack,
+    ...(ack && action.label && action.label !== "I'm OK" ? { ackLabel: String(action.label).slice(0, 20) } : {}),
   };
 }
 

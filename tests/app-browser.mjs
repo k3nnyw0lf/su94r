@@ -8,9 +8,11 @@
 // entry is changed; a dose logged with no signal waits on the phone and goes out when it is back;
 // Now shows active insulin; History shows the goal, streaks and the months; a doctor visit reaches
 // the calendar feed; with no phone to ring the owner's Now says so, a drill goes out, last night's
-// unanswered lows show, and "Can I drive?" answers.
+// unanswered lows show, and "Can I drive?" answers; a meter reading far from the sensor, high ketones,
+// a pill, weight and exercise log, and the spreadsheet downloads.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
+import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 import { handleCgm, resetCaches } from '../workers/cgm-core.js';
@@ -82,7 +84,9 @@ const daily = { ready: true, async since() { return dailyRows; } };
 let visitRows = [];
 const appointments = { ready: true, async from(pid, t) { return visitRows.filter((v) => Date.parse(v.at) >= t).map((v) => ({ ...v, at: Date.parse(v.at) })); }, async add(r) { visitRows.push({ id: 'v' + visitRows.length, ...r }); }, async remove(pid, id) { visitRows = visitRows.filter((v) => v.id !== id); } };
 const drillSent = [];
-const deps = { daily, appointments, meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async (topic, msg) => { if (/drill/.test(msg.title || '')) drillSent.push(topic); }, pushStore: { ready: false } };
+let checkRows = [];
+const checkStoreFake = { ready: true, async between(pid, from, to, kinds = null) { return checkRows.filter((r) => !r.deleted && Date.parse(r.t) >= from && Date.parse(r.t) < to && (!kinds || kinds.includes(r.kind))).map((r) => ({ ...r, t: Date.parse(r.t) })); }, async get(id) { const r = checkRows.find((x) => x.id === id && !x.deleted); return r ? { ...r, t: Date.parse(r.t) } : null; }, async add(list) { for (const r of list) if (!checkRows.some((x) => x.id === r.id)) checkRows.push({ ...r }); }, async remove(ids) { for (const r of checkRows) if (ids.includes(r.id)) r.deleted = true; } };
+const deps = { checks: checkStoreFake, daily, appointments, meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async (topic, msg) => { if (/drill/.test(msg.title || '')) drillSent.push(topic); }, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -364,6 +368,50 @@ await page.waitForSelector('#sheet >> text=DVLA');
 checks.driveCheck = /above 90|eat first|falling|don't drive|No fresh reading/.test(await page.textContent('#sheet h3'));
 await shot('34-drive');
 await page.click('#sheet button[data-b="0"]');
+
+// Meter, ketones, a pill, weight and exercise; the spreadsheet.
+await page.click('#tabs button[data-tab="log"]');
+points.push({ t: Date.now(), mg: 150 });                         // the sensor's reading at the meter check
+await page.click('button[data-kind="meter"]');
+await page.fill('#chkValue', '60');
+await page.click('#chkBtn');
+await page.waitForSelector('#sheet >> text=Meter check');
+checks.meterVsSensor = /The sensor read \d+ mg\/dL then, \d+% higher/.test(await page.textContent('#sheet'));
+await shot('35-meter-check');
+await page.click('#sheet button[data-b="0"]');
+await page.click('button[data-kind="ketone"]');
+await page.fill('#chkValue', '2.0');
+await page.click('#chkBtn');
+await page.waitForSelector('#sheet >> text=Ketone result');
+checks.ketonesHigh = (await page.textContent('#sheet')).includes('risk of DKA');
+await page.click('#sheet button[data-b="0"]');
+await page.click('button[data-kind="med"]');
+await page.waitForSelector('#chkLabel');
+await page.fill('#chkLabel', 'Atorvastatin');
+await page.click('#chkBtn');
+await page.waitForSelector('#toast >> text=Logged Atorvastatin.');
+await page.click('button[data-kind="weight"]');
+await page.click('button[data-wunit="lb"]');
+await page.fill('#chkValue', '181.7');
+await page.click('#chkBtn');
+await page.waitForSelector('#toast >> text=82.4 kg');
+await page.click('button[data-kind="exercise"]');
+await page.click('button[data-act="run"]');
+await page.click('button[data-mins="30"]');
+await page.click('#chkBtn');
+await page.waitForSelector('#toast >> text=30 min of run');
+checks.checksLogged = ['meter', 'ketone', 'med', 'weight', 'exercise'].every((k) => checkRows.some((r) => r.kind === k));
+checks.checksListed = /🩸 60 mg\/dL/.test(await page.textContent('.list')) && (await page.textContent('.list')).includes('⚖️ 181.7 lb');
+checks.checksFit = await noSideScroll();
+await shot('36-checks');
+await page.click('#tabs button[data-tab="now"]');
+await page.waitForSelector('svg.g circle[r="7"]');
+checks.meterDot = true;
+await page.click('#tabs button[data-tab="more"]');
+await page.waitForSelector('#exportBtn');
+const [dl] = await Promise.all([page.waitForEvent('download'), page.click('#exportBtn')]);
+const csvText = fs.readFileSync(await dl.path(), 'utf8');
+checks.exportCsv = csvText.startsWith('local time,iso time,type') && /,meter,60,mg\/dL,/.test(csvText) && csvText.includes(',weight,82.4,kg,');
 
 // A typed barcode fills in the carbs; logging it with its name makes a favorite.
 await page.close();

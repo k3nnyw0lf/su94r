@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal', wunit: 'su94rAppWeightUnit' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -192,6 +192,15 @@
     'Alert check': 'Revisión de alertas', 'Reaches: {list}.': 'Llega a: {list}.', 'nothing yet': 'nada todavía', 'the app on {n} phone(s)': 'la app en {n} teléfono(s)', '{n} Telegram chat(s)': '{n} chat(s) de Telegram',
     'Answered the last drill ({when}): {list}.': 'Respondieron el último simulacro ({when}): {list}.', 'No answer to the last drill yet ({when}).': 'Todavía sin respuesta al último simulacro ({when}).',
     'Phone calls for unanswered lows: on, {n} number(s).': 'Llamadas por bajas sin responder: encendidas, {n} número(s).', 'Phone calls for unanswered lows: set up in su94r Mini (Low alerts → Phone calls).': 'Llamadas por bajas sin responder: se configuran en su94r Mini (Low alerts → Phone calls).',
+    // meter, ketones, pills, weight, exercise, export
+    'Meter': 'Glucómetro', 'Ketones': 'Cetonas', 'Pill': 'Pastilla', 'Weight': 'Peso', 'Exercise': 'Ejercicio',
+    'Meter reading ({u})': 'Lectura del glucómetro ({u})', 'Blood (mmol/L)': 'Sangre (mmol/L)', 'Urine': 'Orina', 'negative': 'negativo', 'trace': 'trazas', 'small': 'pocas', 'moderate': 'moderadas', 'large': 'muchas',
+    'Your medicines': 'Tus medicamentos', 'Add your medicines in su94r Mini (Settings → Medicines) to pick them here, or type one:': 'Agrega tus medicamentos en su94r Mini (Settings → Medicines) para elegirlos aquí, o escribe uno:', 'Medicine name': 'Nombre del medicamento',
+    'Minutes': 'Minutos', 'walk': 'caminar', 'run': 'correr', 'bike': 'bici', 'swim': 'nadar', 'gym': 'gimnasio', 'sport': 'deporte', 'yoga': 'yoga', 'other': 'otro',
+    'Save': 'Guardar', 'Logged on this phone; it sends by itself when back online.': 'Guardado en este teléfono; se envía solo cuando vuelva la conexión.',
+    'Meter check': 'Revisión con glucómetro', 'Ketone result': 'Resultado de cetonas', 'meter': 'glucómetro', 'urine': 'orina',
+    'Export': 'Exportar', 'A spreadsheet (CSV) of the last 90 days: readings, insulin, carbs, notes, meter readings, ketones, weight, exercise and pills. For a PDF, print the report from the Report tab.': 'Una hoja de cálculo (CSV) de los últimos 90 días: lecturas, insulina, carbohidratos, notas, glucómetro, cetonas, peso, ejercicio y pastillas. Para un PDF, imprime el informe en la pestaña Informe.',
+    'Download the spreadsheet': 'Descargar la hoja de cálculo', 'Preparing…': 'Preparando…',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -200,6 +209,7 @@
     days: Number(store.get(K.days)) || 14, hist: {}, report: {}, extras: null, dayView: null,
     log: { kind: 'rapid', amount: 0, ago: 0, meal: null }, installEvt: null, justLinked: false,
     pendingAck: null, treatGrams: null, meals: null, food: null, scan: null, note: { tags: [], text: '' },
+    chk: { ketone: 'blood', label: '', value: '', act: 'walk' }, medsList: null,
     lang: store.get(K.lang) || (/^es/i.test(navigator.language || '') ? 'es' : 'en'),
   };
   /** The text in this phone's language, with {name} filled in. */
@@ -399,6 +409,10 @@
       s += '<polyline points="' + P.map((q) => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ') + '" fill="none" style="stroke:var(--accent)" stroke-width="2" stroke-dasharray="5 4"/>';
     }
     if (to > Date.now() - MIN && from < Date.now()) s += '<line x1="' + X(Date.now()) + '" x2="' + X(Date.now()) + '" y1="' + pt + '" y2="' + (h - pb) + '" style="stroke:var(--muted)" stroke-dasharray="2 3"/>';
+    // Meter readings (a dark dot with a light ring)
+    (o.meters || []).filter((m) => m.t >= from && m.t <= to).forEach((m) => {
+      s += '<circle cx="' + X(m.t).toFixed(1) + '" cy="' + Y(m.value).toFixed(1) + '" r="7" style="fill:var(--fg);stroke:var(--card)" stroke-width="3"><title>' + esc(t('Meter') + ' ' + fmt(m.value, units)) + '</title></circle>';
+    });
     // Notes (a small diamond under the carbs)
     (o.notes || []).filter((n) => n.t >= from && n.t <= to).forEach((n) => {
       const x = X(n.t), y = pt + 28;
@@ -479,7 +493,8 @@
     if (stale && l) top += '<div class="banner stale">' + esc(t('No new reading for {t}. The sensor or the phone running LibreLink may be out of range.', { t: ago(l.t).replace(' ago', '').replace('hace ', '') })) + '</div>';
     top += '<div class="segm" role="group" aria-label="' + t('Hours shown') + '" style="margin-top:14px">' + [3, 6, 12].map((hh) => '<button data-range="' + hh + '" aria-pressed="' + (S.range === hh) + '">' + hh + ' h</button>').join('') + '</div>';
     const nowNotes = S.recent && S.recent.notes ? S.recent.notes.filter((n) => !c.pid || n.pid === c.pid) : [];
-    top += chart({ pts: hist, from, to, low: L.low, high: L.high, units, events, notes: nowNotes, est, last: l, label: t('Glucose for the last {n} hours', { n: S.range }) }) + legend();
+    const nowMeters = S.recent && S.recent.checks ? S.recent.checks.filter((x) => x.kind === 'meter' && (!c.pid || x.pid === c.pid)) : [];
+    top += chart({ pts: hist, from, to, low: L.low, high: L.high, units, events, notes: nowNotes, meters: nowMeters, est, last: l, label: t('Glucose for the last {n} hours', { n: S.range }) }) + legend();
     html += card(top);
     if (est && (est.h30 || est.h60)) {
       const part = (q, when) => (q ? t('<b>{when}</b>: about {v} ({lo}–{hi})', { when, v: fmt(q.mg, units), lo: fmt(q.lo, units), hi: fmt(q.hi, units) }) : '');
@@ -586,13 +601,15 @@
     const when = (ms) => esc(dateKey(ms) === dateKey(Date.now()) ? clock(ms) : dayLabel(ms) + ' ' + clock(ms));
     const items = (S.recent ? S.recent.events.filter((e) => !c.pid || e.p === c.pid) : []).map((e) => ({ t: e.t, e }))
       .concat((S.recent && S.recent.notes ? S.recent.notes.filter((n) => !c.pid || n.pid === c.pid) : []).map((n) => ({ t: n.t, n })))
+      .concat((S.recent && S.recent.checks ? S.recent.checks.filter((x) => !c.pid || x.pid === c.pid) : []).map((x) => ({ t: x.t, k: x })))
       .sort((a, b) => b.t - a.t);
     const waiting = (readJson(K.queue) || []).filter((q) => !c.pid || q.body.pid === c.pid);
     if (!items.length && !waiting.length) return '<p class="muted">' + t('Nothing logged in the last 48 hours.') + '</p>';
     const src = SOURCE();
-    return '<ul class="list">' + waiting.map((q) => '<li><span class="t">' + when(q.body.at) + '</span><span>' + esc(q.path === 'app/note' ? '✎ ' + noteLine(q.body) : what(q.body.kind, q.body.amount)) + '</span><span class="src" style="color:var(--h)">' + t('waiting to send') + '</span></li>').join('') +
+    return '<ul class="list">' + waiting.map((q) => '<li><span class="t">' + when(q.body.at) + '</span><span>' + esc(q.path === 'app/note' ? '✎ ' + noteLine(q.body) : q.path === 'app/check' ? checkLine(q.body) : what(q.body.kind, q.body.amount)) + '</span><span class="src" style="color:var(--h)">' + t('waiting to send') + '</span></li>').join('') +
       items.slice(0, 40).map((x) => (x.e ? '<li><span class="t">' + when(x.t) + '</span><span>' + esc(short(x.e)) + '</span>' +
         '<span class="src">' + esc((src[x.e.source] || x.e.source || '') + (x.e.by ? ' · ' + x.e.by : '')) + '</span>' + (editable && x.e.edit ? '<button data-edit="' + esc(x.e.id) + '">' + t('Edit') + '</button>' : '') + '</li>'
+        : x.k ? '<li><span class="t">' + when(x.t) + '</span><span>' + esc(checkLine(x.k)) + '</span><span class="src">' + esc(x.k.by || '') + '</span>' + (editable && x.k.mine ? '<button data-chkdel="' + esc(x.k.id) + '">' + t('Remove') + '</button>' : '') + '</li>'
         : '<li><span class="t">' + when(x.t) + '</span><span>' + esc('✎ ' + noteLine(x.n)) + '</span><span class="src">' + esc(x.n.by || '') + '</span>' + (editable && x.n.mine ? '<button data-notedel="' + esc(x.n.id) + '">' + t('Remove') + '</button>' : '') + '</li>')).join('') + '</ul>';
   }
   function renderLog() {
@@ -615,9 +632,14 @@
         (L.meal.items.length ? ': ' + L.meal.items.map((x) => esc(x.name) + (x.carbs != null ? ' ' + esc(t('about {g} g', { g: x.carbs })) : '')).join(', ') : '') + '.<br><span class="muted small">' + t('Photo estimates are rough: check the number before logging.') + '</span></div>';
     }
     const mic = (window.SpeechRecognition || window.webkitSpeechRecognition) ? '<button class="btn ghost" id="micBtn" style="display:block;width:100%;margin-bottom:12px">' + esc(t('🎤 Say it: "4 units rapid" or "40 grams"')) + '</button>' + (S.heard ? '<p class="note" style="margin-top:-6px">' + esc(S.heard) + '</p>' : '') : '';
+    const kinds2 = '<div class="kinds kinds2">' + kindBtn('meter', t('Meter')) + kindBtn('ketone', t('Ketones')) + kindBtn('med', t('Pill')) + kindBtn('weight', t('Weight')) + kindBtn('exercise', t('Exercise')) + '</div>';
+    if (['meter', 'ketone', 'med', 'weight', 'exercise'].indexOf(L.kind) >= 0) {
+      main(card('<h2>' + t('Log') + '</h2><div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + kinds2 + checkForm(whens)) + card('<h2>' + t('Last 48 hours') + '</h2>' + recentList(true)));
+      return;
+    }
     if (L.kind === 'note') {
       const N = S.note;
-      main(card('<h2>' + t('Log') + '</h2><div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' +
+      main(card('<h2>' + t('Log') + '</h2><div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + kinds2 +
         '<div class="muted small" style="margin-top:12px">' + t('Tags') + '</div><div class="when">' + TAGS().map((x) => '<button data-tag="' + x[0] + '" aria-pressed="' + (N.tags.indexOf(x[0]) >= 0) + '">' + esc(x[1]) + '</button>').join('') + '</div>' +
         '<textarea id="noteText" class="note-text" rows="2" maxlength="280" placeholder="' + esc(t('What happened? (optional with a tag)')) + '">' + esc(N.text) + '</textarea>' +
         '<div class="muted small">' + t('When') + '</div><div class="when">' + whens.map((w) => '<button data-ago="' + w[0] + '" aria-pressed="' + (L.ago === w[0]) + '">' + w[1] + '</button>').join('') + '</div>' +
@@ -634,7 +656,7 @@
       const chosen = favs && favs.find((f) => f.name === L.mealName);
       if (chosen) m += '<p class="small">' + esc(t('★ {name}', { name: chosen.name })) + ' <button class="btn ghost" style="padding:4px 10px" data-favdel="' + esc(chosen.id) + '">' + t('Remove from favorites') + '</button></p>';
     }
-    const html = card('<h2>' + t('Log') + '</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + m +
+    const html = card('<h2>' + t('Log') + '</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + kinds2 + m +
       '<div class="row" style="margin-top:10px"><label class="muted small" for="otherKind">' + t('Other insulin') + '</label><select id="otherKind"><option value="">—</option>' +
       [['short', t('Regular')], ['intermediate', 'NPH'], ['mix', t('Pre-mixed')]].map((o) => '<option value="' + o[0] + '"' + (L.kind === o[0] ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select></div>' +
       '<div class="amount"><button data-step="-1" aria-label="' + t('Less') + '">−</button><output id="amt" aria-live="polite">' + (L.amount || 0) + '<small>' + (carbs ? t('grams') : t('units')) + '</small></output><button data-step="1" aria-label="' + t('More') + '">+</button></div>' +
@@ -743,6 +765,87 @@
     await refreshRecent();
     if (S.tab === 'log') renderLog();
   }
+  // ---------- meter, ketones, pills, weight, exercise (checks.js) ----------
+  const ACTS = ['walk', 'run', 'bike', 'swim', 'gym', 'sport', 'yoga', 'other'];
+  function checkLine(k) {
+    const units = (cur().info && cur().info.units) || 'mg/dL';
+    if (k.kind === 'meter') return '🩸 ' + (k.value != null ? fmt(k.value, units) + ' ' + units : '') + ' (' + t('meter') + ')';
+    if (k.kind === 'ketone') return '🧪 ' + t('Ketones') + ': ' + (k.unit === 'urine' ? t(k.label) + ' (' + t('urine') + ')' : k.value + ' mmol/L');
+    if (k.kind === 'weight') { const lb = store.get(K.wunit) === 'lb'; return '⚖️ ' + (lb ? Math.round(Number(k.value) / 0.45359237 * 10) / 10 + ' lb' : k.value + ' kg'); }
+    if (k.kind === 'exercise') return '🏃 ' + k.value + ' min · ' + t(k.label || 'other');
+    return '💊 ' + (k.label || '') + (k.value ? ' · ' + k.value + (k.unit ? ' ' + k.unit : '') : '');
+  }
+  function checkForm(whens) {
+    const L = S.log, C = S.chk, units = (cur().info && cur().info.units) || 'mg/dL';
+    const chip = (attr, v, label, on) => '<button ' + attr + '="' + esc(v) + '" aria-pressed="' + Boolean(on) + '">' + esc(label) + '</button>';
+    let h = '';
+    if (L.kind === 'meter') h = '<label class="muted small" for="chkValue">' + esc(t('Meter reading ({u})', { u: units })) + '</label><input id="chkValue" class="big-input" type="number" inputmode="decimal" step="' + (units === 'mmol/L' ? '0.1' : '1') + '" value="' + esc(C.value) + '">';
+    else if (L.kind === 'ketone') {
+      h = '<div class="when">' + chip('data-ktype', 'blood', t('Blood (mmol/L)'), C.ketone === 'blood') + chip('data-ktype', 'urine', t('Urine'), C.ketone === 'urine') + '</div>';
+      h += C.ketone === 'blood' ? '<input id="chkValue" class="big-input" type="number" inputmode="decimal" step="0.1" placeholder="0.4" value="' + esc(C.value) + '">'
+        : '<div class="when">' + ['negative', 'trace', 'small', 'moderate', 'large'].map((x) => chip('data-klabel', x, t(x), C.label === x)).join('') + '</div>';
+    } else if (L.kind === 'med') {
+      const meds = S.medsList;
+      if (!meds) loadMeds();
+      h = meds && meds.length ? '<div class="muted small">' + t('Your medicines') + '</div><div class="when">' + meds.map((m) => chip('data-mlabel', m.name, m.name, C.label === m.name)).join('') + '</div>'
+        : '<p class="muted small">' + t('Add your medicines in su94r Mini (Settings → Medicines) to pick them here, or type one:') + '</p><input id="chkLabel" class="big-input" maxlength="60" placeholder="' + esc(t('Medicine name')) + '" value="' + esc(C.label) + '">';
+    } else if (L.kind === 'weight') {
+      const lb = store.get(K.wunit) !== 'kg';
+      h = '<div class="when">' + chip('data-wunit', 'lb', 'lb', lb) + chip('data-wunit', 'kg', 'kg', !lb) + '</div><input id="chkValue" class="big-input" type="number" inputmode="decimal" step="0.1" value="' + esc(C.value) + '">';
+    } else if (L.kind === 'exercise') {
+      h = '<div class="when">' + ACTS.map((a) => chip('data-act', a, t(a), C.act === a)).join('') + '</div><div class="muted small">' + t('Minutes') + '</div><div class="quick" style="justify-content:flex-start">' + [15, 30, 45, 60, 90].map((m) => '<button data-mins="' + m + '"' + (String(C.value) === String(m) ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + m + '</button>').join('') + '</div><input id="chkValue" class="big-input" type="number" inputmode="numeric" value="' + esc(C.value) + '">';
+    }
+    h += '<div class="muted small">' + t('When') + '</div><div class="when">' + whens.map((w) => '<button data-ago="' + w[0] + '" aria-pressed="' + (L.ago === w[0]) + '">' + w[1] + '</button>').join('') + '</div>';
+    return h + '<button class="btn wide" id="chkBtn">' + t('Save') + '</button>';
+  }
+  async function loadMeds() {
+    if (S.medsLoading) return;
+    S.medsLoading = true;
+    try { S.medsList = (await api('app/meds')).meds || []; } catch (e) { S.medsList = []; }
+    S.medsLoading = false;
+    if (S.tab === 'log' && S.log.kind === 'med' && !$('sheet')) renderLog();
+  }
+  async function saveCheck() {
+    const L = S.log, C = S.chk, units = (cur().info && cur().info.units) || 'mg/dL';
+    const v = $('chkValue') ? $('chkValue').value : C.value;
+    const body = { pid: cur().pid, kind: L.kind, at: Date.now() - L.ago * MIN, cid: Date.now().toString(36) };
+    if (L.kind === 'meter') Object.assign(body, { value: v, unit: units });
+    else if (L.kind === 'ketone') Object.assign(body, C.ketone === 'urine' ? { label: C.label } : { value: v });
+    else if (L.kind === 'med') Object.assign(body, { label: $('chkLabel') ? $('chkLabel').value : C.label });
+    else if (L.kind === 'weight') Object.assign(body, { value: v, unit: store.get(K.wunit) === 'kg' ? 'kg' : 'lb' });
+    else if (L.kind === 'exercise') Object.assign(body, { value: v, label: C.act });
+    let r;
+    try { r = await api('app/check', { method: 'POST', body }); }
+    catch (e) {
+      if (!(e instanceof TypeError)) { toast(e.message); return; }
+      enqueue('app/check', body); toast(t('Logged on this phone; it sends by itself when back online.'));
+      S.chk = { ketone: C.ketone, label: '', value: '', act: C.act }; renderLog(); return;
+    }
+    S.chk = { ketone: C.ketone, label: '', value: '', act: C.act };
+    // A sensor far off the meter, or ketones above normal: a sheet, so it is read.
+    if ((r.sensor && r.sensor.off) || (r.level && r.level !== 'normal')) sheet('<h3>' + t(L.kind === 'meter' ? 'Meter check' : 'Ketone result') + '</h3><p>' + esc(r.text) + '</p>', [[t('Close'), 'btn', closeSheet]]);
+    else toast(r.text);
+    await refreshRecent();
+    if (S.tab === 'log') renderLog();
+  }
+  async function removeCheck(id) {
+    try { await api('app/checks/remove', { method: 'POST', body: { id } }); toast(t('Removed.')); } catch (e) { toast(e.message); }
+    await refreshRecent(); if (S.tab === 'log') renderLog();
+  }
+  async function exportCsvFile(btn) {
+    btn.disabled = true; btn.textContent = t('Preparing…');
+    try {
+      const res = await fetch('/app/export?days=90&pid=' + encodeURIComponent(cur().pid), { headers: { Authorization: 'Bearer ' + store.get(K.token), 'X-Su94r-Lang': S.lang }, cache: 'no-store' });
+      if (!res.ok) throw new Error(t('The server answered {s}.', { s: res.status }));
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url; a.download = 'su94r-' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) { toast(e.message); }
+    btn.disabled = false; btn.textContent = t('Download the spreadsheet');
+  }
+
   // ---------- offline queue: logs and notes made without signal go out when it is back ----------
   function enqueue(path, body) {
     const q = readJson(K.queue) || [];
@@ -1419,6 +1522,7 @@
         (sup.canEdit && items.length < 6 ? '<button class="btn ghost" data-supply="">' + t('Add insulin or sensors') + '</button>' : '') +
         '<p class="note">' + t('Counts down as doses are logged (pen priming is not counted) and as new sensors start. su94r reminds you by day when it runs low or a refill is due.') + '</p>');
     }
+    html += card('<h2>' + t('Export') + '</h2><p class="small">' + t('A spreadsheet (CSV) of the last 90 days: readings, insulin, carbs, notes, meter readings, ketones, weight, exercise and pills. For a PDF, print the report from the Report tab.') + '</p><button class="btn ghost" id="exportBtn">' + t('Download the spreadsheet') + '</button>');
     html += card('<h2>' + t('This phone') + '</h2><p>' + (role === 'family' ? (S.me && S.me.canLog ? t('A family member\'s phone: it reads and logs (the owner allowed it).') : t('A family member\'s phone: it reads; the owner can allow it to log.')) : t('Your own phone: it reads and logs.')) + (S.me && S.me.name ? esc(t(' Named “{name}” in su94r Mini.', { name: S.me.name })) : '') + '</p>' +
       '<button class="btn ghost" id="unlink">' + t('Unlink this phone') + '</button>');
     html += '<p class="note" style="text-align:center">' + t('su94r · not a medical device. Readings come from LibreLinkUp and can be a few minutes behind.') + '</p>';
@@ -1465,12 +1569,21 @@
     else if (d.days) { S.days = Number(d.days); store.set(K.days, d.days); S.dayView = null; renderHistory(); }
     else if (d.day) { S.dayView = d.day; renderHistory(); }
     else if (d.back) { S.dayView = null; renderHistory(); }
-    else if (d.kind) { S.log.kind = d.kind; S.log.amount = 0; S.log.meal = null; S.log.mealName = ''; renderLog(); }
+    else if (d.kind) { S.log.kind = d.kind; S.log.amount = 0; S.log.meal = null; S.log.mealName = ''; S.chk.value = ''; S.chk.label = ''; renderLog(); }
     else if (d.step) setAmount(S.log.amount + Number(d.step) * (S.log.kind === 'carbs' ? 5 : 0.5));
     else if (d.amount) setAmount(Number(d.amount));
     else if (d.ago !== undefined) { S.log.ago = Number(d.ago); renderLog(); }
     else if (el.id === 'logBtn') askToLog();
     else if (el.id === 'noteBtn') saveNote();
+    else if (el.id === 'chkBtn') { el.disabled = true; saveCheck(); }
+    else if (el.id === 'exportBtn') exportCsvFile(el);
+    else if (d.chkdel) removeCheck(d.chkdel);
+    else if (d.ktype) { S.chk.ketone = d.ktype; S.chk.value = ''; S.chk.label = ''; renderLog(); }
+    else if (d.klabel) { S.chk.label = d.klabel; renderLog(); }
+    else if (d.mlabel) { S.chk.label = d.mlabel; renderLog(); }
+    else if (d.wunit) { store.set(K.wunit, d.wunit); renderLog(); }
+    else if (d.act) { S.chk.act = d.act; if ($('chkValue')) S.chk.value = $('chkValue').value; renderLog(); }
+    else if (d.mins) { S.chk.value = d.mins; renderLog(); }
     else if (el.id === 'scanBtn') scan();
     else if (d.tag) { const i = S.note.tags.indexOf(d.tag); if (i >= 0) S.note.tags.splice(i, 1); else S.note.tags.push(d.tag); if ($('noteText')) S.note.text = $('noteText').value; renderLog(); }
     else if (d.fav !== undefined) { const f = S.meals && S.meals.list[Number(d.fav)]; if (f) { S.log.amount = f.carbs; S.log.mealName = f.name; S.log.meal = null; renderLog(); } }
@@ -1517,6 +1630,8 @@
     } else if (d.copy && navigator.clipboard) navigator.clipboard.writeText(d.copy).then(() => { el.textContent = t('Copied'); }).catch(() => {});
   });
   $('main').addEventListener('input', (e) => {
+    if (e.target.id === 'chkValue') S.chk.value = e.target.value;
+    if (e.target.id === 'chkLabel') S.chk.label = e.target.value;
     if (e.target.id === 'noteText') { S.note.text = e.target.value; const b = $('noteBtn'); if (b) b.disabled = !(S.note.tags.length || S.note.text.trim()); }
   });
   $('main').addEventListener('change', (e) => {

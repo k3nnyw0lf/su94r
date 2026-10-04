@@ -34,7 +34,15 @@ async function call(link, path, { method = 'GET', body } = {}) {
 }
 
 /** Sends recent insulin markers and deletions; returns doses said to Alexa. */
-export const exchangeDoses = (link, markers, removed, forecasts = [], rapidInsulin) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts, ...(rapidInsulin ? { rapidInsulin } : {}) } });
+export const exchangeDoses = (link, markers, removed, forecasts = [], rapidInsulin, extra = {}) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts, ...(rapidInsulin ? { rapidInsulin } : {}), ...extra } });
+/** Everything the server keeps for a period, as CSV (workers/export.js), for the monthly copy to Drive. */
+export async function serverExport(link, from, to) {
+  const p = parseScreenLink(link);
+  if (!p) throw new Error('Connect su94r Mini to your su94r server first.');
+  const res = await fetch(`${p.base}/export?key=${encodeURIComponent(p.key)}&from=${from}&to=${to}`, { cache: 'no-store', signal: AbortSignal.timeout(30000) });
+  if (!res.ok) throw new Error(`The su94r server answered ${res.status}.`);
+  return res.text();
+}
 /** The logged insulin of the last 90 days, once (missed-dose reminders and the report learn from it). */
 export const dosesImport = (link, markers) => call(link, 'doses/import', { method: 'POST', body: { markers } });
 /** A new key for this su94r Mini; the old one keeps working until rotateKeyDone turns it off. */

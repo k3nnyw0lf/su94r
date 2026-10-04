@@ -41,6 +41,7 @@ import { missedDoseNudges } from './nudges.js';
 import { supplyStatus, supplyReminders } from './supplies.js';
 import { updateDaily, dayIn } from './daily.js';
 import { logEpisode, morningReport, runDrill, drillAnswer, coverageOf } from './coverage.js';
+import { pillTimes, sameMed, ketoneLevel } from './checks.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -53,7 +54,7 @@ export const NIGHT_DEFAULTS = {
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
   treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
-  mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null, call_enabled: false, call_numbers: [],
+  mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null, call_enabled: false, call_numbers: [], meds: [], meds_pid: null,
 };
 
 export const EXERCISE_MARGIN = 10;                 // mg/dL above the low line that "Low soon" watches in exercise mode
@@ -79,7 +80,7 @@ export function modeFields(mode, hours, now = Date.now()) {
 export function inLanguage(msg, lang) {
   if (lang !== 'es' || !msg?.es) return msg;
   const { es, ...rest } = msg;
-  return { ...rest, title: es.title ?? msg.title, message: es.message ?? msg.message, actions: (msg.actions || []).map((a) => ({ ...a, label: a.label === "I'm OK" ? 'Estoy bien' : a.label })) };
+  return { ...rest, title: es.title ?? msg.title, message: es.message ?? msg.message, actions: (msg.actions || []).map((a) => ({ ...a, label: a.label === "I'm OK" ? 'Estoy bien' : a.label === 'Taken' ? 'Tomada' : a.label })) };
 }
 const sensorWhenEs = (left, ends, tz) => (left > 12 * 60 * MIN ? `mañana alrededor de las ${localTime(ends, tz)}` : `hoy alrededor de las ${localTime(ends, tz)}`);
 
@@ -487,6 +488,18 @@ export async function acknowledge(row, token, now = Date.now()) {
   return null;
 }
 
+/** A pill reminder's "Taken": the new state and the pill, or null when the token is not one. */
+export async function pillAnswer(row, token, now = Date.now()) {
+  if (!/^[0-9a-f]{32}$/.test(String(token || ''))) return null;
+  const hash = await sha256(token);
+  const state = structuredClone(row.state || {});
+  const key = Object.keys(state._pill || {}).find((k) => state._pill[k].hash === hash);
+  if (!key) return null;
+  const p = state._pill[key];
+  state._pill[key] = { at: p.at, taken: true };
+  return { state, pill: { name: p.name, pid: p.pid, t: now } };
+}
+
 /** "I'm OK" from a phone that may log (the bedside screen): every open low and Low soon warning. */
 export function acknowledgeAll(row, now = Date.now()) {
   const state = structuredClone(row.state || {});
@@ -596,7 +609,7 @@ export function alertFanOut(env, row, { push = null, telegram = null, webpush = 
  * Missed-dose reminders (nudges.js) and supplies running low (supplies.js), after each check.
  * They go to the owner only and never block the alerts. Changes `state` in place.
  */
-export async function reminders(row, people, state, send, { doses = null, supplies = null, now = Date.now() } = {}) {
+export async function reminders(row, people, state, send, { doses = null, supplies = null, checks = null, ackUrl = null, now = Date.now() } = {}) {
   const cfg = { ...NIGHT_DEFAULTS, ...row };
   const sent = [];
   if (!cfg.enabled || !people.length) return sent;
@@ -631,6 +644,39 @@ export async function reminders(row, people, state, send, { doses = null, suppli
     }
     for (const k of Object.keys(state._supply)) if (!rows.some((r) => `${r.pid}:${r.item}` === k)) delete state._supply[k];
   }
+  // Pills (not insulin): an hour after each usual time (set in su94r Mini, or learned from 14 days
+  // of logs), when none was logged since two hours before it, a reminder with "Taken" (that logs
+  // it). Once per time and day, until 4 hours after; not in the night hours unless the time is.
+  if (checks?.ready && ackUrl && (cfg.meds || []).length) {
+    const pid = cfg.meds_pid && people.some((x) => x.pid === cfg.meds_pid) ? cfg.meds_pid : people[0].pid;
+    const p = people.find((x) => x.pid === pid);
+    const logs = await checks.between(pid, now - 15 * 24 * 60 * MIN, now + MIN, ['med']);
+    const minuteNow = (() => { const h = localHour(now, cfg.time_zone); return h * 60 + new Date(now).getUTCMinutes(); })();
+    const today = dayIn(now, cfg.time_zone);
+    state._pill = Object.fromEntries(Object.entries(state._pill || {}).filter(([, v]) => now - v.at < 2 * 24 * 60 * MIN));
+    const asleepNow = hourIn(localHour(now, cfg.time_zone), cfg.night_start, cfg.night_end);
+    for (const pt of pillTimes(cfg.meds, logs, { tz: cfg.time_zone, now })) {
+      const key = `${today}|${pt.name}|${pt.minute}`;
+      const late = minuteNow - pt.minute;
+      if (state._pill[key] || late < 60 || late > 240) continue;
+      if (asleepNow && !hourIn(Math.floor(pt.minute / 60), cfg.night_start, cfg.night_end)) continue;
+      const dueAt = now - late * MIN;
+      if (logs.some((l) => sameMed(l.label, pt.name) && l.t >= dueAt - 2 * 60 * MIN)) { state._pill[key] = { at: now, taken: true }; continue; }
+      const token = randomToken(16);
+      state._pill[key] = { at: now, hash: await sha256(token), name: pt.name, pid };
+      const when = localTime(dueAt, cfg.time_zone);
+      const pre = many && p ? `${p.firstName || p.name}: ` : '';
+      try {
+        await send(cfg.self_topic, {
+          title: `${pre}Pill: ${pt.name}`, message: `Your ${when} ${pt.name} is not logged yet. Tap "Taken" if you took it.`, priority: 3, tags: ['pill'],
+          actions: [{ action: 'http', label: 'Taken', url: ackUrl(token), method: 'POST', clear: true }],
+          es: { title: `${pre}Pastilla: ${pt.name}`, message: `Tu ${pt.name} de las ${when} todavía no está registrada. Toca "Tomada" si la tomaste.` },
+        });
+        sent.push({ label: 'pill', ok: true });
+      } catch (e) { sent.push({ label: 'pill', ok: false, error: e.message }); }
+    }
+  }
+
   // Sick day: a check every 4 hours while awake, every 2 while above 250 mg/dL. It describes;
   // the sick-day plan is the doctor's.
   if (activeMode(cfg, now) === 'sick') {
@@ -641,19 +687,25 @@ export async function reminders(row, people, state, send, { doses = null, suppli
       const high = Boolean(l && l.mg >= SICK_KETONE_MGDL);
       if (now - (state._sick[p.pid] || 0) < (high ? 2 : 4) * 60 * MIN) continue;
       state._sick[p.pid] = now;
+      // The last ketone result of the day, if one was logged.
+      let k = null;
+      try { if (checks?.ready) k = (await checks.between(p.pid, now - 24 * 60 * MIN, now + MIN, ['ketone'])).at(-1) || null; } catch { k = null; }
+      const kv = k ? (k.unit === 'urine' ? `${k.label} (urine)` : `${k.value} mmol/L`) : null;
+      const kLine = k ? ` Last ketones: ${kv} at ${localTime(k.t, cfg.time_zone)}${ketoneLevel(k) === 'normal' ? '' : `, ${ketoneLevel(k)}`}.` : ' Log the ketone result in the app.';
+      const kLineEs = k ? ` Últimas cetonas: ${kv.replace('urine', 'orina')} a las ${localTime(k.t, cfg.time_zone)}${{ normal: '', raised: ', elevadas', high: ', altas', urgent: ', muy altas' }[ketoneLevel(k)]}.` : ' Registra el resultado de cetonas en la app.';
       if (high) {
-        await say(p, `Sick day: ${fmt(p, l.mg)}, check ketones`, 'Above 250 mg/dL while sick: a ketone check is due now. Drink fluids and follow your sick-day plan. Call your doctor if ketones are moderate or high, or you cannot keep fluids down.', 'thermometer', 'sick',
-          { title: `Día de enfermedad: ${fmt(p, l.mg)}, mide cetonas`, message: 'Por encima de 250 mg/dL estando enfermo: toca medir cetonas ahora. Toma líquidos y sigue tu plan para días de enfermedad. Llama a tu médico si las cetonas están moderadas o altas, o si no puedes retener líquidos.' });
+        await say(p, `Sick day: ${fmt(p, l.mg)}, check ketones`, `Above 250 mg/dL while sick: a ketone check is due now. Drink fluids and follow your sick-day plan. Call your doctor if ketones are moderate or high, or you cannot keep fluids down.${kLine}`, 'thermometer', 'sick',
+          { title: `Día de enfermedad: ${fmt(p, l.mg)}, mide cetonas`, message: `Por encima de 250 mg/dL estando enfermo: toca medir cetonas ahora. Toma líquidos y sigue tu plan para días de enfermedad. Llama a tu médico si las cetonas están moderadas o altas, o si no puedes retener líquidos.${kLineEs}` });
       } else {
-        await say(p, `Sick day check${l ? `: ${fmt(p, l.mg)}` : ''}`, 'Time for the 4-hour sick-day check: ketones, fluids, and your sick-day plan.', 'thermometer', 'sick',
-          { title: `Revisión de día de enfermedad${l ? `: ${fmt(p, l.mg)}` : ''}`, message: 'Toca la revisión de cada 4 horas: cetonas, líquidos y tu plan para días de enfermedad.' });
+        await say(p, `Sick day check${l ? `: ${fmt(p, l.mg)}` : ''}`, `Time for the 4-hour sick-day check: ketones, fluids, and your sick-day plan.${kLine}`, 'thermometer', 'sick',
+          { title: `Revisión de día de enfermedad${l ? `: ${fmt(p, l.mg)}` : ''}`, message: `Toca la revisión de cada 4 horas: cetonas, líquidos y tu plan para días de enfermedad.${kLineEs}` });
       }
     }
   } else if (state._sick) delete state._sick;
   return sent;
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, dial = null, counts = null, now = () => Date.now() }) {
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, dial = null, counts = null, checks = null, now = () => Date.now() }) {
   if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test', 'night/drill', 'night/coverage'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const sendFor = (row) => {
@@ -670,7 +722,13 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     if (!state) {
       // Not a low: maybe a drill (coverage.js).
       const d = await drillAnswer(row, url.searchParams.get('t'), now());
-      if (!d) return json({ error: 'unknown or used' }, 404);
+      if (!d) {
+        const pa = await pillAnswer(row, url.searchParams.get('t'), now());
+        if (!pa) return json({ error: 'unknown or used' }, 404);
+        await store.patch({ state: pa.state });
+        if (checks?.ready) await checks.add([{ id: `pill-${randomToken(8)}`, pid: pa.pill.pid, t: new Date(pa.pill.t).toISOString(), kind: 'med', value: null, unit: '', label: pa.pill.name, by: 'reminder', source: 'reminder' }]).catch(() => {});
+        return json({ ok: true, pill: pa.pill.name, message: `Logged: ${pa.pill.name}.` });
+      }
       await store.patch({ drill: d.drill });
       return json({ ok: true, drill: d.via, message: 'Drill: this alert reached you.' });
     }
@@ -688,7 +746,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     try { people = (await snapshot()).people || []; } catch (e) { error = { code: e.code || 'error', message: String(e.message || e).slice(0, 200) }; }
     const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}`, ring, dial });
     if (!error) {
-      try { result.sent.push(...await reminders(row, people, result.state, sendFor(row), { doses, supplies, now: now() })); } catch (e) { result.sent.push({ label: 'reminders', ok: false, error: String(e.message || e).slice(0, 120) }); }
+      try { result.sent.push(...await reminders(row, people, result.state, sendFor(row), { doses, supplies, checks, ackUrl: (t) => `${ackBase}?t=${t}`, now: now() })); } catch (e) { result.sent.push({ label: 'reminders', ok: false, error: String(e.message || e).slice(0, 120) }); }
     }
     // Keep the history on the server (history.js), and trim it to 90 days once a day.
     if (history?.ready && people.length) {

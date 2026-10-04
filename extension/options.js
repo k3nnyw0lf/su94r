@@ -289,14 +289,37 @@ function renderMeds(s) {
     unit.replaceChildren(...MED_UNITS.map((u) => new Option(u, u, false, u === med.unit)));
     unit.disabled = Boolean(med.isInsulin);
     unit.onchange = () => updateMed(i, { unit: unit.value });
+    const times = document.createElement('input');
+    times.type = 'text';
+    times.className = 'times';
+    times.placeholder = med.isInsulin ? '' : 'times, e.g. 8:00, 20:00';
+    times.value = (med.times || []).join(', ');
+    times.title = 'When you usually take it: your su94r server reminds you an hour later if it is not logged';
+    times.hidden = Boolean(med.isInsulin);
+    times.onchange = () => updateMed(i, { times: parseTimes(times.value) });
     const rm = document.createElement('button');
     rm.type = 'button';
     rm.className = 'ghost';
     rm.textContent = 'Remove';
     rm.onclick = () => updateMed(i, null);
-    li.append(name, dose, unit, rm);
+    li.append(name, dose, unit, times, rm);
     return li;
   }));
+}
+
+/** "8, 8:30pm, 20:15" → ['08:00', '20:30', '20:15'] (at most 6). */
+function parseTimes(text) {
+  const out = [];
+  for (const part of String(text || '').toLowerCase().split(/[,;]+|\s{2,}/)) {
+    const m = /^\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm|a|p)?\s*$/.exec(part);
+    if (!m) continue;
+    let h = Number(m[1]); const min = Number(m[2] || 0);
+    if (m[3] && m[3].startsWith('p') && h < 12) h += 12;
+    if (m[3] && m[3].startsWith('a') && h === 12) h = 0;
+    if (h > 23 || min > 59) continue;
+    out.push(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+  }
+  return [...new Set(out)].slice(0, 6);
 }
 
 async function updateMed(index, patch) {

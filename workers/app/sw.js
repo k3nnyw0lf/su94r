@@ -36,7 +36,7 @@ self.addEventListener('push', (e) => {
     badge: '/app/icon-192.png',
     vibrate: d.urgent ? [500, 200, 500, 200, 900] : [200, 100, 200],
     data: { ack: d.ack || null },
-    actions: d.ack ? [{ action: 'ok', title: "I'm OK" }] : [],
+    actions: d.ack ? [{ action: 'ok', title: d.ackLabel || "I'm OK" }] : [],
   }));
 });
 

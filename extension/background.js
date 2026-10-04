@@ -4,14 +4,14 @@ import { saveReadings, loadReadings, wholeSeries, putRecords, archivedPatients, 
 import { ptKey, learnedKey, allPatients, firstName, isDemo } from './store.js';
 import { learn, LEARN_DAYS, forecast, trustworthy, trustedHorizon } from './learner.js';
 import { getSamples, putSamples, preferOneSource, firstSample } from './vault.js';
-import { getToken, saveMonth, readAllMonths, monthOf, monthRange, DRIVE_SCOPES } from './google.js';
+import { getToken, saveMonth, readAllMonths, monthOf, monthRange, DRIVE_SCOPES, saveBlob } from './google.js';
 import { RAPID_PROFILES } from './insulin.js';
 import {
   deviceId, heartbeat, pushEvents, mergeDays, changedDays, syncedDays, pruneOld, tombstoned, utcDay, KEEP_DAYS,
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport, rotateKey, rotateKeyDone, parseScreenLink, nightCoverage } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport, rotateKey, rotateKeyDone, parseScreenLink, nightCoverage, serverExport } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { findPatterns } from './patterns.js';
 import { parseBody } from './vault-import.js';
@@ -152,6 +152,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) copyDosesOnce().catch(() => {});
     if (!LEGACY) rotateServerKey().catch(() => {});
     if (!LEGACY) checkReach().catch(() => {});
+    if (!LEGACY) serverBackup().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -870,6 +871,29 @@ async function autoConnect() {
   }
 }
 
+// ---- the server's data, a CSV a month in Google Drive (with the Drive copy on) ----
+// The month just ended, once, early in the next month; this month again once a week. The server
+// keeps readings 90 days, so these files are the long-term copy. Files: su94r-server-YYYY-MM.csv.
+async function serverBackup() {
+  const settings = await getSettings();
+  if (!settings.driveBackup || !settings.screenLink) return;
+  const { serverBackupAt = 0, serverBackupMonth = '' } = await local.get(['serverBackupAt', 'serverBackupMonth']);
+  const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const now = new Date();
+  const thisStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const jobs = [];
+  if (serverBackupMonth !== ym(prevStart)) jobs.push([prevStart, thisStart]);
+  if (Date.now() - serverBackupAt > 7 * 864e5) jobs.push([thisStart, now]);
+  if (!jobs.length) return;
+  const token = await getToken(DRIVE_SCOPES, { interactive: false });
+  for (const [from, to] of jobs) {
+    const csv = await serverExport(settings.screenLink, from.getTime(), to.getTime());
+    await saveBlob(token, `su94r-server-${ym(from)}.csv`, new Blob([csv], { type: 'text/csv' }), 'text/csv');
+  }
+  await local.set({ serverBackupAt: Date.now(), ...(jobs.some(([f]) => f === prevStart) ? { serverBackupMonth: ym(prevStart) } : {}) });
+}
+
 // ---- do low alerts reach anyone? (night/coverage on the server) ----
 // Every 30 minutes: when no phone or chat would ring for a low, say so on this computer (once a
 // day); and after a night with lows nobody answered, say that too (once per morning).
@@ -1138,8 +1162,17 @@ async function syncVoice(settings) {
     // Which rapid insulin this is set to (the phone app's active insulin uses its curve), when it changes.
     const { rapidSentAs } = await local.get('rapidSentAs');
     const rapid = settings.rapidInsulin && settings.rapidInsulin !== rapidSentAs ? settings.rapidInsulin : undefined;
-    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed, await currentForecasts(settings).catch(() => []), rapid);
+    // The medicine list (with the times set for each) and the pills logged here in the last two
+    // days, when either changed: the server reminds about pills with every computer off.
+    const { events: all = [], medSig = '' } = await local.get(['events', 'medSig']);
+    const medList = (settings.meds || []).map((m) => ({ name: m.short || m.display || m.name, isInsulin: Boolean(m.isInsulin), times: m.times || [] }));
+    const medsTaken = all.filter((e) => e.type === 'med' && e.medName && e.t >= Date.now() - 50 * 3600e3 && !isDemo(e.p))
+      .map((e) => ({ id: e.id, p: e.p, t: e.t, name: e.medName, amount: e.amount ?? null, unit: e.unit || '' }));
+    const sig = JSON.stringify([medList, medsTaken.map((m) => m.id)]);
+    const extra = sig !== medSig ? { medList, medsTaken, medsPid: settings.vaultOwner || null } : {};
+    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed, await currentForecasts(settings).catch(() => []), rapid, extra);
     if (rapid) await local.set({ rapidSentAs: rapid });
+    if (sig !== medSig) await local.set({ medSig: sig });
     await serial(async () => {
       const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
       const sent = new Set(out.removed);

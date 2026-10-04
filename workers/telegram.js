@@ -27,7 +27,7 @@
 
 import { drillAnswer } from './coverage.js';
 import { sha256, randomToken } from './screens.js';
-import { acknowledge, inLanguage } from './night.js';
+import { acknowledge, inLanguage, pillAnswer } from './night.js';
 import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal, labelEs } from './tglog.js';
 import { asMarkers } from './doses.js';
 import { doubleDoseWarning } from '../extension/insulin.js';
@@ -136,7 +136,7 @@ export async function telegramAlert(store, role, msg, { api = tgApi } = {}) {
       await api(bot.token, 'sendMessage', {
         chat_id: c.chat_id,
         text: [m.title, m.message].filter(Boolean).join('\n'),
-        ...(ack ? { reply_markup: { inline_keyboard: [[{ text: c.lang === 'es' ? 'Estoy bien' : "I'm OK", callback_data: `ack:${ack}` }]] } } : {}),
+        ...(ack ? { reply_markup: { inline_keyboard: [[{ text: m.actions?.[0]?.label || (c.lang === 'es' ? 'Estoy bien' : "I'm OK"), callback_data: `ack:${ack}` }]] } } : {}),
         disable_web_page_preview: true,
       });
       n++;
@@ -164,7 +164,7 @@ function sugarText(snap, lang = 'en') {
 }
 
 /** Handles Telegram's own calls (the bot's webhook). */
-async function webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history }) {
+async function webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history, checks = null }) {
   const bot = await store.bot();
   if (!bot?.token || !bot.webhook_secret) return { status: 404 };
   if (request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== bot.webhook_secret) return { status: 401 };
@@ -208,8 +208,14 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
       const row = await night.get();
       const state = await acknowledge(row, m[1]);
       const drill = state ? null : await drillAnswer(row, m[1]);
+      const pill = state || drill ? null : await pillAnswer(row, m[1]);
       if (state) { await night.patch({ state }); text = T('Got it. Reminders for this low stop; a severe low still tells you once.', 'Entendido. Los recordatorios de esta baja paran; una baja severa avisa una vez más.'); }
       else if (drill) { await night.patch({ drill: drill.drill }); text = T('Drill: this alert reached you.', 'Simulacro: esta alerta te llegó.'); }
+      else if (pill) {
+        await night.patch({ state: pill.state });
+        if (checks?.ready) await checks.add([{ id: `pill-${randomToken(8)}`, pid: pill.pill.pid, t: new Date().toISOString(), kind: 'med', value: null, unit: '', label: pill.pill.name, by: 'Telegram', source: 'reminder' }]).catch(() => {});
+        text = T(`Logged: ${pill.pill.name}.`, `Registrada: ${pill.pill.name}.`);
+      }
       else text = T('That alert was already answered, or the low is over.', 'Esa alerta ya se respondió, o la baja terminó.');
       await api(bot.token, 'editMessageReplyMarkup', { chat_id: chatId, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }
@@ -318,13 +324,13 @@ async function firstPerson(snapshot, doses) {
   try { return (await doses.recent(null))[0]?.pid || null; } catch { return null; }
 }
 
-export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi, doses = null, meal = null, fetchImpl = (...a) => fetch(...a), history = null }) {
+export async function telegramRoute(path, request, url, env, { store, json, keyOk, snapshot, night, api = tgApi, doses = null, meal = null, fetchImpl = (...a) => fetch(...a), history = null, checks = null }) {
   if (path !== 'tg' && !path.startsWith('tg/')) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
 
   if (path === 'tg/webhook') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
-    const r = await webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history });
+    const r = await webhook(request, store, { api, snapshot, night, doses, meal, fetchImpl, history, checks });
     return json({ ok: r.status === 200 }, r.status);
   }
 

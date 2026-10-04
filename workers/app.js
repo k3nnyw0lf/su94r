@@ -35,6 +35,10 @@
 //   GET  app/trend?pid=             GMI by month, lab A1c results, the goal and streaks (daily.js)
 //   GET  app/coverage               (owner's phone) what could ring for a low (coverage.js); POST app/drill
 //   GET  app/drive?pid=             "can I drive?" (drive.js)
+//   POST app/check                  { kind: meter|ketone|weight|exercise|med, value, unit, label, at, cid } (checks.js)
+//   GET  app/checks?pid=&days=      those entries; POST app/checks/remove { id }
+//   GET  app/meds                   the pills su94r Mini lists (for logging them here)
+//   GET  app/export?pid=&days=90    everything as CSV (export.js)
 //   POST app/goal                   (owner's phone) { tir } the time-in-range goal, 50 to 95
 //   GET  app/appointments?pid=      doctor visits ahead (calendar.js); POST …/save, …/remove
 //   GET  app/calendar               (owner's phone) the calendar feed link; POST …/new, …/remove
@@ -64,6 +68,8 @@ import { months as monthsOf, streaks, summarize, dayIn } from './daily.js';
 import { appointmentRow, calendarManage } from './calendar.js';
 import { coverageOf, runDrill } from './coverage.js';
 import { driveCheck } from './drive.js';
+import { checkRow, sensorVsMeter, ketoneLevel, KETONE_WORDS } from './checks.js';
+import { exportCsv } from './export.js';
 import { rateOf } from './night.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
@@ -72,7 +78,7 @@ export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/re
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
   'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
   'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove',
-  'app/coverage', 'app/drill', 'app/drive']);
+  'app/coverage', 'app/drill', 'app/drive', 'app/check', 'app/checks', 'app/checks/remove', 'app/meds', 'app/export']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -80,7 +86,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, daily = null, appointments = null, counts = null, drill = null, ackBase = '', callsReady = false, fetchImpl, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, daily = null, appointments = null, counts = null, drill = null, ackBase = '', callsReady = false, checks = null, fetchImpl, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -124,7 +130,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
     let tz;
     try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
-    return json(await reportFor(pid, { history, doses, snapshot, labs, notes, daily, tz, now, lang: es ? 'es' : 'en' }));
+    return json(await reportFor(pid, { history, doses, snapshot, labs, notes, daily, checks, tz, now, lang: es ? 'es' : 'en' }));
   }
 
   if (path === 'app/recent') {
@@ -156,6 +162,9 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       if (tr && now - tr.t < 3 * 60 * MIN) treating[p.pid] = { t: tr.t, grams: tr.grams, by: tr.by || '', recheckAt: tr.recheckAt, done: Boolean(tr.done) };
     }
     const plan = { grams: row?.treat_grams ?? NIGHT_DEFAULTS.treat_grams, minutes: row?.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, text: row?.treat_plan || '' };
+    let recentChecks = [];
+    try { if (checks?.ready) for (const p of l) recentChecks.push(...await checks.between(p.pid, now - 2 * DAY, now + MIN)); } catch { recentChecks = []; }
+    const chkMine = `chk-${screen.id.slice(0, 8)}-`;
     let recentNotes = [];
     try { if (notes?.ready) for (const p of l) recentNotes.push(...await notes.between(p.pid, now - 2 * DAY, now + MIN)); } catch { recentNotes = []; }
     const noteMine = `note-${screen.id.slice(0, 8)}-`;
@@ -171,6 +180,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS, edit: canEdit(e) })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
       mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
       notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob,
+      checks: recentChecks.map((c) => ({ ...c, mine: canLog && (c.id.startsWith(chkMine) || owner) })),
       morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, at: now });
   }
 
@@ -235,6 +245,30 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     try { if (notes?.ready) noted = await notes.between(pid, now - 14 * DAY, now + MIN); } catch { /* without notes */ }
     const mmol = person.units === 'mmol/L';
     return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en', notes: noted }));
+  }
+
+  if (path === 'app/checks' && request.method === 'GET') {
+    if (!checks?.ready) return json({ checks: [] });
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const days = Math.min(365, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 14)));
+    const kinds = (url.searchParams.get('kinds') || '').split(',').filter(Boolean);
+    return json({ checks: pid ? await checks.between(pid, now - days * DAY, now + MIN, kinds.length ? kinds : null) : [] });
+  }
+
+  if (path === 'app/meds') {
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* none */ }
+    return json({ meds: (row?.meds || []).filter((m) => !m.isInsulin).map((m) => ({ name: m.name, times: m.times || [] })) });
+  }
+
+  if (path === 'app/export') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const p = (await people()).find((x) => x.pid === pid) || {};
+    const days = Math.min(90, Math.max(1, Math.round(Number(url.searchParams.get('days')) || 90)));
+    let tz;
+    try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
+    const csv = await exportCsv(pid, { from: now - days * DAY, to: now + MIN, history, doses, notes, checks, tz, units: p.units });
+    return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="su94r-${new Date(now).toISOString().slice(0, 10)}.csv"`, 'Cache-Control': 'no-store' } });
   }
 
   if (path === 'app/drive') {
@@ -420,6 +454,48 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ ok: true, id: row.id, text: T('Note saved.', 'Nota guardada.') });
   }
 
+  if (path === 'app/check' || path === 'app/checks/remove') {
+    if (!checks?.ready) return json({ ok: false, error: 'Logging these is not set up on the server.' }, 503);
+    if (path === 'app/checks/remove') {
+      const id = String(body.id || '');
+      const c = /^[\w-]{1,80}$/.test(id) ? await checks.get(id) : null;
+      if (!c) return json({ ok: false, error: T('That entry is already gone.', 'Ese registro ya no está.') }, 404);
+      if (!owner && !id.startsWith(`chk-${screen.id.slice(0, 8)}-`)) return json({ ok: false, error: T('Only the phone that logged it, or the owner\'s phone, can remove it.', 'Solo el teléfono que lo registró, o el del dueño, lo puede quitar.') }, 403);
+      await checks.remove([id]);
+      return json({ ok: true });
+    }
+    const pid = await pidFor(String(body.pid || ''));
+    if (!pid) return json({ ok: false, error: 'No one to log for yet.' }, 400);
+    const t = atOk ? Number(body.at) : now - Math.round(Number(body.minutesAgo) || 0) * MIN;
+    const row = checkRow({ id: `chk-${screen.id.slice(0, 8)}-${stamp}`, pid, t, kind: String(body.kind || ''), value: body.value, unit: body.unit, label: body.label, by: screen.name }, now);
+    if (row.error) return json({ ok: false, error: es ? (CHECK_ES[row.error] || row.error) : row.error }, 400);
+    await checks.add([row]);
+    const p = (await people()).find((x) => x.pid === pid) || {};
+    const mmol = p.units === 'mmol/L';
+    const g = (mg) => (mmol ? `${(mg / 18.0182).toFixed(1)} mmol/L` : `${Math.round(mg)} mg/dL`);
+    let text = T('Logged.', 'Registrado.'), level = null, sensor = null;
+    if (row.kind === 'meter') {
+      try { if (history?.ready) sensor = sensorVsMeter(row.value, t, await history.range(pid, t - 15 * MIN, t + 15 * MIN)); } catch { /* without */ }
+      text = !sensor ? T(`Logged ${g(row.value)}.`, `Registrado: ${g(row.value)}.`)
+        : sensor.off ? T(`Logged ${g(row.value)}. The sensor read ${g(sensor.cgm)} then, ${Math.abs(sensor.pct)}% ${sensor.diff > 0 ? 'higher' : 'lower'}: more than a sensor usually strays. Check again in an hour; if it stays off, trust the meter and think about changing the sensor.`, `Registrado: ${g(row.value)}. El sensor marcaba ${g(sensor.cgm)}, ${Math.abs(sensor.pct)}% ${sensor.diff > 0 ? 'más alto' : 'más bajo'}: más de lo que un sensor suele desviarse. Mide otra vez en una hora; si sigue desviado, confía en el glucómetro y piensa en cambiar el sensor.`)
+          : T(`Logged ${g(row.value)}. The sensor read ${g(sensor.cgm)}: within 20%.`, `Registrado: ${g(row.value)}. El sensor marcaba ${g(sensor.cgm)}: dentro del 20%.`);
+    } else if (row.kind === 'ketone') {
+      level = ketoneLevel(row);
+      text = `${row.unit === 'urine' ? T(`Logged urine ketones: ${row.label}.`, `Registradas cetonas en orina: ${row.label}.`) : T(`Logged ${row.value} mmol/L.`, `Registrado: ${row.value} mmol/L.`)} ${KETONE_WORDS[level][es ? 1 : 0]} ${T('(Diabetes UK guidance; your sick-day plan comes first.)', '(Guía de Diabetes UK; tu plan para días de enfermedad va primero.)')}`;
+      // High ketones: the owner and the family hear it (a risk of DKA).
+      if ((level === 'high' || level === 'urgent') && night?.ready && notify) {
+        const nrow = await night.get().catch(() => null);
+        const who = p.firstName || p.name || '';
+        const v = row.unit === 'urine' ? row.label : `${row.value} mmol/L`;
+        const msg = { title: `${who ? `${who}: ` : ''}Ketones ${level === 'urgent' ? 'very high' : 'high'}: ${v}`, message: KETONE_WORDS[level][0], priority: 5, tags: ['rotating_light'], es: { title: `${who ? `${who}: ` : ''}Cetonas ${level === 'urgent' ? 'muy altas' : 'altas'}: ${v}`, message: KETONE_WORDS[level][1] } };
+        if (nrow) await Promise.allSettled([notify(nrow, 'me', msg), notify(nrow, 'family', msg)]);
+      }
+    } else if (row.kind === 'weight') text = T(`Logged ${row.value} kg (${Math.round(row.value / 0.45359237 * 10) / 10} lb).`, `Registrado: ${row.value} kg (${Math.round(row.value / 0.45359237 * 10) / 10} lb).`);
+    else if (row.kind === 'exercise') text = T(`Logged ${row.value} min of ${row.label}.`, `Registrado: ${row.value} min de ${ACT_ES[row.label] || row.label}.`);
+    else text = T(`Logged ${row.label}.`, `Registrada: ${row.label}.`);
+    return json({ ok: true, id: row.id, text, level, sensor });
+  }
+
   if (path === 'app/appointments/save' || path === 'app/appointments/remove') {
     if (!appointments?.ready) return json({ ok: false, error: 'Appointments are not set up on the server.' }, 503);
     const pid = await pidFor(String(body.pid || ''));
@@ -551,6 +627,13 @@ export async function appRoute(path, request, url, env, { screens, history, dose
 const whatEn = (kind, amount) => (kind === 'carbs' ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`);
 const KIND_ES = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' };
 const whatEs = (kind, amount) => (kind === 'carbs' ? `${amount} g de carbohidratos` : `${amount} ${amount === 1 ? 'unidad' : 'unidades'} de insulina ${KIND_ES[kind]}`);
+const ACT_ES = { walk: 'caminata', run: 'carrera', bike: 'bicicleta', swim: 'natación', gym: 'gimnasio', sport: 'deporte', yoga: 'yoga', other: 'ejercicio' };
+const CHECK_ES = {
+  'Pick what to log.': 'Elige qué registrar.', 'The time must be within the last 24 hours.': 'La hora debe estar dentro de las últimas 24 horas.',
+  'A meter reading is between 20 and 600 mg/dL (1.1 to 33.3 mmol/L).': 'Una lectura del glucómetro está entre 20 y 600 mg/dL (1.1 a 33.3 mmol/L).',
+  'Blood ketones are between 0 and 8 mmol/L.': 'Las cetonas en sangre están entre 0 y 8 mmol/L.', 'That weight does not look right.': 'Ese peso no parece correcto.',
+  'Exercise is between 1 and 600 minutes.': 'El ejercicio es de 1 a 600 minutos.', 'Pick the medicine.': 'Elige el medicamento.',
+};
 const VISIT_ES = {
   'Pick the date and time of the visit.': 'Elige la fecha y la hora de la cita.',
   'That date does not look right.': 'Esa fecha no parece correcta.',

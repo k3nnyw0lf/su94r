@@ -55,6 +55,8 @@ import { dailyStore } from './daily.js';
 import { appointmentStore, calendarFeed } from './calendar.js';
 import { supplyStatus } from './supplies.js';
 import { dialer, callRoute, telnyxReady } from './calls.js';
+import { checkStore } from './checks.js';
+import { exportCsv } from './export.js';
 import { drillSenders } from './night.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
@@ -325,6 +327,26 @@ async function voiceSync(request, url, env, deps) {
     const n = deps.night || nightStore(env);
     if (n.ready) await n.patch({ rapid_insulin: body.rapidInsulin }).catch(() => {});
   }
+  if (Array.isArray(body?.medList)) {
+    const n = deps.night || nightStore(env);
+    const meds = body.medList.slice(0, 20).map((m) => ({ name: String(m?.name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60), isInsulin: m?.isInsulin === true, times: (Array.isArray(m?.times) ? m.times : []).map(String).filter((x) => /^\d{1,2}:\d{2}$/.test(x)).slice(0, 6) })).filter((m) => m.name);
+    if (n.ready) await n.patch({ meds, meds_pid: /^[\w-]{1,80}$/.test(String(body.medsPid || '')) ? String(body.medsPid) : null }).catch(() => {});
+  }
+  if (Array.isArray(body?.medsTaken)) {
+    const cs = deps.checks || checkStore(env);
+    if (cs.ready) {
+      const list = body.medsTaken.filter((m) => m && /^[\w-]{1,70}$/.test(String(m.id)) && m.p && Number.isFinite(m.t) && now - m.t < WINDOW_MS && m.name).slice(0, 200);
+      await cs.add(list.map((m) => ({ id: `mini-${m.id}`, pid: String(m.p), t: new Date(m.t).toISOString(), kind: 'med', value: Number(m.amount) > 0 ? Number(m.amount) : null, unit: String(m.unit || '').slice(0, 12), label: String(m.name).slice(0, 60), by: 'su94r Mini', source: 'extension' }))).catch(() => {});
+      // The ones deleted on the computer since the last list.
+      const keep = new Set(list.map((m) => `mini-${m.id}`));
+      const pids = new Set([...list.map((m) => String(m.p)), ...(body.medsPid ? [String(body.medsPid)] : [])]);
+      for (const pid of pids) {
+        const had = await cs.between(pid, now - WINDOW_MS, now + 60e3, ['med']).catch(() => []);
+        const gone = had.filter((c) => c.source === 'extension' && !keep.has(c.id)).map((c) => c.id);
+        if (gone.length) await cs.remove(gone).catch(() => {});
+      }
+    }
+  }
   const removed = (Array.isArray(body?.removed) ? body.removed : []).slice(0, 500);
   if (removed.length) await store.markDeleted(removed);
   // The learner's estimates ride along (forecast.js); a failure here never blocks the doses.
@@ -362,7 +384,7 @@ async function screensRoute(path, request, url, env, deps) {
     const screen = await screenFor(request, store, '');
     let tz;
     try { const n = deps.night || nightStore(env); if (n.ready) tz = (await n.get()).time_zone; } catch { /* default */ }
-    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), notes: deps.notes || noteStore(env), daily: deps.daily || dailyStore(env), tz, snapshot: () => snapshot(env) });
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), notes: deps.notes || noteStore(env), daily: deps.daily || dailyStore(env), checks: deps.checks || checkStore(env), tz, snapshot: () => snapshot(env) });
     return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {
@@ -471,7 +493,7 @@ export async function handleCgm(path, request, env, deps = {}) {
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
         night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env), labs: deps.labs || labStore(env),
         meals: deps.meals || mealStore(env), notes: deps.notes || noteStore(env), fetchImpl: deps.fetchImpl,
-        counts: reachCounts(env, deps), callsReady: telnyxReady(env),
+        counts: reachCounts(env, deps), callsReady: telnyxReady(env), checks: deps.checks || checkStore(env),
         drill: (row) => drillSenders(env, row, { push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }), webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)) }),
         ackBase: `${fnBase(env)}/night/ack`,
         daily: deps.daily || dailyStore(env), appointments: deps.appointments || appointmentStore(env),
@@ -490,6 +512,18 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (connect) return connect;
     const rotate = await rotateRoute(path, request, url, { screens: deps.screens || screenStore(env), json });
     if (rotate) return rotate;
+    if (path === 'export') {
+      if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
+      const snap = await snapshot(env).catch(() => ({ people: [] }));
+      const p = snap.people.find((x) => x.pid === url.searchParams.get('pid')) || snap.people[0];
+      if (!p) return json({ error: 'no one yet' }, 404);
+      const to = Math.min(Date.now() + 60e3, Number(url.searchParams.get('to')) || Date.now() + 60e3);
+      const from = Math.max(to - 92 * 864e5, Number(url.searchParams.get('from')) || to - 31 * 864e5);
+      let tz;
+      try { const n = deps.night || nightStore(env); if (n.ready) tz = (await n.get()).time_zone; } catch { /* default */ }
+      const csv = await exportCsv(p.pid, { from, to, history: deps.history || historyStore(env), doses: deps.store || doseStore(env), notes: deps.notes || noteStore(env), checks: deps.checks || checkStore(env), tz, units: p.units });
+      return new Response(csv, { headers: { ...CORS, 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' } });
+    }
     const calls = await callRoute(path, request, url, { night: deps.night || nightStore(env), base: fnBase(env) });
     if (calls) return calls;
     if (path === 'calendar/feed') {
@@ -528,7 +562,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       webpush: deps.webpush || ((role, msg) => pushToPhones(deps.pushStore || pushStore(env), role, msg)),
       doses: deps.store || doseStore(env), supplies: deps.supplies || supplyStore(env),
       history: deps.history || historyStore(env), daily: deps.daily || dailyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
-      counts: reachCounts(env, deps), dial: deps.dial || dialer(env, { base: fnBase(env) }),
+      counts: reachCounts(env, deps), dial: deps.dial || dialer(env, { base: fnBase(env) }), checks: deps.checks || checkStore(env),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (hist) return hist;
@@ -536,7 +570,7 @@ export async function handleCgm(path, request, env, deps = {}) {
     const tg = await telegramRoute(path, request, url, env, {
       store: tgStore, json, keyOk, snapshot: () => snapshot(env), night: deps.night || nightStore(env), api: deps.tgApi,
       doses: deps.store || doseStore(env), meal: deps.meal || ((bot, dataUrl) => askMeal(env, bot, dataUrl)), fetchImpl: deps.fetchImpl,
-      history: deps.history || historyStore(env),
+      history: deps.history || historyStore(env), checks: deps.checks || checkStore(env),
     });
     if (tg) return tg;
     const ns = await nightscoutRoute(path, request, url, env, { screens: deps.screens || screenStore(env), json, keyOk, snapshot: () => snapshot(env) });
