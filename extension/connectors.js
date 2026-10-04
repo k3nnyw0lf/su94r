@@ -456,7 +456,7 @@ export const CONNECTORS = [
           });
           return h('details', {},
             h('summary', {}, 'Phone calls for unanswered lows'),
-            state(h, `When a low gets no "I'm OK" (severe: after 5 minutes; at night: after the second reminder; by day: after 20 minutes), su94r calls your number; 10 minutes later the family numbers; your number once more 15 minutes after the first call. Pressing 1 answers the low. ${v.callsReady ? (v.callEnabled ? 'On.' : 'Off.') : 'Not set up yet: it uses Telnyx (paid, about 1 cent a call plus $1 a month for the number). Kenneth adds the four SU94R_TELNYX_ secrets in Supabase (docs/tv-and-alexa.md).'}`, v.callEnabled && v.callsReady ? 'on' : ''),
+            state(h, `When a low gets no "I'm OK" (severe: after 5 minutes; at night: after the second reminder; by day: after 20 minutes), su94r calls your number; 10 minutes later the family numbers; your number once more 15 minutes after the first call. Pressing 1 answers the low. ${v.callsReady ? (v.callEnabled ? 'On.' : 'Off.') : 'Not set up yet: it uses Telnyx (paid, about 1 cent a call plus $1 a month for the number). Add the four SU94R_TELNYX_ secrets in Supabase (docs/tv-and-alexa.md).'}`, v.callEnabled && v.callsReady ? 'on' : ''),
             ...rows.map((r) => h('div', { class: 'actions' }, r.name, r.phone, r.role, r.lang)),
             h('div', { class: 'actions' },
               action(ctx, msg, 'Save the numbers', 'Saving…', () => nightSave(settings.screenLink, { callNumbers: rows.map((r) => ({ name: r.name.value.trim(), phone: r.phone.value.trim(), role: r.role.value, lang: r.lang.value })).filter((x) => x.phone) })),
