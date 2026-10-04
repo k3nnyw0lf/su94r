@@ -5,7 +5,9 @@
 // member's phone cannot log; exercise mode turns on and off; the bedside screen turns red for a
 // low and "I'm OK" stops it; the owner's emergency card saves, gets a QR picture and its page shows;
 // a typed barcode fills in the carbs and the meal becomes a favorite; a note shows on the graph; an
-// entry is changed; a dose logged with no signal waits on the phone and goes out when it is back.
+// entry is changed; a dose logged with no signal waits on the phone and goes out when it is back;
+// Now shows active insulin; History shows the goal, streaks and the months; a doctor visit reaches
+// the calendar feed.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
 import path from 'node:path';
@@ -73,7 +75,12 @@ let mealRows = [];
 const meals = { ready: true, async list() { return mealRows.slice().sort((a, b) => b.uses - a.uses); }, async use(pid, name, carbs) { const m = mealRows.find((x) => x.name.toLowerCase() === name.toLowerCase()); if (m) { m.carbs = carbs; m.uses += 1; } else mealRows.push({ id: 'm' + mealRows.length, pid, name, carbs, uses: 1 }); return name; }, async remove(pid, id) { mealRows = mealRows.filter((x) => x.id !== id); } };
 let noteRows = [];
 const notes = { ready: true, async between(pid, from, to) { return noteRows.filter((n) => !n.deleted && n.pid === pid && Date.parse(n.t) >= from && Date.parse(n.t) < to).map((n) => ({ ...n, t: Date.parse(n.t) })); }, async get(id) { const n = noteRows.find((x) => x.id === id && !x.deleted); return n ? { ...n, t: Date.parse(n.t) } : null; }, async add(row) { if (!noteRows.some((x) => x.id === row.id)) noteRows.push({ ...row }); }, async remove(id) { const n = noteRows.find((x) => x.id === id); if (n) n.deleted = true; } };
-const deps = { meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
+const dailyRows = [];
+for (let i = 75; i >= 1; i--) { const d = new Date(now - i * DAY).toISOString().slice(0, 10); dailyRows.push({ day: d, readings: 280, mean: 150 - i * 0.3, inRange: i <= 4 ? 0.82 : i === 5 ? 0.6 : 0.74, below: 0.02, above: 0.2, lows: i <= 2 ? 0 : 1 }); }
+const daily = { ready: true, async since() { return dailyRows; } };
+let visitRows = [];
+const appointments = { ready: true, async from(pid, t) { return visitRows.filter((v) => Date.parse(v.at) >= t).map((v) => ({ ...v, at: Date.parse(v.at) })); }, async add(r) { visitRows.push({ id: 'v' + visitRows.length, ...r }); }, async remove(pid, id) { visitRows = visitRows.filter((v) => v.id !== id); } };
+const deps = { daily, appointments, meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -83,7 +90,7 @@ const server = http.createServer(async (req, res) => {
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const request = new Request(url, { method: req.method, headers: req.headers, body: req.method === 'GET' ? undefined : body });
   // The proxy serves the app's own files and the meal photo; everything else is su94r-cgm.
-  const proxied = url.pathname === '/app/qr' || /^\/e\/[0-9a-f]{64}$/.test(url.pathname);
+  const proxied = url.pathname === '/app/qr' || /^\/e\/[0-9a-f]{64}$/.test(url.pathname) || /^\/cal\/[0-9a-f]{64}\.ics$/.test(url.pathname);
   const appFile = req.method === 'GET' && ['/app', '/app/', '/app/app.js', '/app/sw.js', '/app/manifest.webmanifest', '/app/icon.svg', '/app/icon-192.png', '/app/icon-512.png', '/app/apple-touch-icon.png'].includes(url.pathname);
   const r = appFile || proxied || url.pathname === '/app/meal'
     ? await proxy.fetch(request, { CGM_URL: `http://localhost:${PORT}`, AI: ai })
@@ -406,6 +413,44 @@ const sentLater = doseRows.filter((d) => d.kind === 'rapid' && d.amount === 1 &&
 checks.sentWhenBack = sentLater.length === 1 && Date.now() - sentLater[0].t > 0;
 checks.everydayFits = await p3.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
 page = p3;
+
+// Active insulin on Now; goal, streaks and months in History; the owner changes the goal.
+await page.click('#tabs button[data-tab="now"]');
+await page.waitForSelector('#main >> text=Active insulin: about');
+checks.activeInsulin = true;
+await page.waitForSelector('#main >> text=days in a row at 70%+ in range');
+checks.streakOnNow = true;
+await page.click('#tabs button[data-tab="history"]');
+await page.waitForSelector('h2:has-text("Goal: 70% in range")');
+await page.waitForSelector('h2:has-text("Month by month")');
+checks.monthsChart = (await page.$$('svg[aria-label="GMI by month and lab A1c"] circle')).length >= 2 && (await page.$$('svg[aria-label="GMI by month and lab A1c"] rect')).length === 1;
+await page.locator('h2:has-text("Goal: 70% in range")').scrollIntoViewIfNeeded();
+await page.screenshot({ path: path.join(OUT, 'app-31-goal-months.png'), fullPage: true });
+await page.click('#goalBtn');
+await page.selectOption('#goalSel', '80');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('h2:has-text("Goal: 80% in range")');
+checks.goalChanged = nightRow.goal_tir === 80;
+
+// A doctor visit, then the calendar feed has it.
+await page.click('#tabs button[data-tab="more"]');
+await page.waitForSelector('#visitAdd');
+await page.click('#visitAdd');
+await page.fill('#vTitle', 'Dr. Lee');
+await page.fill('#vPlace', 'Naples');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('#main >> text=Dr. Lee · Naples');
+await page.click('#calNew');
+await page.waitForSelector('a:has-text("Google Calendar")');
+const calLink = await page.evaluate(() => localStorage.getItem('su94rAppCal'));
+const ics = await (await fetch(calLink)).text();
+checks.calendarFeed = ics.startsWith('BEGIN:VCALENDAR') && ics.includes('SUMMARY:Dr. Lee') && ics.includes('LOCATION:Naples') && ics.includes('Change the sensor');
+// On https the feed is offered as webcal://; this test server is plain http.
+const gHref = await page.getAttribute('a:has-text("Google Calendar")', 'href');
+checks.googleLink = gHref.startsWith('https://calendar.google.com/calendar/r?cid=') && decodeURIComponent(gHref.split('cid=')[1]).endsWith(calLink.replace(/^https?:/, ''));
+checks.insightsFits = await noSideScroll();
+await page.locator('h2:has-text("Calendar")').scrollIntoViewIfNeeded();
+await page.screenshot({ path: path.join(OUT, 'app-32-calendar.png'), fullPage: true });
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

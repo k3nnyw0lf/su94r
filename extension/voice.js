@@ -34,7 +34,7 @@ async function call(link, path, { method = 'GET', body } = {}) {
 }
 
 /** Sends recent insulin markers and deletions; returns doses said to Alexa. */
-export const exchangeDoses = (link, markers, removed, forecasts = []) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts } });
+export const exchangeDoses = (link, markers, removed, forecasts = [], rapidInsulin) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts, ...(rapidInsulin ? { rapidInsulin } : {}) } });
 /** The logged insulin of the last 90 days, once (missed-dose reminders and the report learn from it). */
 export const dosesImport = (link, markers) => call(link, 'doses/import', { method: 'POST', body: { markers } });
 /** A new key for this su94r Mini; the old one keeps working until rotateKeyDone turns it off. */

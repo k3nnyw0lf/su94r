@@ -35,6 +35,7 @@ import { localHour } from '../src/lib/util/localDay.js';
 import { rowsFromSnapshot } from './history.js';
 import { missedDoseNudges } from './nudges.js';
 import { supplyStatus, supplyReminders } from './supplies.js';
+import { updateDaily, dayIn } from './daily.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -47,7 +48,7 @@ export const NIGHT_DEFAULTS = {
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
   treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
-  mode: null, mode_until: null,
+  mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null,
 };
 
 export const EXERCISE_MARGIN = 10;                 // mg/dL above the low line that "Low soon" watches in exercise mode
@@ -491,6 +492,8 @@ function settingsPatch(body, row) {
   if (ne !== undefined) out.night_end = ne;
   if (typeof body.timeZone === 'string' && TZ_OK(body.timeZone)) out.time_zone = body.timeZone;
   if (body.mode !== undefined) Object.assign(out, modeFields(body.mode, body.modeHours));
+  const goal = int(body.goalTir, 50, 95);
+  if (goal !== undefined) out.goal_tir = goal;
   return out;
 }
 
@@ -507,7 +510,7 @@ function publicView(row, base) {
     selfTopic: row.self_topic, selfUrl: topicUrl(row.self_topic),
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
     lastTickAt: row.last_tick_at, lastResult: row.last_result || null, openLows: open, signInWarnedAt: meta.authWarnAt || null,
-    mode: activeMode(row), modeUntil: activeMode(row) ? row.mode_until : null,
+    mode: activeMode(row), modeUntil: activeMode(row) ? row.mode_until : null, goalTir: row.goal_tir ?? 70,
   };
 }
 
@@ -592,7 +595,7 @@ export async function reminders(row, people, state, send, { doses = null, suppli
   return sent;
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, now = () => Date.now() }) {
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, now = () => Date.now() }) {
   if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const sendFor = (row) => {
@@ -630,6 +633,13 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
       if (!meta.prunedAt || now() - meta.prunedAt > 24 * 60 * MIN) {
         await history.prune(now()).catch(() => {});
         result.state._meta = { ...meta, prunedAt: now() };
+      }
+    }
+    // Yesterday's summary (daily.js), once a day; the first time, every day the history still has.
+    if (daily?.ready && history?.ready && people.length) {
+      const today = dayIn(now(), row.time_zone || 'America/New_York');
+      if ((result.state._meta || {}).dailyFor !== today) {
+        try { await updateDaily({ daily, history, people, tz: row.time_zone || 'America/New_York', now: now() }); result.state._meta = { ...(result.state._meta || {}), dailyFor: today }; } catch { /* next check tries again */ }
       }
     }
     const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null };

@@ -1102,7 +1102,11 @@ async function syncVoice(settings) {
         removed: [...gone],
       };
     });
-    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed, await currentForecasts(settings).catch(() => []));
+    // Which rapid insulin this is set to (the phone app's active insulin uses its curve), when it changes.
+    const { rapidSentAs } = await local.get('rapidSentAs');
+    const rapid = settings.rapidInsulin && settings.rapidInsulin !== rapidSentAs ? settings.rapidInsulin : undefined;
+    const r = await exchangeDoses(settings.screenLink, out.markers, out.removed, await currentForecasts(settings).catch(() => []), rapid);
+    if (rapid) await local.set({ rapidSentAs: rapid });
     await serial(async () => {
       const { events = [], voiceRemoved = [], syncQueue } = await local.get(['events', 'voiceRemoved', 'syncQueue']);
       const sent = new Set(out.removed);

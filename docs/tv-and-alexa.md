@@ -86,6 +86,12 @@ Each code works once, for 10 minutes. Linked phones appear with the other screen
 
 **No signal**: a dose, meal or note logged without a connection waits on the phone ("waiting to send") and goes out by itself when the phone is back online, at the time it was logged. Each carries an id made on the phone, so sending it twice saves it once; if a dose was logged elsewhere meanwhile, the double-dose question comes up first.
 
+**Active insulin** (app → Now): about how much rapid or regular insulin is still working, from every logged dose (phone, su94r Mini, Alexa, Telegram), with su94r Mini's curve for the rapid insulin it is set to (su94r Mini tells the server when that setting changes). It describes; it is never a reason to dose.
+
+**Goal and streaks, month by month** (app → History): your time-in-range goal (70% unless you change it on your own phone or in su94r Mini → Low alerts → Levels and warnings), days in a row at the goal, the best run, the last 7 days and days with no lows, and today so far; Now shows a streak of 2 days or more. **Month by month** draws the GMI of each month next to the A1c results you typed in. The readings are kept 90 days, so the night check keeps one small summary per day for years (`workers/daily.js`, table `su94r_daily`); the report and the doctor's link show the last six months too.
+
+**Calendar** (app → More): doctor visits (any phone that may log adds them), and on your own phone **Add to my calendar**: one private `.ics` link (`/cal/<token>.ics`) for Google Calendar, Apple Calendar or Outlook with sensor changes (this one and the next), refill dates, when insulin or sensors likely run out, and the visits. Calendar apps refresh it by themselves (Google every few hours). One link at a time; a new one turns the old one off. Code: `workers/calendar.js`.
+
 **Lab results** (app → Report): type in an A1c or any other result; the report and the doctor's link show the last 12 months and put the latest A1c next to the GMI. Code: `workers/labs.js`.
 
 **Supplies** (app → More): insulin and sensors on hand count down as doses are logged (pen priming is not counted) and as new sensors start; su94r reminds you by day when one runs low or a refill date is near. The app also says when the sensor ends. Code: `workers/supplies.js`.

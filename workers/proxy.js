@@ -55,7 +55,8 @@ const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest',
   '/app/supplies', '/app/supplies/save', '/app/supplies/remove', '/doses/import',
   '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/patterns', '/app/mode', '/app/ack',
   '/app/emergency', '/app/emergency/save', '/app/emergency/new', '/app/emergency/remove',
-  '/app/edit', '/app/remove', '/app/food', '/app/meals', '/app/meals/remove', '/app/notes', '/app/note', '/app/notes/remove']);
+  '/app/edit', '/app/remove', '/app/food', '/app/meals', '/app/meals/remove', '/app/notes', '/app/note', '/app/notes/remove',
+  '/app/trend', '/app/goal', '/app/appointments', '/app/appointments/save', '/app/appointments/remove', '/app/calendar', '/app/calendar/new', '/app/calendar/remove']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -256,6 +257,13 @@ export default {
         return new Response(displayPage('', { pair: true }), {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' },
         });
+      }
+      const cal = /^\/cal\/([0-9a-f]{64})\.ics$/.exec(path);
+      if (cal && request.method === 'GET') {
+        // The calendar feed: calendar apps can only fetch an address, so the token is in it; it
+        // goes on to su94r-cgm as a header.
+        const feedUrl = new URL('/calendar/feed', url.origin);
+        return await forward(new Request(feedUrl, { headers: { Authorization: `Bearer ${cal[1]}`, accept: 'text/calendar' } }), feedUrl, env);
       }
       if (/^\/e\/[0-9a-f]{64}$/.test(path)) {
         // The emergency card: the page holds nothing; /emergency/data checks the link.

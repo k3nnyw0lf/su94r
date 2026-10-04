@@ -51,6 +51,9 @@ import { appRoute, APP_PATHS } from './app.js';
 import { emergencyRoute } from './emergency.js';
 import { mealStore } from './food.js';
 import { noteStore } from './notes.js';
+import { dailyStore } from './daily.js';
+import { appointmentStore, calendarFeed } from './calendar.js';
+import { supplyStatus } from './supplies.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
@@ -316,6 +319,10 @@ async function voiceSync(request, url, env, deps) {
     id: m.id, pid: m.p, t: m.t, kind: m.kind || 'rapid', amount: m.amount ?? null,
     source: m.source === 'alexa' ? 'alexa' : 'extension',
   })));
+  if (['lyumjev', 'fiasp', 'novorapid', 'humalog', 'apidra'].includes(body?.rapidInsulin)) {
+    const n = deps.night || nightStore(env);
+    if (n.ready) await n.patch({ rapid_insulin: body.rapidInsulin }).catch(() => {});
+  }
   const removed = (Array.isArray(body?.removed) ? body.removed : []).slice(0, 500);
   if (removed.length) await store.markDeleted(removed);
   // The learner's estimates ride along (forecast.js); a failure here never blocks the doses.
@@ -353,7 +360,7 @@ async function screensRoute(path, request, url, env, deps) {
     const screen = await screenFor(request, store, '');
     let tz;
     try { const n = deps.night || nightStore(env); if (n.ready) tz = (await n.get()).time_zone; } catch { /* default */ }
-    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), notes: deps.notes || noteStore(env), tz, snapshot: () => snapshot(env) });
+    const data = await doctorData(screen, { history: deps.history || historyStore(env), doses: deps.store || doseStore(env), labs: deps.labs || labStore(env), notes: deps.notes || noteStore(env), daily: deps.daily || dailyStore(env), tz, snapshot: () => snapshot(env) });
     return data ? json(data) : json({ error: 'unauthorized' }, 401);
   }
   if (path === 'share/extras') {
@@ -449,6 +456,7 @@ export async function handleCgm(path, request, env, deps = {}) {
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
         night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env), labs: deps.labs || labStore(env),
         meals: deps.meals || mealStore(env), notes: deps.notes || noteStore(env), fetchImpl: deps.fetchImpl,
+        daily: deps.daily || dailyStore(env), appointments: deps.appointments || appointmentStore(env),
         notify: (row, role, msg) => alertFanOut(env, row, {
           push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
           webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),
@@ -464,6 +472,16 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (connect) return connect;
     const rotate = await rotateRoute(path, request, url, { screens: deps.screens || screenStore(env), json });
     if (rotate) return rotate;
+    if (path === 'calendar/feed') {
+      const scr = deps.screens || screenStore(env);
+      if (!scr.ready) return json({ error: 'not configured' }, 503);
+      const ics = await calendarFeed(await screenFor(request, scr, ''), {
+        snapshot: () => snapshot(env), night: deps.night || nightStore(env), supplies: deps.supplies || supplyStore(env),
+        doses: deps.store || doseStore(env), appointments: deps.appointments || appointmentStore(env), supplyStatus,
+      });
+      if (!ics) return json({ error: 'unauthorized' }, 401);
+      return new Response(ics, { headers: { ...CORS, 'Content-Type': 'text/calendar; charset=utf-8', 'Cache-Control': 'no-store' } });
+    }
     if (path === 'emergency' || path.startsWith('emergency/')) {
       const pstore = deps.pushStore || pushStore(env);
       const tg = deps.telegram || telegramStore(env);
@@ -489,7 +507,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       telegram: (role, msg) => telegramAlert(tgStore, role, msg, { api: deps.tgApi }),
       webpush: deps.webpush || ((role, msg) => pushToPhones(deps.pushStore || pushStore(env), role, msg)),
       doses: deps.store || doseStore(env), supplies: deps.supplies || supplyStore(env),
-      history: deps.history || historyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
+      history: deps.history || historyStore(env), daily: deps.daily || dailyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (hist) return hist;

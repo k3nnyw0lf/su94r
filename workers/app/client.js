@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -170,6 +170,19 @@
     'Change this entry': 'Cambiar este registro', 'Carbs (grams)': 'Carbohidratos (gramos)', 'Insulin (units)': 'Insulina (unidades)', 'Kind': 'Tipo', 'Minutes ago': 'Hace cuántos minutos',
     'waiting to send': 'esperando para enviar', 'No signal: saved on this phone; it sends by itself when back online.': 'Sin señal: guardado en este teléfono; se envía solo cuando vuelva la conexión.',
     'Saved while offline: {what}.': 'Guardado sin conexión: {what}.', 'Do not log': 'No registrar', 'Could not send a saved entry: {e}': 'No se pudo enviar un registro guardado: {e}', 'note': 'nota',
+    // active insulin, goals, months, calendar
+    'Active insulin: about {u} u': 'Insulina activa: unas {u} u', 'last {what} at {time}': 'última {what} a las {time}', '🔥 {n} days in a row at {goal}%+ in range': '🔥 {n} días seguidos con {goal}%+ en rango',
+    'Goal: {goal}% in range': 'Meta: {goal}% en rango', 'days in a row': 'días seguidos', 'best run': 'mejor racha', 'last 7 days': 'últimos 7 días', 'days with no lows': 'días sin bajas',
+    'Today so far: {p} in range, on track.': 'Hoy hasta ahora: {p} en rango, vas bien.', 'Today so far: {p} in range.': 'Hoy hasta ahora: {p} en rango.', 'Change goal': 'Cambiar la meta',
+    'Streaks count full days kept on the server; the first appears after the next night check.': 'Las rachas cuentan los días completos guardados en el servidor; la primera aparece después del próximo chequeo nocturno.',
+    'Month by month': 'Mes a mes', 'GMI from the average of each month; squares are your lab A1c results.': 'GMI del promedio de cada mes; los cuadrados son tus resultados de A1c del laboratorio.', 'lab A1c': 'A1c de laboratorio', 'GMI by month and lab A1c': 'GMI por mes y A1c de laboratorio',
+    'Time-in-range goal': 'Meta de tiempo en rango', 'The usual goal is 70% of the day between your low and high lines. Pick yours with your doctor.': 'La meta usual es 70% del día entre tus líneas de baja y alta. Elige la tuya con tu médico.', 'Goal': 'Meta',
+    'Calendar': 'Calendario', 'Sensor changes, refill and run-out dates, and doctor visits, in Google, Apple or Outlook calendar. It updates by itself.': 'Cambios de sensor, fechas de surtido y de cuándo se acaba, y citas médicas, en el calendario de Google, Apple u Outlook. Se actualiza solo.',
+    'No doctor visits ahead.': 'No hay citas médicas próximas.', 'Add a doctor visit': 'Agregar una cita médica', 'Subscribe once:': 'Suscríbete una vez:', 'Google Calendar': 'Google Calendar', 'Apple or Outlook': 'Apple u Outlook',
+    'A calendar link exists on another device. Make a new link to subscribe from here; the old one stops working.': 'Hay un enlace de calendario en otro dispositivo. Crea uno nuevo para suscribirte desde aquí; el anterior deja de funcionar.',
+    'Add to my calendar': 'Agregar a mi calendario', 'Doctor visit': 'Cita médica', 'Date': 'Fecha', 'Time': 'Hora', 'With whom (for example Dr. Lee)': 'Con quién (por ejemplo Dra. Lee)', 'Where (optional)': 'Dónde (opcional)',
+    'Make a new calendar link?': '¿Crear un enlace de calendario nuevo?', 'Calendars subscribed to the old link stop updating. Subscribe again with the new one.': 'Los calendarios suscritos al enlace anterior dejan de actualizarse. Suscríbete otra vez con el nuevo.',
+    'The calendar link is ready.': 'El enlace del calendario está listo.', 'The calendar link is off.': 'El enlace del calendario está apagado.',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -438,6 +451,10 @@
       (l && !stale ? '<span class="a" aria-label="' + esc(ARROW_WORD()[l.trend] || '') + '">' + (ARROW[l.trend] || '') + '</span>' : '') + '<span class="u">' + esc(units) + '</span></div>';
     top += '<div class="sub">' + (people().length > 1 || (c.info && c.info.name) ? esc(c.info ? c.info.name : '') + ' · ' : '') +
       (l ? (delta != null ? esc(t('{d} in 15 min · ', { d: fmtDelta(delta, units) })) : '') + esc(ago(l.t)) : t('no reading yet')) + '</div>';
+    const io = S.recent && S.recent.iob ? S.recent.iob[c.pid] : null;
+    if (io) top += '<div class="sub">' + esc(t('Active insulin: about {u} u', { u: io.units })) + (io.last ? ' · ' + esc(t('last {what} at {time}', { what: (io.last.amount ? io.last.amount + ' u ' : '') + (KIND()[io.last.kind] || ''), time: clock(io.last.t) })) : '') + '</div>';
+    const goals = S.trend && S.trend.pid === c.pid ? S.trend.goals : null;
+    if (goals && goals.streak >= 2) top += '<div class="sub">' + esc(t('🔥 {n} days in a row at {goal}%+ in range', { n: goals.streak, goal: goals.goal })) + '</div>';
     if (l && !stale && l.mg < L.low) top += '<div class="banner low">' + esc(t('{what}: below {v} {u}', { what: t(l.mg < 55 ? 'Urgent low' : 'Low'), v: fmt(L.low, units), u: units })) + '</div>';
     if (stale && l) top += '<div class="banner stale">' + esc(t('No new reading for {t}. The sensor or the phone running LibreLink may be out of range.', { t: ago(l.t).replace(' ago', '').replace('hace ', '') })) + '</div>';
     top += '<div class="segm" role="group" aria-label="' + t('Hours shown') + '" style="margin-top:14px">' + [3, 6, 12].map((hh) => '<button data-range="' + hh + '" aria-pressed="' + (S.range === hh) + '">' + hh + ' h</button>').join('') + '</div>';
@@ -514,9 +531,12 @@
       main(html);
       return;
     }
+    await loadTrend();
+    if (S.tab !== 'history' || S.days !== days || S.dayView) return;
     const from = now - days * DAY;
     const s = stats(pts, low, high);
     const coverage = Math.min(1, s.slots / (days * 96));
+    const trendHtml = trendCards();
     html += card(kv([[pct(s.inr), t('in range')], [fmt(s.mean, units), t('average')], [s.gmi.toFixed(1) + '%', t('GMI')], [s.lows, t('lows')]]) +
       '<div style="margin-top:12px">' + rangeBar(s) + '</div>' +
       '<p class="muted small" style="margin:6px 0 0">' + esc(t('{b} below · {a} above · readings for {c} of the time', { b: pct(s.vl + s.lo), a: pct(s.hi + s.vh), c: pct(coverage) })) + '</p>' +
@@ -527,6 +547,7 @@
       if (pr) html += card('<h2>' + t('Patterns') + '</h2>' + (pr.data.patterns.length ? '<ul class="pat">' + pr.data.patterns.map((p) => '<li>' + esc(p.text) + '</li>').join('') + '</ul><p class="note">' + t('From the last 14 days. It describes what repeated; it does not advise.') + '</p>' : '<p class="muted">' + esc(pr.data.note || t('No clear patterns yet.')) + '</p>'));
       else { const lang = S.lang; api('app/patterns?pid=' + encodeURIComponent(c.pid)).then((data) => { S.patterns = { pid: c.pid, lang, at: Date.now(), data }; if (S.tab === 'history' && !S.dayView) renderHistory(); }).catch(() => {}); }
     }
+    html += trendHtml;
     if (days > 1) {
       const byDay = new Map();
       pts.forEach((p) => { const k = dateKey(p[0]); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(p); });
@@ -959,6 +980,111 @@
     renderNow();
   }
 
+  // ---------- goals, streaks and the months (daily.js) ----------
+  async function loadTrend(force) {
+    const pid = cur().pid;
+    if (!force && S.trend && S.trend.pid === pid && Date.now() - S.trend.at < 30 * MIN) return S.trend;
+    try { S.trend = Object.assign(await api('app/trend?pid=' + encodeURIComponent(pid)), { pid, at: Date.now() }); } catch (e) { /* keep the last */ }
+    return S.trend;
+  }
+  function trendCards() {
+    const tr = S.trend; if (!tr || tr.pid !== cur().pid) return '';
+    const g = tr.goals;
+    let h = card('<h2>' + esc(t('Goal: {goal}% in range', { goal: g.goal })) + '</h2>' +
+      kv([[String(g.streak), t('days in a row')], [String(g.best), t('best run')], [g.week.met + '/' + g.week.of, t('last 7 days')], [String(g.noLowStreak), t('days with no lows')]]) +
+      (g.today ? '<p class="small">' + esc(t(g.today.onTrack ? 'Today so far: {p} in range, on track.' : 'Today so far: {p} in range.', { p: Math.round(g.today.inRange * 100) + '%' })) + '</p>' : '') +
+      (tr.days ? '' : '<p class="note">' + t('Streaks count full days kept on the server; the first appears after the next night check.') + '</p>') +
+      (tr.canSet ? '<button class="btn ghost" id="goalBtn">' + t('Change goal') + '</button>' : ''));
+    if (tr.months.length || tr.a1c.length) h += card('<h2>' + t('Month by month') + '</h2>' + monthsChart(tr) + '<p class="note">' + t('GMI from the average of each month; squares are your lab A1c results.') + '</p>');
+    return h;
+  }
+  function monthsChart(tr) {
+    const ms = tr.months.slice(-12);
+    const keys = ms.map((m) => m.month);
+    tr.a1c.forEach((a) => { const k = a.takenOn.slice(0, 7); if (keys.indexOf(k) < 0) keys.push(k); });
+    keys.sort();
+    const show = keys.slice(-12);
+    if (!show.length) return '';
+    const w = 640, h = 230, pl = 52, pr = 18, pt = 26, pb = 34;
+    const vals = ms.map((m) => m.gmi).concat(tr.a1c.map((a) => a.value));
+    const lo = Math.min(5, Math.floor(Math.min.apply(null, vals))), hi = Math.max(9, Math.ceil(Math.max.apply(null, vals)));
+    const pad = 34;                                      // room for the first and last labels and an A1c square
+    const X = (i) => pl + pad + (show.length === 1 ? (w - pl - pr - 2 * pad) / 2 : (i / (show.length - 1)) * (w - pl - pr - 2 * pad));
+    const Y = (v) => pt + (1 - (v - lo) / (hi - lo)) * (h - pt - pb);
+    let s = '<svg class="g" viewBox="0 0 ' + w + ' ' + h + '" role="img" aria-label="' + esc(t('GMI by month and lab A1c')) + '">';
+    for (let v = lo; v <= hi; v++) s += '<line x1="' + pl + '" x2="' + (w - pr) + '" y1="' + Y(v).toFixed(1) + '" y2="' + Y(v).toFixed(1) + '" style="stroke:var(--line)"/><text x="2" y="' + (Y(v) + 7).toFixed(1) + '">' + v + '%</text>';
+    const step = Math.ceil(show.length / 6);
+    show.forEach((k, i) => { if (i % step === 0 || i === show.length - 1) s += '<text x="' + (X(i) - 20).toFixed(1) + '" y="' + (h - 8) + '">' + esc(new Date(k + '-15T12:00:00').toLocaleDateString(LOC(), { month: 'short' })) + '</text>'; });
+    const P = ms.filter((m) => show.indexOf(m.month) >= 0).map((m) => [X(show.indexOf(m.month)), Y(m.gmi), m]);
+    if (P.length > 1) s += '<polyline points="' + P.map((p) => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '" fill="none" style="stroke:var(--in)" stroke-width="3"/>';
+    P.forEach((p) => { s += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="6" style="fill:var(--in)"/><text x="' + (p[0] - 18).toFixed(1) + '" y="' + (p[1] - 12).toFixed(1) + '">' + p[2].gmi.toFixed(1) + '</text>'; });
+    tr.a1c.forEach((a) => {
+      const i = show.indexOf(a.takenOn.slice(0, 7)); if (i < 0) return;
+      const x = X(i) + 14, y = Y(a.value);
+      s += '<rect x="' + (x - 7).toFixed(1) + '" y="' + (y - 7).toFixed(1) + '" width="14" height="14" rx="2" style="fill:var(--accent)"><title>A1c ' + a.value + '% · ' + esc(a.takenOn) + '</title></rect>';
+    });
+    return s + '</svg><div class="legend"><span><i style="background:var(--in);border-radius:50%"></i>GMI</span><span><i style="background:var(--accent)"></i>' + t('lab A1c') + '</span></div>';
+  }
+  function askGoal() {
+    const now = (S.trend && S.trend.goals && S.trend.goals.goal) || 70;
+    sheet('<h3>' + t('Time-in-range goal') + '</h3><p class="muted small">' + t('The usual goal is 70% of the day between your low and high lines. Pick yours with your doctor.') + '</p>' +
+      '<label for="goalSel">' + t('Goal') + '</label><select id="goalSel">' + [50, 55, 60, 65, 70, 75, 80, 85, 90, 95].map((v) => '<option value="' + v + '"' + (v === now ? ' selected' : '') + '>' + v + '%</option>').join('') + '</select>',
+      [[t('Save'), 'btn', async () => {
+        try { await api('app/goal', { method: 'POST', body: { tir: Number($('goalSel').value) } }); closeSheet(); toast(t('Saved.')); } catch (e) { toast(e.message); return; }
+        await loadTrend(true); if (S.tab === 'history') renderHistory();
+      }], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+
+  // ---------- calendar: visits and the feed link (calendar.js) ----------
+  async function calendarCard(role) {
+    const pid = cur().pid;
+    let v;
+    try { v = await api('app/appointments?pid=' + encodeURIComponent(pid)); } catch (e) { v = { visits: [], canEdit: false }; }
+    let link = null;
+    if (role === 'me') { try { link = (await api('app/calendar')).link; } catch (e) { link = null; } if (!link) store.del(K.cal); }
+    const feed = link ? store.get(K.cal) : null;
+    S.calLink = link;
+    let h = '<h2>' + t('Calendar') + '</h2><p class="muted small">' + t('Sensor changes, refill and run-out dates, and doctor visits, in Google, Apple or Outlook calendar. It updates by itself.') + '</p>';
+    h += v.visits.length ? '<ul class="list">' + v.visits.map((x) => '<li><span class="t">' + esc(new Date(x.at).toLocaleDateString(LOC(), { month: 'short', day: 'numeric' }) + ' ' + clock(x.at)) + '</span><span>' + esc(x.title + (x.place ? ' · ' + x.place : '')) + '</span>' + (v.canEdit ? '<button data-visitdel="' + esc(x.id) + '">' + t('Remove') + '</button>' : '') + '</li>').join('') + '</ul>'
+      : '<p class="muted small">' + t('No doctor visits ahead.') + '</p>';
+    if (v.canEdit) h += '<button class="btn ghost" id="visitAdd">' + t('Add a doctor visit') + '</button>';
+    if (role === 'me') {
+      if (feed) {
+        const webcal = feed.replace(/^https:/, 'webcal:');
+        h += '<p class="small" style="margin-top:12px">' + t('Subscribe once:') + '</p><div class="row"><a class="btn" href="https://calendar.google.com/calendar/r?cid=' + encodeURIComponent(webcal) + '" target="_blank" rel="noopener">' + t('Google Calendar') + '</a><a class="btn ghost" href="' + esc(webcal) + '">' + t('Apple or Outlook') + '</a><button class="btn ghost" data-copy="' + esc(feed) + '">' + t('Copy') + '</button></div>' +
+          '<div class="row" style="margin-top:8px"><button class="btn ghost" id="calNew">' + t('New link') + '</button><button class="btn ghost" id="calOff">' + t('Turn off') + '</button></div>';
+      } else if (link) h += '<p class="small">' + t('A calendar link exists on another device. Make a new link to subscribe from here; the old one stops working.') + '</p><div class="row"><button class="btn" id="calNew">' + t('New link') + '</button><button class="btn ghost" id="calOff">' + t('Turn off') + '</button></div>';
+      else h += '<div class="row" style="margin-top:10px"><button class="btn" id="calNew">' + t('Add to my calendar') + '</button></div>';
+    }
+    return card(h);
+  }
+  function addVisit() {
+    const d = new Date(Date.now() + 7 * DAY);
+    const pad = (n) => String(n).padStart(2, '0');
+    sheet('<h3>' + t('Doctor visit') + '</h3>' +
+      '<label for="vDate">' + t('Date') + '</label><input id="vDate" type="date" value="' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '">' +
+      '<label for="vTime">' + t('Time') + '</label><input id="vTime" type="time" value="10:00">' +
+      '<label for="vTitle">' + t('With whom (for example Dr. Lee)') + '</label><input id="vTitle" maxlength="80">' +
+      '<label for="vPlace">' + t('Where (optional)') + '</label><input id="vPlace" maxlength="120">',
+      [[t('Save'), 'btn', async () => {
+        const at = new Date($('vDate').value + 'T' + ($('vTime').value || '10:00'));
+        try { await api('app/appointments/save', { method: 'POST', body: { pid: cur().pid, at: isNaN(at) ? '' : at.toISOString(), title: $('vTitle').value, place: $('vPlace').value } }); closeSheet(); toast(t('Saved.')); } catch (e) { toast(e.message); return; }
+        if (S.tab === 'more') renderMore();
+      }], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+  function calendarNew() {
+    const go = async () => {
+      try { const r = await api('app/calendar/new', { method: 'POST', body: {} }); store.set(K.cal, location.origin + '/cal/' + r.token + '.ics'); closeSheet(); toast(t('The calendar link is ready.')); } catch (e) { toast(e.message); return; }
+      if (S.tab === 'more') renderMore();
+    };
+    if (!S.calLink) { go(); return; }
+    sheet('<h3>' + t('Make a new calendar link?') + '</h3><p>' + t('Calendars subscribed to the old link stop updating. Subscribe again with the new one.') + '</p>', [[t('New link'), 'btn warn', go], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+  async function calendarOff() {
+    try { await api('app/calendar/remove', { method: 'POST', body: {} }); store.del(K.cal); toast(t('The calendar link is off.')); } catch (e) { toast(e.message); return; }
+    if (S.tab === 'more') renderMore();
+  }
+
   // ---------- exercise and sick-day modes (night.js) ----------
   function askMode(kind) {
     const hours = kind === 'exercise' ? [1, 2, 4] : [12, 24, 48];
@@ -1228,6 +1354,9 @@
       if (S.tab !== 'more') return;
       html += em;
     }
+    const calc = await calendarCard(role);
+    if (S.tab !== 'more') return;
+    html += calc;
     let sup = null;
     try { sup = await api('app/supplies?pid=' + encodeURIComponent(cur().pid)); } catch (e) { sup = null; }
     if (S.tab !== 'more') return;
@@ -1273,7 +1402,7 @@
   $('tabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (b) show(b.dataset.tab); });
   $('people').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-pid]'); if (!b) return;
-    S.pid = b.dataset.pid; store.set(K.pid, S.pid); S.dayView = null;
+    S.pid = b.dataset.pid; store.set(K.pid, S.pid); S.dayView = null; S.trend = null; loadTrend();
     renderPeople(); show(S.tab);
   });
   $('main').addEventListener('click', (e) => {
@@ -1308,6 +1437,11 @@
     else if (d.mode) setMode(d.mode);
     else if (el.id === 'bedBtn') bedOpen();
     else if (el.id === 'emEdit') emergencyEdit();
+    else if (el.id === 'goalBtn') askGoal();
+    else if (el.id === 'visitAdd') addVisit();
+    else if (d.visitdel) { api('app/appointments/remove', { method: 'POST', body: { id: d.visitdel, pid: cur().pid } }).then(() => { toast(t('Removed.')); if (S.tab === 'more') renderMore(); }).catch((x) => toast(x.message)); }
+    else if (el.id === 'calNew') calendarNew();
+    else if (el.id === 'calOff') calendarOff();
     else if (el.id === 'emNew') emergencyNew();
     else if (el.id === 'emOff') emergencyOff();
     else if (el.id === 'pushOn') { el.disabled = true; pushOn().then(() => toast(t('Alerts are on. Send a test to hear one.'))).catch((x) => toast(x.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
@@ -1355,6 +1489,8 @@
     await refreshLive();
     await refreshRecent();
     show(S.justLinked ? 'more' : S.tab);
+    loadTrend().then(() => { if (S.tab === 'now' && !$('sheet')) renderNow(); });
+    setInterval(() => loadTrend(true), 30 * MIN);
     setInterval(refreshLive, 60e3);
     setInterval(refreshRecent, 120e3);
     setInterval(() => { status(); if (S.tab === 'now' && !$('sheet')) renderNow(); }, 15e3);

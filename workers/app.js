@@ -32,6 +32,10 @@
 //   POST app/supplies/save          { pid, item, onHand, warnAt, refillOn }
 //   POST app/supplies/remove        { pid, item }
 //   POST app/mode                   { mode: 'exercise'|'sick'|'off', hours } (night.js modes)
+//   GET  app/trend?pid=             GMI by month, lab A1c results, the goal and streaks (daily.js)
+//   POST app/goal                   (owner's phone) { tir } the time-in-range goal, 50 to 95
+//   GET  app/appointments?pid=      doctor visits ahead (calendar.js); POST …/save, …/remove
+//   GET  app/calendar               (owner's phone) the calendar feed link; POST …/new, …/remove
 //   POST app/ack                    "I'm OK" for every open low (the bedside screen)
 //   GET  app/emergency              (owner's phone) the emergency card (emergency.js); POST
 //                                   app/emergency/save, app/emergency/new, app/emergency/remove
@@ -43,7 +47,7 @@
 import { screenFor } from './screens.js';
 import { asMarkers } from './doses.js';
 import { reportFor } from './doctor.js';
-import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
+import { doubleDoseWarning, kindWord, insulinOnBoard, lastDose, BOLUS_KINDS } from '../extension/insulin.js';
 import { pushTo, pushEndpointOk } from './webpush.js';
 import { startTreatment, NIGHT_DEFAULTS, activeMode, modeFields, acknowledgeAll, EXERCISE_MARGIN } from './night.js';
 import { emergencyManage } from './emergency.js';
@@ -54,12 +58,15 @@ import { findPatterns } from '../extension/patterns.js';
 import { asMarkers as markersOf } from './doses.js';
 import { foodByBarcode } from './food.js';
 import { noteRow } from './notes.js';
+import { months as monthsOf, streaks, summarize, dayIn } from './daily.js';
+import { appointmentRow, calendarManage } from './calendar.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
   'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns', 'app/mode', 'app/ack',
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
-  'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove']);
+  'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
+  'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -67,7 +74,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, fetchImpl, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, daily = null, appointments = null, fetchImpl, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -111,7 +118,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!pid) return json({ error: 'No one to report on yet.' }, 404);
     let tz;
     try { if (night?.ready) tz = (await night.get()).time_zone; } catch { /* default */ }
-    return json(await reportFor(pid, { history, doses, snapshot, labs, notes, tz, now, lang: es ? 'es' : 'en' }));
+    return json(await reportFor(pid, { history, doses, snapshot, labs, notes, daily, tz, now, lang: es ? 'es' : 'en' }));
   }
 
   if (path === 'app/recent') {
@@ -146,11 +153,31 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     let recentNotes = [];
     try { if (notes?.ready) for (const p of l) recentNotes.push(...await notes.between(p.pid, now - 2 * DAY, now + MIN)); } catch { recentNotes = []; }
     const noteMine = `note-${screen.id.slice(0, 8)}-`;
+    // Active insulin from every logged rapid or regular dose (su94r Mini's curve for the rapid insulin it is set to).
+    const iob = {};
+    for (const p of l) {
+      const units = insulinOnBoard(events, p.pid, { rapidInsulin: row?.rapid_insulin || undefined }, now);
+      const last = lastDose(events, p.pid, BOLUS_KINDS, now);
+      if (units > 0 || (last && now - last.t < 8 * 3600e3)) iob[p.pid] = { units, last: last ? { t: last.t, amount: last.amount ?? null, kind: last.kind || 'rapid' } : null };
+    }
     const mode = activeMode(row, now);
     const canEdit = (e) => canLog && ((e.id.startsWith(mine) && now - createdAt(e.id) < DAY) || (owner && e.source !== 'extension'));
     return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS, edit: canEdit(e) })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
       mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
-      notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), at: now });
+      notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob, at: now });
+  }
+
+  // The goal and the calendar feed link: the owner's own phone.
+  if (path === 'app/goal' || path.startsWith('app/calendar')) {
+    if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    if (path !== 'app/goal') return calendarManage(path, request, { screens, json });
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const b = await request.json().catch(() => ({}));
+    const tir = Math.round(Number(b.tir));
+    if (!(tir >= 50 && tir <= 95)) return json({ ok: false, error: T('Pick a goal between 50% and 95%.', 'Elige una meta entre 50% y 95%.') }, 400);
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    await night.patch({ goal_tir: tir });
+    return json({ ok: true, goal: tir });
   }
 
   // The emergency card: the owner's own phone keeps it up to date (emergency.js).
@@ -187,6 +214,34 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     try { if (notes?.ready) noted = await notes.between(pid, now - 14 * DAY, now + MIN); } catch { /* without notes */ }
     const mmol = person.units === 'mmol/L';
     return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en', notes: noted }));
+  }
+
+  if (path === 'app/trend') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const person = (await people()).find((p) => p.pid === pid) || {};
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* defaults */ }
+    const tz = row?.time_zone || 'America/New_York';
+    let days = [];
+    try { if (daily?.ready && pid) days = await daily.since(pid, new Date(now - 730 * DAY).toISOString().slice(0, 10)); } catch { /* none yet */ }
+    // Today so far, from the server's history.
+    let today = null;
+    try {
+      if (history?.ready && pid) {
+        const pts = (await history.range(pid, now - DAY, now + MIN)).filter((x) => dayIn(x.t, tz) === dayIn(now, tz));
+        today = summarize(pid, dayIn(now, tz), pts, person.low ?? 70, person.high ?? 180);
+      }
+    } catch { /* without today */ }
+    let a1c = [];
+    try { if (labs?.ready && pid) a1c = (await labs.list(pid)).filter((r) => r.kind === 'a1c').map((r) => ({ takenOn: r.taken_on, value: Number(r.value) })); } catch { /* without labs */ }
+    return json({ months: monthsOf(days).slice(-24), a1c, goals: streaks(days, row?.goal_tir ?? 70, today), days: days.length, canSet: owner });
+  }
+
+  if (path === 'app/appointments' && request.method === 'GET') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    let list = [];
+    try { if (appointments?.ready && pid) list = await appointments.from(pid, now - 6 * 3600e3); } catch { /* none */ }
+    return json({ visits: list.map((v) => ({ id: v.id, at: v.at, title: v.title, place: v.place || '' })), canEdit: canLog });
   }
 
   if (path === 'app/food') {
@@ -326,6 +381,16 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ ok: true, id: row.id, text: T('Note saved.', 'Nota guardada.') });
   }
 
+  if (path === 'app/appointments/save' || path === 'app/appointments/remove') {
+    if (!appointments?.ready) return json({ ok: false, error: 'Appointments are not set up on the server.' }, 503);
+    const pid = await pidFor(String(body.pid || ''));
+    if (path === 'app/appointments/remove') { await appointments.remove(pid, String(body.id || '')); return json({ ok: true }); }
+    const row = appointmentRow(pid, body, now);
+    if (row.error) return json({ ok: false, error: es ? (VISIT_ES[row.error] || row.error) : row.error }, 400);
+    await appointments.add(row);
+    return json({ ok: true });
+  }
+
   if (path === 'app/meals/remove') {
     if (!meals?.ready) return json({ ok: false, error: 'Favorite meals are not set up on the server.' }, 503);
     const pid = await pidFor(String(body.pid || ''));
@@ -447,6 +512,11 @@ export async function appRoute(path, request, url, env, { screens, history, dose
 const whatEn = (kind, amount) => (kind === 'carbs' ? `${amount} g of carbs` : `${amount} ${amount === 1 ? 'unit' : 'units'} of ${kindWord(kind)} insulin`);
 const KIND_ES = { rapid: 'rápida', short: 'regular', intermediate: 'NPH', basal: 'de acción prolongada', mix: 'premezclada' };
 const whatEs = (kind, amount) => (kind === 'carbs' ? `${amount} g de carbohidratos` : `${amount} ${amount === 1 ? 'unidad' : 'unidades'} de insulina ${KIND_ES[kind]}`);
+const VISIT_ES = {
+  'Pick the date and time of the visit.': 'Elige la fecha y la hora de la cita.',
+  'That date does not look right.': 'Esa fecha no parece correcta.',
+  'Say who the visit is with, for example Dr. Lee.': 'Escribe con quién es la cita, por ejemplo Dra. Lee.',
+};
 const NOTE_ES = {
   'Write a note or pick a tag.': 'Escribe una nota o elige una etiqueta.',
   'The time must be within the last 24 hours.': 'La hora debe estar dentro de las últimas 24 horas.',

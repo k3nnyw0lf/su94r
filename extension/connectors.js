@@ -361,6 +361,7 @@ export const CONNECTORS = [
           : state(h, `On. Last check ${last?.at ? ctx.when(last.at) : 'in the next 5 minutes'}. Low below ${v.lowMgdl} mg/dL, severe below ${v.severeMgdl}.${v.openLows ? ' A low is open right now.' : ''}`, 'on');
       const low = h('input', { type: 'number', min: '60', max: '100', value: String(v.lowMgdl), 'aria-label': 'Low level, mg/dL', class: 'num' });
       const severe = h('input', { type: 'number', min: '40', max: '70', value: String(v.severeMgdl), 'aria-label': 'Severe level, mg/dL', class: 'num' });
+      const goal = h('input', { type: 'number', min: '50', max: '95', step: '5', value: String(v.goalTir || 70), 'aria-label': 'Time-in-range goal, percent', class: 'num' });
       return [
         status,
         h('p', { class: 'sub-h' }, 'Your phone'),
@@ -382,6 +383,8 @@ export const CONNECTORS = [
           h('summary', {}, 'Levels and warnings'),
           h('div', { class: 'actions' }, 'Low below ', low, ' severe below ', severe, ' mg/dL ',
             action(ctx, msg, 'Save', 'Saving…', () => nightSave(settings.screenLink, { lowMgdl: Number(low.value), severeMgdl: Number(severe.value) }))),
+          h('div', { class: 'actions' }, 'Goal ', goal, '% of the day in range (the phone app counts streaks against it) ',
+            action(ctx, msg, 'Save', 'Saving…', () => nightSave(settings.screenLink, { goalTir: Number(goal.value) }))),
           state(h, `Low soon: ${v.soonEnabled ? 'on' : 'off'} (a warning when you are falling toward the low line within 20 minutes). Sensor and signal: ${v.watchEnabled ? 'on' : 'off'} (no readings for 30 minutes; a sensor ending within a day, counted as ${v.sensorDays}-day sensors). Missed-dose reminders: ${v.nudgeEnabled ? 'on' : 'off'} (when a usual dose is not logged, learned from your last 14 days; it never says what to take).`),
           h('div', { class: 'actions' },
             action(ctx, msg, v.soonEnabled ? 'Turn off Low soon' : 'Turn on Low soon', 'Saving…', () => nightSave(settings.screenLink, { soonEnabled: !v.soonEnabled })),
