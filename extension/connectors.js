@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, emergencyGet, emergencySave, emergencyNew, emergencyRemove, emergencyUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgAllow, tgEnabled, tgTest } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, nightCoverage, nightDrill, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, emergencyGet, emergencySave, emergencyNew, emergencyRemove, emergencyUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgAllow, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -428,6 +428,39 @@ export const CONNECTORS = [
             h('div', { class: 'actions' }, 'Log ', grams, ' g, recheck after ', minutes, ' min'),
             h('div', { class: 'actions' }, plan),
             h('div', { class: 'actions' }, action(ctx, msg, 'Save my plan', 'Saving…', () => nightSave(settings.screenLink, { treatGrams: Number(grams.value), treatMinutes: Number(minutes.value), treatPlan: plan.value.trim() }), 'primary')));
+        })(),
+        await (async () => {
+          let c = null;
+          try { c = await nightCoverage(settings.screenLink); } catch { /* shown as unknown */ }
+          const words = { 'me.ntfy': 'ntfy', 'me.telegram': 'Telegram', 'me.push': 'the su94r app', 'family.ntfy': 'family ntfy', 'family.telegram': 'family Telegram', 'family.push': 'a family phone' };
+          const reach = c ? [c.me.phones ? `the app on ${c.me.phones} phone${c.me.phones === 1 ? '' : 's'}` : null, c.me.telegram ? `${c.me.telegram} Telegram chat${c.me.telegram === 1 ? '' : 's'}` : null].filter(Boolean) : [];
+          const got = c?.drill ? Object.keys(c.drill.got || {}).filter((k) => c.drill.got[k] >= c.drill.at) : [];
+          return h('details', c && c.state !== 'ok' ? { open: true } : {},
+            h('summary', {}, 'Alert check'),
+            state(h, !c ? 'Could not check.' : c.state === 'none' ? 'Your low alerts reach no phone: a low at night would ring nowhere. Link your phone (Share to another phone) and turn on its alerts, or subscribe in ntfy, then run a drill.'
+              : c.state === 'untested' ? `Reaches ${reach.join(' and ')}, but no drill answered in the last 30 days. Run one.`
+                : `Working: the last drill was answered on ${got.map((k) => words[k] || k).join(', ') || 'a channel'}.`, c?.state === 'ok' ? 'on' : 'warn'),
+            c?.drill ? state(h, `Last drill ${ctx.when(c.drill.at)}: sent to ${Object.keys(c.drill.sent || {}).map((k) => words[k] || k).join(', ') || 'nothing'}; answered on ${got.map((k) => words[k] || k).join(', ') || 'none yet'}.`) : null,
+            h('div', { class: 'actions' }, action(ctx, msg, 'Run an alert drill', 'Sending the drill…', async () => { const r = await nightDrill(settings.screenLink); msg.textContent = `Drill sent to ${Object.keys(r.sent || {}).length} channel(s). Tap "I'm OK" on each one that reaches you.`; return { ok: false, message: msg.textContent }; }, 'primary')),
+            c?.morning?.lows?.length ? state(h, `Last night: ${c.morning.lows.length} low${c.morning.lows.length === 1 ? '' : 's'}, ${c.morning.unanswered} not answered.`, c.morning.unanswered ? 'warn' : 'on') : null);
+        })(),
+        (() => {
+          const rows = [0, 1, 2, 3].map((k) => {
+            const n = (v.callNumbers || [])[k] || {};
+            return {
+              name: h('input', { type: 'text', maxlength: '40', placeholder: 'Name', value: n.name || '', 'aria-label': `Who to call ${k + 1}` }),
+              phone: h('input', { type: 'tel', maxlength: '20', placeholder: '+12395550101', value: n.phone || '', 'aria-label': `Their number ${k + 1}` }),
+              role: h('select', { 'aria-label': `Whose number ${k + 1}` }, h('option', { value: 'me', selected: n.role !== 'family' }, 'Mine'), h('option', { value: 'family', selected: n.role === 'family' }, 'Family')),
+              lang: h('select', { 'aria-label': `Language ${k + 1}` }, h('option', { value: 'en', selected: n.lang !== 'es' }, 'English'), h('option', { value: 'es', selected: n.lang === 'es' }, 'Español')),
+            };
+          });
+          return h('details', {},
+            h('summary', {}, 'Phone calls for unanswered lows'),
+            state(h, `When a low gets no "I'm OK" (severe: after 5 minutes; at night: after the second reminder; by day: after 20 minutes), su94r calls your number; 10 minutes later the family numbers; your number once more 15 minutes after the first call. Pressing 1 answers the low. ${v.callsReady ? (v.callEnabled ? 'On.' : 'Off.') : 'Not set up yet: it uses Telnyx (paid, about 1 cent a call plus $1 a month for the number). Kenneth adds the four SU94R_TELNYX_ secrets in Supabase (docs/tv-and-alexa.md).'}`, v.callEnabled && v.callsReady ? 'on' : ''),
+            ...rows.map((r) => h('div', { class: 'actions' }, r.name, r.phone, r.role, r.lang)),
+            h('div', { class: 'actions' },
+              action(ctx, msg, 'Save the numbers', 'Saving…', () => nightSave(settings.screenLink, { callNumbers: rows.map((r) => ({ name: r.name.value.trim(), phone: r.phone.value.trim(), role: r.role.value, lang: r.lang.value })).filter((x) => x.phone) })),
+              v.callsReady ? action(ctx, msg, v.callEnabled ? 'Turn calls off' : 'Turn calls on', 'Saving…', () => nightSave(settings.screenLink, { callEnabled: !v.callEnabled }), v.callEnabled ? 'ghost' : 'primary') : null));
         })(),
         h('details', v.mode ? { open: true } : {},
           h('summary', {}, 'Exercise and sick days'),

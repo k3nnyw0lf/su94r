@@ -11,7 +11,9 @@
 // Alexa only records what you say you took; it never suggests an amount.
 
 import { verifyAlexaSignature, AlexaVerifyError } from './alexa-verify.js';
-import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
+import { doubleDoseWarning, kindWord, insulinOnBoard } from '../extension/insulin.js';
+import { driveCheck } from './drive.js';
+import { rateOf } from './night.js';
 import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 import { nightSummary, weekLine } from './history.js';
@@ -192,6 +194,7 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
   if (intent === 'ForecastIntent') return forecastIntent(body, { say, getSnapshot, store, forecasts, lang });
   if (intent === 'NightIntent' || intent === 'WeekIntent') return pastIntent(body, intent, { say, getSnapshot, store, history, lang });
   if (intent === 'PatternIntent') return patternIntent(body, { say, getSnapshot, store, history, lang });
+  if (intent === 'DriveIntent') return driveIntent(body, { say, getSnapshot, store, forecasts, lang });
 
   let snap;
   try {
@@ -415,6 +418,28 @@ async function patternIntent(body, { say, getSnapshot, store, history, lang = 'e
     ? T(`Over the last ${r.days} days: ${list} The app's History shows more.`, `En los últimos ${r.days} días: ${list} El historial de la app muestra más.`)
     : r.note;
   return say(who.many && who.name ? `${who.name}: ${text}` : text);
+}
+
+// ---- "can I drive?" (drive.js: the UK DVLA lines for drivers who use insulin) ----
+async function driveIntent(body, { say, getSnapshot, store, forecasts, lang = 'en' }) {
+  const T = (en, sp) => (lang === 'es' ? sp : en);
+  const who = await whoFor(body, getSnapshot, store || { recent: async () => [] });
+  if (who.missing) return say(T(`I don't follow anyone called ${who.missing}.`, `No sigo a nadie llamado ${who.missing}.`));
+  if (who.none) return say(T('No one is sharing their glucose with this account yet.', 'Nadie está compartiendo su glucosa con esta cuenta todavía.'));
+  let person = null;
+  try { person = (await getSnapshot()).people.find((p) => p.pid === who.pid) || null; } catch { /* below */ }
+  const now = Date.now();
+  let events = [];
+  try { if (store?.recent) events = asMarkers(await store.recent(who.pid, now)); } catch { /* without doses */ }
+  let soon = null;
+  try { const f = forecasts?.ready ? await forecasts.get(who.pid) : null; if (f && f.trusted && now - f.at <= 20 * 60e3 && f.h30) soon = f.h30.mg; } catch { /* without */ }
+  const l = person?.latest || null;
+  const mmol = person?.units === 'mmol/L';
+  // Spoken without units (Alexa spells "mg/dL" out).
+  const r = driveCheck({ latest: l, rate: l ? rateOf(person, l, null) : null, soon, iob: insulinOnBoard(events, who.pid, {}, now), now, lang, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))) });
+  const spoken = [r.title, ...r.lines.slice(0, -1)].join('. ').replace(/ mg\/dL/g, '').replace(/ \(5\.0 mmol\/L\)/g, '').replace(/\.\./g, '.');
+  const tail = T('That follows the UK driving guidance for insulin users; your own doctor\'s advice comes first.', 'Eso sigue la guía de manejo del Reino Unido para quienes usan insulina; el consejo de tu médico va primero.');
+  return say(`${who.many && who.name ? `${who.name}: ` : ''}${spoken} ${tail}`);
 }
 
 // ---- "how was my night?" and "how was my week?" (the server's history, history.js) ----

@@ -25,6 +25,10 @@
 //   exercise  "Low soon" warns earlier: from 10 mg/dL above the low line, 30 minutes ahead
 //   sick      a sick-day check every 4 hours while awake (every 2 when above 250 mg/dL)
 //
+// Whether alerts reach anyone (coverage.js): night/coverage, night/drill, the episode log and the
+// morning report. Phone calls for a low nobody answers (calls.js), when set up: the owner's numbers
+// first, family numbers 10 minutes later, each call with its own "press 1 if you are OK".
+//
 // Every alert goes to ntfy, to the linked Telegram chats and to the phones that turned on alerts
 // in the su94r app (webpush.js), each by role. A low treated from the app (app/treat in app.js)
 // stops the reminders and is rechecked after the owner's plan's minutes; still low, they resume.
@@ -36,6 +40,7 @@ import { rowsFromSnapshot } from './history.js';
 import { missedDoseNudges } from './nudges.js';
 import { supplyStatus, supplyReminders } from './supplies.js';
 import { updateDaily, dayIn } from './daily.js';
+import { logEpisode, morningReport, runDrill, drillAnswer, coverageOf } from './coverage.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -48,7 +53,7 @@ export const NIGHT_DEFAULTS = {
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
   treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
-  mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null,
+  mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null, call_enabled: false, call_numbers: [],
 };
 
 export const EXERCISE_MARGIN = 10;                 // mg/dL above the low line that "Low soon" watches in exercise mode
@@ -167,7 +172,7 @@ function localTime(t, timeZone) {
  *   people: snapshot people [{ pid, firstName, name, units, latest: { t, mg, trend } }]
  *   push(topic, msg) sends; ackUrl(token) builds the "I'm OK" address.
  */
-export async function nightCheck({ row, people, error = null, now = Date.now(), push, ackUrl, ring = null }) {
+export async function nightCheck({ row, people, error = null, now = Date.now(), push, ackUrl, ring = null, dial = null }) {
   const cfg = { ...NIGHT_DEFAULTS, ...row };
   const state = structuredClone(row.state || {});
   const sent = [];
@@ -185,6 +190,39 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     if (!url || !ring || !(night || severe || cfg.echo_always)) return;
     try { await ring(url); sent.push({ label: `echo-${kind}`, ok: true }); } catch (e) { sent.push({ label: `echo-${kind}`, ok: false, error: e.message }); }
   };
+
+  // A phone call for a low nobody answers (calls.js), when set up: the owner's numbers once the
+  // alerts went unanswered (severe or silent: 5 minutes; night: the second reminder; day: 20
+  // minutes); family numbers 10 minutes after that first call; the owner once more 15 minutes after
+  // it. Each call has its own answer.
+  const numbers = Array.isArray(cfg.call_numbers) ? cfg.call_numbers.filter((n) => n?.phone) : [];
+  async function escalate(p, ep, mg, severe, silent) {
+    if (!dial || !cfg.call_enabled || !numbers.length || ep.ackAt || !ep.firstAt) return;
+    const since = now - ep.firstAt;
+    const calls = ep.calls || { me: [], family: null };
+    const due = severe || silent ? since >= 5 * MIN : night ? ep.count >= 2 : since >= 20 * MIN;
+    if (!due) return;
+    const name = p.firstName || p.name || ep.name || '';
+    const what = silent ? 'low, and the sensor stopped reporting' : `low: ${mg == null ? '' : Math.round(mg)}${severe ? ', severely' : ''}`;
+    const whatEs = silent ? 'baja, y el sensor dejó de reportar' : `baja: ${mg == null ? '' : Math.round(mg)}${severe ? ', severa' : ''}`;
+    const call = async (role) => {
+      const token = randomToken(16);
+      ep.callHash = await sha256(token);
+      let n = 0;
+      for (const num of numbers.filter((x) => (x.role || 'me') === role)) {
+        const lang = num.lang === 'es' ? 'es' : (role === 'family' ? cfg.lang_care : cfg.lang_self) || 'en';
+        const say = lang === 'es'
+          ? `Esta es una llamada de su94r. ${role === 'me' ? 'Tu glucosa' : `La glucosa de ${name || 'tu familiar'}`} está ${whatEs}. Nadie respondió las alertas. Marca 1 si está bien. Marca 2 para escuchar otra vez.`
+          : `This is a call from su94r. ${role === 'me' ? 'Your glucose' : `${name || 'Your family member'}'s glucose`} is ${what}. Nobody answered the alerts. Press 1 if everything is OK. Press 2 to hear this again.`;
+        try { await dial(num.phone, { token, say, lang }); n += 1; sent.push({ label: `call-${role}`, ok: true }); } catch (e) { sent.push({ label: `call-${role}`, ok: false, error: e.message }); }
+      }
+      return n;
+    };
+    if (!calls.me.length) { await call('me'); calls.me.push(now); }
+    else if (!calls.family && now - calls.me[0] >= 10 * MIN && numbers.some((x) => x.role === 'family')) { await call('family'); calls.family = now; }
+    else if (calls.me.length < 2 && now - calls.me[0] >= 15 * MIN) { await call('me'); calls.me.push(now); }
+    ep.calls = calls;
+  }
 
   // Without a reading from LibreLinkUp, everyone who was low counts as gone silent.
   const openLows = Object.entries(state).filter(([k]) => isLowKey(k))
@@ -281,14 +319,16 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     const last = state._last[p.pid];
     if (l) state._last[p.pid] = { t: l.t, mg: l.mg };
     if (!error && cfg.watch_enabled !== false) await watchdog(p, l, ep);
-    if (ep && !l && now - ep.since > 6 * 60 * MIN) { delete state[p.pid]; continue; }   // an old episode, not an ongoing one
+    if (ep && !l && now - ep.since > 6 * 60 * MIN) { logEpisode(state, p.pid, ep, now); delete state[p.pid]; continue; }   // an old episode, not an ongoing one
     if (ep) Object.assign(ep, { name: p.firstName || p.name || ep.name || '', units: p.units || ep.units });
 
     if (l && l.mg >= low) {
       if (ep?.notified) {
-        await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: 'The low is over.', priority: 3, tags: ['white_check_mark'], es: { title: `${who(p)}Volvió a subir: ${fmt(p, l.mg)}`, message: 'La baja terminó.' } }, 'recovered');
+        const bounce = ep.fast && now - ep.since <= 30 * MIN;
+        await send(cfg.self_topic, { title: `${who(p)}Back up: ${fmt(p, l.mg)}`, message: bounce ? 'The low is over. It came back up quickly after a fast drop, which fits pressure on the sensor.' : 'The low is over.', priority: 3, tags: ['white_check_mark'], es: { title: `${who(p)}Volvió a subir: ${fmt(p, l.mg)}`, message: bounce ? 'La baja terminó. Subió rápido después de una caída rápida, lo que coincide con presión sobre el sensor.' : 'La baja terminó.' } }, 'recovered');
         recovered.add(p.pid);
       }
+      if (ep) logEpisode(state, p.pid, ep, now);
       delete state[p.pid];
       if (cfg.soon_enabled !== false || exercise) await lowSoon(p, l, last);
       continue;
@@ -301,6 +341,9 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       ep = ep || { since: now, count: 0, name: p.firstName || p.name || '', units: p.units };
       ep.lastMg = l.mg;
       ep.gapAt = null;
+      if (ep.lowest == null || l.mg < ep.lowest) { ep.lowest = l.mg; ep.lowestAt = l.t; }
+      // A fall of 25+ mg/dL in 10 minutes at night, straight into a low: lying on the sensor can do that.
+      if (!ep.notified) { const r = rateOf(p, l, last); ep.fast = Boolean(night && r != null && r <= -2.5); }
       const wasSevere = ep.severe;
       ep.severe = Boolean(ep.severe || severe);
       const due = !ep.notified
@@ -314,14 +357,15 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         ep.count += 1;
         await send(cfg.self_topic, {
           title: `${who(p)}${severe ? 'Severe low' : 'Low'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
-          message: `${cfg.treat_plan ? `${severe ? 'Treat now.' : 'Treat it.'} Your plan: ${cfg.treat_plan}.` : severe ? 'Treat now with fast sugar.' : 'Treat with fast sugar.'} Tap "I'm OK" once you have.${ep.count > 1 ? ` (Reminder ${ep.count})` : ''}`,
-          es: { title: `${who(p)}${severe ? 'Baja severa' : 'Baja'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `${cfg.treat_plan ? `${severe ? 'Trátala ya.' : 'Trátala.'} Tu plan: ${cfg.treat_plan}.` : severe ? 'Trátala ya con azúcar rápida.' : 'Trátala con azúcar rápida.'} Toca "Estoy bien" cuando lo hayas hecho.${ep.count > 1 ? ` (Recordatorio ${ep.count})` : ''}` },
+          message: `${cfg.treat_plan ? `${severe ? 'Treat now.' : 'Treat it.'} Your plan: ${cfg.treat_plan}.` : severe ? 'Treat now with fast sugar.' : 'Treat with fast sugar.'}${ep.fast && ep.count === 1 ? ' It dropped fast: lying on the sensor can cause a false low like this, so check with a meter, and treat if in doubt.' : ''} Tap "I'm OK" once you have.${ep.count > 1 ? ` (Reminder ${ep.count})` : ''}`,
+          es: { title: `${who(p)}${severe ? 'Baja severa' : 'Baja'}: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `${cfg.treat_plan ? `${severe ? 'Trátala ya.' : 'Trátala.'} Tu plan: ${cfg.treat_plan}.` : severe ? 'Trátala ya con azúcar rápida.' : 'Trátala con azúcar rápida.'}${ep.fast && ep.count === 1 ? ' Bajó rápido: acostarse sobre el sensor puede causar una baja falsa así, así que mide con un glucómetro y trátala si tienes duda.' : ''} Toca "Estoy bien" cuando lo hayas hecho.${ep.count > 1 ? ` (Recordatorio ${ep.count})` : ''}` },
           priority: severe || night ? 5 : 4,
           tags: [severe ? 'rotating_light' : 'warning'],
           actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
         }, severe ? 'severe' : 'low');
         await echo('low', severe);
       }
+      await escalate(p, ep, l.mg, severe, false);
     } else if (ep && !ep.ackAt && now - ep.since >= GAP_AFTER_MS) {
       // Was low and has gone silent: a lost sensor and a person who cannot answer look the same.
       if (!ep.gapAt || now - ep.gapAt >= 5 * MIN) {
@@ -338,6 +382,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         }, 'gap');
         await echo('low', true);
       }
+      await escalate(p, ep, ep.lastMg ?? null, true, true);
     }
 
     if (ep && cfg.care_enabled && cfg.care_topic) {
@@ -432,9 +477,10 @@ export async function acknowledge(row, token, now = Date.now()) {
   const state = structuredClone(row.state || {});
   const entries = [...Object.entries(state).filter(([k]) => isLowKey(k)), ...Object.entries(state._soon || {})];
   for (const [, ep] of entries) {
-    if (ep?.ackHash === hash) {
+    if (ep && (ep.ackHash === hash || ep.callHash === hash)) {
       ep.ackAt = now;
       ep.ackHash = null;
+      ep.callHash = null;
       return state;
     }
   }
@@ -456,6 +502,15 @@ export const ECHO_URL = /^https:\/\/(www\.)?virtualsmarthome\.xyz\/url_routine_t
 
 const TZ_OK = (tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return true; } catch { return false; } };
 const int = (v, lo, hi) => (Number.isInteger(Number(v)) && Number(v) >= lo && Number(v) <= hi ? Number(v) : undefined);
+
+/** Up to 4 numbers to call, in E.164 (+ and 8 to 15 digits), each the owner's ('me') or family's. */
+export function callNumbers(list) {
+  return list.slice(0, 4).map((n) => ({
+    name: String(n?.name || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 40),
+    phone: String(n?.phone || '').replace(/[\s().-]/g, ''),
+    role: n?.role === 'family' ? 'family' : 'me', lang: n?.lang === 'es' ? 'es' : 'en',
+  })).filter((n) => /^\+[1-9]\d{7,14}$/.test(n.phone));
+}
 
 /** Settings su94r Mini may change; anything else in the body is ignored. */
 function settingsPatch(body, row) {
@@ -492,6 +547,8 @@ function settingsPatch(body, row) {
   if (ne !== undefined) out.night_end = ne;
   if (typeof body.timeZone === 'string' && TZ_OK(body.timeZone)) out.time_zone = body.timeZone;
   if (body.mode !== undefined) Object.assign(out, modeFields(body.mode, body.modeHours));
+  if (typeof body.callEnabled === 'boolean') out.call_enabled = body.callEnabled;
+  if (Array.isArray(body.callNumbers)) out.call_numbers = callNumbers(body.callNumbers);
   const goal = int(body.goalTir, 50, 95);
   if (goal !== undefined) out.goal_tir = goal;
   return out;
@@ -511,6 +568,7 @@ function publicView(row, base) {
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
     lastTickAt: row.last_tick_at, lastResult: row.last_result || null, openLows: open, signInWarnedAt: meta.authWarnAt || null,
     mode: activeMode(row), modeUntil: activeMode(row) ? row.mode_until : null, goalTir: row.goal_tir ?? 70,
+    callEnabled: Boolean(row.call_enabled), callNumbers: (row.call_numbers || []).map((n) => ({ name: n.name, phone: n.phone, role: n.role, lang: n.lang })),
   };
 }
 
@@ -595,8 +653,8 @@ export async function reminders(row, people, state, send, { doses = null, suppli
   return sent;
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, now = () => Date.now() }) {
-  if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test'].includes(path)) return null;
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, dial = null, counts = null, now = () => Date.now() }) {
+  if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test', 'night/drill', 'night/coverage'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const sendFor = (row) => {
     const out = alertFanOut(env, row, { push, telegram, webpush });
@@ -609,7 +667,13 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
     const row = await store.get();
     const state = await acknowledge(row, url.searchParams.get('t'), now());
-    if (!state) return json({ error: 'unknown or used' }, 404);
+    if (!state) {
+      // Not a low: maybe a drill (coverage.js).
+      const d = await drillAnswer(row, url.searchParams.get('t'), now());
+      if (!d) return json({ error: 'unknown or used' }, 404);
+      await store.patch({ drill: d.drill });
+      return json({ ok: true, drill: d.via, message: 'Drill: this alert reached you.' });
+    }
     await store.patch({ state });
     return json({ ok: true, message: 'Got it. Alerts for this low stop; a severe low still tells you once.' });
   }
@@ -622,7 +686,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     let people = [];
     let error = null;
     try { people = (await snapshot()).people || []; } catch (e) { error = { code: e.code || 'error', message: String(e.message || e).slice(0, 200) }; }
-    const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}`, ring });
+    const result = await nightCheck({ row, people, error, now: now(), push: sendFor(row), ackUrl: (t) => `${ackBase}?t=${t}`, ring, dial });
     if (!error) {
       try { result.sent.push(...await reminders(row, people, result.state, sendFor(row), { doses, supplies, now: now() })); } catch (e) { result.sent.push({ label: 'reminders', ok: false, error: String(e.message || e).slice(0, 120) }); }
     }
@@ -642,14 +706,41 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
         try { await updateDaily({ daily, history, people, tz: row.time_zone || 'America/New_York', now: now() }); result.state._meta = { ...(result.state._meta || {}), dailyFor: today }; } catch { /* next check tries again */ }
       }
     }
+    // The morning after: last night's lows and whether anyone answered them (coverage.js).
+    let morning = null;
+    try {
+      const tz = row.time_zone || 'America/New_York';
+      const endAt = nightBoundary(now(), tz, row.night_end ?? 7);
+      if (endAt) {
+        const hours = ((row.night_end ?? 7) - (row.night_start ?? 22) + 24) % 24 || 9;
+        const p0 = people[0] || {};
+        const m = morningReport(result.state, row, { now: now(), nightStartAt: endAt - hours * 60 * MIN, nightEndAt: endAt, day: dayIn(now(), tz), fmt: (mg) => fmt(p0, mg), clock: (t) => localTime(t, tz) });
+        if (m) {
+          morning = m.report;
+          if (m.msg) { try { await sendFor(row)(row.self_topic, m.msg); result.sent.push({ label: 'morning', ok: true }); } catch (e) { result.sent.push({ label: 'morning', ok: false, error: e.message }); } }
+        }
+      }
+    } catch { /* the next check tries again */ }
     const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null };
-    await store.patch({ state: result.state, last_result: summary });
+    await store.patch({ state: result.state, last_result: summary, ...(morning ? { morning } : {}) });
     return json({ ok: true, people: summary.people, sent: summary.sent.length, error: summary.error });
   }
 
   // Owner-only below.
   if (!(await keyOk(url.searchParams.get('key')))) return json({ error: 'unauthorized' }, 401);
   const row = await store.get();
+
+  if (path === 'night/coverage') {
+    const c = counts ? await counts().catch(() => ({})) : {};
+    return json({ ...coverageOf(row, { ...c, now: now() }), morning: row.morning || null, drill: row.drill ? { at: row.drill.at, sent: row.drill.sent, got: row.drill.got } : null });
+  }
+
+  if (path === 'night/drill') {
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const drill = await runDrill(row, { send: drillSenders(env, row, { push, telegram, webpush }), ackBase, now: now() });
+    await store.patch({ drill });
+    return json({ ok: true, sent: drill.sent });
+  }
 
   if (path === 'night/echo-test') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
@@ -687,9 +778,29 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     let patch;
     try { patch = settingsPatch(body, row); } catch (e) { return json({ error: 'bad-setting', message: e.message }, e.status || 400); }
     if (Object.keys(patch).length) await store.patch(patch);
-    return json(publicView({ ...row, ...patch }, ntfyBase));
+    return json({ ...publicView({ ...row, ...patch }, ntfyBase), callsReady: callsReady(env) });
   }
-  return json(publicView(row, ntfyBase));
+  return json({ ...publicView(row, ntfyBase), callsReady: callsReady(env) });
+}
+
+/** Whether the four Telnyx secrets are set (calls.js does the calling). */
+const callsReady = (env) => Boolean(env.TELNYX_API_KEY && env.TELNYX_ACCOUNT_SID && env.TELNYX_TEXML_APP_ID && env.TELNYX_FROM);
+
+/** One sender per channel, for the drill: ntfy to a topic, Telegram and app alerts to a role. */
+export function drillSenders(env, row, { push = null, telegram = null, webpush = null } = {}) {
+  return {
+    ntfy: async (topic, msg) => { await (push || ((t, m) => ntfyPush(env, t, m)))(topic, inLanguage(msg, topic === row.care_topic ? row.lang_care : row.lang_self)); return true; },
+    telegram: async (role, msg) => (telegram ? telegram(role, msg) : 0),
+    push: async (role, msg) => (webpush ? webpush(role, msg) : 0),
+  };
+}
+
+/** When today's night ended (the night_end hour, local), or null before it ended or after night_start. */
+export function nightBoundary(now, tz, endHour = 7) {
+  const h = localHour(now, tz);
+  if (h < endHour) return null;
+  for (let t = now; t > now - 24 * 60 * MIN; t -= 5 * MIN) if (localHour(t, tz) === endHour && localHour(t - 5 * MIN, tz) !== endHour) return t;
+  return null;
 }
 
 /** Fires a trigger link (GET); throws when it does not answer OK. */

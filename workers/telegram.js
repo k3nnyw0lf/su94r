@@ -25,6 +25,7 @@
 //   POST tg/test?key=<owner>            a test message to the owner's chats
 //   POST tg/webhook                     Telegram itself (its secret header must match)
 
+import { drillAnswer } from './coverage.js';
 import { sha256, randomToken } from './screens.js';
 import { acknowledge, inLanguage } from './night.js';
 import { parseLog, describeLog, entryFromData, MEAL_PROMPT, parseMealAnswer, describeMeal, labelEs } from './tglog.js';
@@ -206,7 +207,9 @@ async function webhook(request, store, { api, snapshot, night, doses, meal, fetc
     if (linked && m && night?.ready) {
       const row = await night.get();
       const state = await acknowledge(row, m[1]);
+      const drill = state ? null : await drillAnswer(row, m[1]);
       if (state) { await night.patch({ state }); text = T('Got it. Reminders for this low stop; a severe low still tells you once.', 'Entendido. Los recordatorios de esta baja paran; una baja severa avisa una vez más.'); }
+      else if (drill) { await night.patch({ drill: drill.drill }); text = T('Drill: this alert reached you.', 'Simulacro: esta alerta te llegó.'); }
       else text = T('That alert was already answered, or the low is over.', 'Esa alerta ya se respondió, o la baja terminó.');
       await api(bot.token, 'editMessageReplyMarkup', { chat_id: chatId, message_id: cq.message.message_id, reply_markup: { inline_keyboard: [] } }).catch(() => {});
     }

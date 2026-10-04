@@ -33,6 +33,8 @@
 //   POST app/supplies/remove        { pid, item }
 //   POST app/mode                   { mode: 'exercise'|'sick'|'off', hours } (night.js modes)
 //   GET  app/trend?pid=             GMI by month, lab A1c results, the goal and streaks (daily.js)
+//   GET  app/coverage               (owner's phone) what could ring for a low (coverage.js); POST app/drill
+//   GET  app/drive?pid=             "can I drive?" (drive.js)
 //   POST app/goal                   (owner's phone) { tir } the time-in-range goal, 50 to 95
 //   GET  app/appointments?pid=      doctor visits ahead (calendar.js); POST …/save, …/remove
 //   GET  app/calendar               (owner's phone) the calendar feed link; POST …/new, …/remove
@@ -60,13 +62,17 @@ import { foodByBarcode } from './food.js';
 import { noteRow } from './notes.js';
 import { months as monthsOf, streaks, summarize, dayIn } from './daily.js';
 import { appointmentRow, calendarManage } from './calendar.js';
+import { coverageOf, runDrill } from './coverage.js';
+import { driveCheck } from './drive.js';
+import { rateOf } from './night.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
   'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns', 'app/mode', 'app/ack',
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
   'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
-  'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove']);
+  'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove',
+  'app/coverage', 'app/drill', 'app/drive']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -74,7 +80,7 @@ export const APP_MAX_GRAMS = 300;
 const UNDO_MS = 30 * MIN;
 const FRESH_MS = 20 * MIN;
 
-export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, daily = null, appointments = null, fetchImpl, now = Date.now() }) {
+export async function appRoute(path, request, url, env, { screens, history, doses, forecasts, snapshot, json, night = null, push = null, notify = null, supplies = null, labs = null, meals = null, notes = null, daily = null, appointments = null, counts = null, drill = null, ackBase = '', callsReady = false, fetchImpl, now = Date.now() }) {
   if (!APP_PATHS.has(path)) return null;
   if (!screens.ready) return json({ error: 'not configured' }, 503);
   const screen = await screenFor(request, screens, '');
@@ -164,10 +170,25 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     const canEdit = (e) => canLog && ((e.id.startsWith(mine) && now - createdAt(e.id) < DAY) || (owner && e.source !== 'extension'));
     return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS, edit: canEdit(e) })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
       mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
-      notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob, at: now });
+      notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob,
+      morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, at: now });
   }
 
   // The goal and the calendar feed link: the owner's own phone.
+  if (path === 'app/coverage' || path === 'app/drill') {
+    if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    if (!night?.ready) return json({ error: 'Low alerts are not set up on the server.' }, 503);
+    const row = await night.get();
+    if (path === 'app/coverage') {
+      const c = counts ? await counts().catch(() => ({})) : {};
+      return json({ ...coverageOf(row, { ...c, now }), drill: row.drill ? { at: row.drill.at, sent: row.drill.sent, got: row.drill.got } : null, calls: { ready: callsReady, enabled: Boolean(row.call_enabled), numbers: (row.call_numbers || []).length } });
+    }
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const d = await runDrill(row, { send: drill(row), ackBase, now });
+    await night.patch({ drill: d });
+    return json({ ok: true, sent: d.sent, text: T('Drill sent. Tap "I\'m OK" on each alert that reaches you; su94r records which ones did.', 'Simulacro enviado. Toca "Estoy bien" en cada alerta que te llegue; su94r anota cuáles llegaron.') });
+  }
+
   if (path === 'app/goal' || path.startsWith('app/calendar')) {
     if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
     if (path !== 'app/goal') return calendarManage(path, request, { screens, json });
@@ -214,6 +235,24 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     try { if (notes?.ready) noted = await notes.between(pid, now - 14 * DAY, now + MIN); } catch { /* without notes */ }
     const mmol = person.units === 'mmol/L';
     return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en', notes: noted }));
+  }
+
+  if (path === 'app/drive') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const p = (await people()).find((x) => x.pid === pid) || null;
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* defaults */ }
+    let events = [];
+    try { if (doses?.ready) events = asMarkers(await doses.recent(pid, now)); } catch { /* none */ }
+    let soon = null;
+    try { const f = forecasts?.ready ? await forecasts.get(pid) : null; if (f && f.trusted && now - f.at <= FRESH_MS && f.h30) soon = f.h30.mg; } catch { /* without */ }
+    const l = p?.latest || null;
+    const mmol = p?.units === 'mmol/L';
+    return json(driveCheck({
+      latest: l, rate: l ? rateOf(p, l, null) : null, soon, now, lang: es ? 'es' : 'en',
+      iob: insulinOnBoard(events, pid, { rapidInsulin: row?.rapid_insulin || undefined }, now),
+      fmt: (mg) => (mmol ? `${(mg / 18.0182).toFixed(1)} mmol/L` : `${Math.round(mg)} mg/dL`),
+    }));
   }
 
   if (path === 'app/trend') {

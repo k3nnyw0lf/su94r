@@ -7,7 +7,8 @@
 // a typed barcode fills in the carbs and the meal becomes a favorite; a note shows on the graph; an
 // entry is changed; a dose logged with no signal waits on the phone and goes out when it is back;
 // Now shows active insulin; History shows the goal, streaks and the months; a doctor visit reaches
-// the calendar feed.
+// the calendar feed; with no phone to ring the owner's Now says so, a drill goes out, last night's
+// unanswered lows show, and "Can I drive?" answers.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
 import path from 'node:path';
@@ -80,7 +81,8 @@ for (let i = 75; i >= 1; i--) { const d = new Date(now - i * DAY).toISOString().
 const daily = { ready: true, async since() { return dailyRows; } };
 let visitRows = [];
 const appointments = { ready: true, async from(pid, t) { return visitRows.filter((v) => Date.parse(v.at) >= t).map((v) => ({ ...v, at: Date.parse(v.at) })); }, async add(r) { visitRows.push({ id: 'v' + visitRows.length, ...r }); }, async remove(pid, id) { visitRows = visitRows.filter((v) => v.id !== id); } };
-const deps = { daily, appointments, meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async () => {}, pushStore: { ready: false } };
+const drillSent = [];
+const deps = { daily, appointments, meals, notes, screens, history, store: doses, forecasts, night, supplies, labs, telegram: { ready: false }, push: async (topic, msg) => { if (/drill/.test(msg.title || '')) drillSent.push(topic); }, pushStore: { ready: false } };
 const ai = { async run() { return { response: '{"food":true,"items":[{"name":"rice","carbs_g":45},{"name":"beans","carbs_g":15}],"total_g":60,"low_g":45,"high_g":75,"confidence":"medium"}' }; } };
 
 const server = http.createServer(async (req, res) => {
@@ -342,6 +344,27 @@ checks.cardPageEs = (await cardPage.textContent('main')).includes('Llamar al 911
 await cardPage.screenshot({ path: path.join(OUT, 'app-26-emergency-page-es.png'), fullPage: true });
 await cardPage.close();
 
+// Nobody to ring: the owner's Now says so; a drill goes out; last night's unanswered lows show.
+nightRow.morning = { for: 'today', at: Date.now() - 2 * 3600e3, unanswered: 2, lows: [{ pid: 'p1', since: Date.now() - 8 * 3600e3, lowest: 53, lowestAt: Date.now() - 8 * 3600e3, answered: false }, { pid: 'p1', since: Date.now() - 6 * 3600e3, lowest: 61, answered: false }] };
+await page.goto(`http://localhost:${PORT}/app/`);
+await page.waitForSelector('#tabs button[data-tab="now"]');
+await page.click('#tabs button[data-tab="now"]');
+await page.waitForSelector('text=Your low alerts reach no phone');
+checks.reachWarning = true;
+await page.waitForSelector('text=Last night: 2 lows, none answered');
+checks.morningCard = (await page.textContent('#main')).includes('Lowest 53 mg/dL');
+await shot('33-reach-morning');
+await page.click('#drillBtn');
+await page.waitForSelector('#toast >> text=Drill sent');
+checks.drillSent = drillSent.includes('s-topic') && Boolean(nightRow.drill && nightRow.drill.hashes && nightRow.drill.hashes['me.ntfy']);
+await page.click('#morningOk');
+await page.waitForFunction(() => !document.body.textContent.includes('Last night: 2 lows'));
+await page.click('#driveBtn');
+await page.waitForSelector('#sheet >> text=DVLA');
+checks.driveCheck = /above 90|eat first|falling|don't drive|No fresh reading/.test(await page.textContent('#sheet h3'));
+await shot('34-drive');
+await page.click('#sheet button[data-b="0"]');
+
 // A typed barcode fills in the carbs; logging it with its name makes a favorite.
 await page.close();
 const p3 = await ctx.newPage();
@@ -408,7 +431,7 @@ await ctx.setOffline(false);
 await p3.evaluate(() => window.dispatchEvent(new Event('online')));
 await p3.waitForFunction(() => !(JSON.parse(localStorage.getItem('su94rAppQueue') || '[]')).length, null, { timeout: 15000 });
 // A dose already logged a little earlier: the double-dose question comes up for the waiting one too.
-if (await p3.$('#sheet >> text=Saved while offline')) { checks.offlineAsksFirst = true; await p3.click('#sheet button[data-b="0"]'); await p3.waitForSelector('#toast'); }
+if (await p3.waitForSelector('#sheet >> text=Saved while offline', { timeout: 6000 }).catch(() => null)) { checks.offlineAsksFirst = true; await p3.click('#sheet button[data-b="0"]'); await p3.waitForSelector('#toast'); }
 const sentLater = doseRows.filter((d) => d.kind === 'rapid' && d.amount === 1 && d.source === 'phone' && !d.deleted);
 checks.sentWhenBack = sentLater.length === 1 && Date.now() - sentLater[0].t > 0;
 checks.everydayFits = await p3.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);

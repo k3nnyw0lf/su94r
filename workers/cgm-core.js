@@ -54,6 +54,8 @@ import { noteStore } from './notes.js';
 import { dailyStore } from './daily.js';
 import { appointmentStore, calendarFeed } from './calendar.js';
 import { supplyStatus } from './supplies.js';
+import { dialer, callRoute, telnyxReady } from './calls.js';
+import { drillSenders } from './night.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
@@ -433,6 +435,19 @@ async function glance(env, n) {
   }
 }
 
+/** Phones with app alerts on and linked Telegram chats, per role (coverage.js). */
+function reachCounts(env, deps) {
+  return async () => {
+    const ps = deps.pushStore || pushStore(env), tg = deps.telegram || telegramStore(env);
+    const n = async (fn) => { try { return (await fn()).length; } catch { return 0; } };
+    return {
+      pushes: { me: ps.ready ? await n(() => ps.forRole('me')) : 0, family: ps.ready ? await n(() => ps.forRole('family')) : 0 },
+      chats: { me: tg.ready ? await n(() => tg.chats('me')) : 0, family: tg.ready ? await n(() => tg.chats('family')) : 0 },
+    };
+  };
+}
+const fnBase = (env) => `${String(env.SUPABASE_URL || '').replace(/\/$/, '')}/functions/v1/su94r-cgm`;
+
 export async function handleCgm(path, request, env, deps = {}) {
   if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
   const url = new URL(request.url);
@@ -456,6 +471,9 @@ export async function handleCgm(path, request, env, deps = {}) {
         forecasts: deps.forecasts || forecastStore(env), snapshot: () => snapshot(env), json,
         night: deps.night || nightStore(env), push: pstore, supplies: deps.supplies || supplyStore(env), labs: deps.labs || labStore(env),
         meals: deps.meals || mealStore(env), notes: deps.notes || noteStore(env), fetchImpl: deps.fetchImpl,
+        counts: reachCounts(env, deps), callsReady: telnyxReady(env),
+        drill: (row) => drillSenders(env, row, { push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }), webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)) }),
+        ackBase: `${fnBase(env)}/night/ack`,
         daily: deps.daily || dailyStore(env), appointments: deps.appointments || appointmentStore(env),
         notify: (row, role, msg) => alertFanOut(env, row, {
           push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
@@ -472,6 +490,8 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (connect) return connect;
     const rotate = await rotateRoute(path, request, url, { screens: deps.screens || screenStore(env), json });
     if (rotate) return rotate;
+    const calls = await callRoute(path, request, url, { night: deps.night || nightStore(env), base: fnBase(env) });
+    if (calls) return calls;
     if (path === 'calendar/feed') {
       const scr = deps.screens || screenStore(env);
       if (!scr.ready) return json({ error: 'not configured' }, 503);
@@ -508,6 +528,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       webpush: deps.webpush || ((role, msg) => pushToPhones(deps.pushStore || pushStore(env), role, msg)),
       doses: deps.store || doseStore(env), supplies: deps.supplies || supplyStore(env),
       history: deps.history || historyStore(env), daily: deps.daily || dailyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
+      counts: reachCounts(env, deps), dial: deps.dial || dialer(env, { base: fnBase(env) }),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (hist) return hist;

@@ -135,6 +135,9 @@ export const nightNotify = (link, title, message) => call(link, 'night/notify', 
 // Night safety net (server: workers/night.js): phone alerts through ntfy, checked every 5 minutes.
 export const nightSetup = (link) => call(link, 'night/setup');
 export const nightSave = (link, patch) => call(link, 'night/setup', { method: 'POST', body: patch });
+/** Whether low alerts reach anyone, last night's report, and the drill (workers/coverage.js). */
+export const nightCoverage = (link) => call(link, 'night/coverage');
+export const nightDrill = (link) => call(link, 'night/drill', { method: 'POST', body: {} });
 export const nightTest = (link) => call(link, 'night/test', { method: 'POST', body: {} });
 export const nightEchoTest = (link, which = 'low') => call(link, 'night/echo-test', { method: 'POST', body: { which } });
 // The server's history (history.js): su94r Mini copies what it has kept, once, in pieces.

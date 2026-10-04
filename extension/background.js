@@ -11,7 +11,7 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport, rotateKey, rotateKeyDone, parseScreenLink } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport, rotateKey, rotateKeyDone, parseScreenLink, nightCoverage } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { findPatterns } from './patterns.js';
 import { parseBody } from './vault-import.js';
@@ -151,6 +151,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) copyHistoryOnce().catch(() => {});
     if (!LEGACY) copyDosesOnce().catch(() => {});
     if (!LEGACY) rotateServerKey().catch(() => {});
+    if (!LEGACY) checkReach().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -866,6 +867,38 @@ async function autoConnect() {
     });
   } catch (err) {
     await done({ ok: false, message: err.message, code: err.code || null });
+  }
+}
+
+// ---- do low alerts reach anyone? (night/coverage on the server) ----
+// Every 30 minutes: when no phone or chat would ring for a low, say so on this computer (once a
+// day); and after a night with lows nobody answered, say that too (once per morning).
+async function checkReach() {
+  const settings = await getSettings();
+  if (!settings.screenLink) return;
+  const { reachAt = 0, reachToldDay = '', morningTold = '' } = await local.get(['reachAt', 'reachToldDay', 'morningTold']);
+  if (Date.now() - reachAt < 30 * 60e3) return;
+  await local.set({ reachAt: Date.now() });
+  const c = await nightCoverage(settings.screenLink);
+  const today = new Date().toDateString();
+  const m = c.morning;
+  if (m?.for && m.for !== morningTold && m.unanswered > 0 && Date.now() - m.at < 12 * 3600e3) {
+    await local.set({ morningTold: m.for });
+    const low = (m.lows || []).reduce((a, b) => ((b.lowest ?? 999) < (a.lowest ?? 999) ? b : a), {});
+    const at = low.lowestAt ? new Date(low.lowestAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
+    chrome.notifications.create('su94r-morning', {
+      type: 'basic', iconUrl: 'icons/icon128.png', priority: 2, requireInteraction: true,
+      title: `Last night: ${m.lows.length} ${m.lows.length === 1 ? 'low' : 'lows'}, ${m.unanswered === m.lows.length ? 'nobody answered' : `${m.unanswered} not answered`}`,
+      message: `${low.lowest ? `Lowest ${low.lowest} mg/dL${at ? ` at ${at}` : ''}. ` : ''}Make sure a phone rings for su94r alerts at night: Health vault → Low alerts → Run an alert drill.`,
+    });
+  }
+  if (c.state === 'none' && reachToldDay !== today) {
+    await local.set({ reachToldDay: today });
+    chrome.notifications.create('su94r-reach', {
+      type: 'basic', iconUrl: 'icons/icon128.png', priority: 2, requireInteraction: true,
+      title: 'Low alerts reach no phone',
+      message: 'A low at night would ring nowhere. Link your phone (Health vault → Share to another phone), turn on its alerts, then run an alert drill.',
+    });
   }
 }
 

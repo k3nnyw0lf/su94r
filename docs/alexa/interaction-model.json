@@ -234,6 +234,28 @@
             "what patterns do you see for {name}",
             "about patterns for {name}"
           ]
+        },
+        {
+          "name": "DriveIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "can I drive",
+            "can I drive now",
+            "is it safe to drive",
+            "is it safe for me to drive",
+            "am I okay to drive",
+            "am I safe to drive",
+            "should I drive",
+            "if I can drive",
+            "whether I can drive",
+            "can {name} drive",
+            "is it safe for {name} to drive"
+          ]
         }
       ],
       "types": [

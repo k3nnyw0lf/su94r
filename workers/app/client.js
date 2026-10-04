@@ -183,6 +183,15 @@
     'Add to my calendar': 'Agregar a mi calendario', 'Doctor visit': 'Cita médica', 'Date': 'Fecha', 'Time': 'Hora', 'With whom (for example Dr. Lee)': 'Con quién (por ejemplo Dra. Lee)', 'Where (optional)': 'Dónde (opcional)',
     'Make a new calendar link?': '¿Crear un enlace de calendario nuevo?', 'Calendars subscribed to the old link stop updating. Subscribe again with the new one.': 'Los calendarios suscritos al enlace anterior dejan de actualizarse. Suscríbete otra vez con el nuevo.',
     'The calendar link is ready.': 'El enlace del calendario está listo.', 'The calendar link is off.': 'El enlace del calendario está apagado.',
+    // reach, morning, driving
+    'Your low alerts reach no phone': 'Tus alertas de baja no llegan a ningún teléfono', 'A low at night would ring nowhere. Turn on alerts on this phone, then run a drill.': 'Una baja de noche no sonaría en ningún lado. Enciende las alertas en este teléfono y luego haz un simulacro.',
+    'Run an alert drill': 'Hacer un simulacro de alerta', 'Alerts not tested yet': 'Alertas sin probar', 'Run a drill: su94r sends a test to every channel and records which ones reached you.': 'Haz un simulacro: su94r envía una prueba a cada canal y anota cuáles te llegaron.',
+    'Last night: {n} lows, none answered': 'Anoche: {n} bajas, ninguna respondida', 'Last night: a low, not answered': 'Anoche: una baja, sin responder', 'Last night: {n} lows, {u} not answered': 'Anoche: {n} bajas, {u} sin responder', 'Last night: {n} lows, all answered': 'Anoche: {n} bajas, todas respondidas', 'Last night: a low, answered': 'Anoche: una baja, respondida',
+    'Lowest {v} at {time}.': 'La más baja: {v} a las {time}.', 'Check that this phone rings for su94r at night (Do Not Disturb lets it through).': 'Revisa que este teléfono suene con su94r de noche (que No molestar lo deje pasar).',
+    '🚗 Can I drive?': '🚗 ¿Puedo manejar?', 'the su94r app': 'la app su94r', 'a family phone': 'un teléfono de la familia', 'Checking…': 'Revisando…',
+    'Alert check': 'Revisión de alertas', 'Reaches: {list}.': 'Llega a: {list}.', 'nothing yet': 'nada todavía', 'the app on {n} phone(s)': 'la app en {n} teléfono(s)', '{n} Telegram chat(s)': '{n} chat(s) de Telegram',
+    'Answered the last drill ({when}): {list}.': 'Respondieron el último simulacro ({when}): {list}.', 'No answer to the last drill yet ({when}).': 'Todavía sin respuesta al último simulacro ({when}).',
+    'Phone calls for unanswered lows: on, {n} number(s).': 'Llamadas por bajas sin responder: encendidas, {n} número(s).', 'Phone calls for unanswered lows: set up in su94r Mini (Low alerts → Phone calls).': 'Llamadas por bajas sin responder: se configuran en su94r Mini (Low alerts → Phone calls).',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -441,6 +450,17 @@
         '<div class="quick" style="justify-content:flex-start">' + [10, 15, 20, 30].concat([10, 15, 20, 30].indexOf(plan.grams) < 0 ? [plan.grams] : []).sort((a, b) => a - b).map((x) => '<button data-treat-g="' + x + '"' + (x === g ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + x + ' g</button>').join('') + '</div>' +
         '<button class="btn wide" id="treatBtn" data-g="' + g + '">' + esc(t('I treated it with {g} g', { g })) + '</button><p class="note">' + esc(t('Logs the carbs, stops the reminders, and rechecks in {n} min.', { n: plan.minutes })) + '</p>');
     }
+    const cov = S.cover && (S.me && S.me.role === 'me') ? S.cover : null;
+    if (cov && cov.state === 'none') html += card('<h2>' + t('Your low alerts reach no phone') + '</h2><p>' + t('A low at night would ring nowhere. Turn on alerts on this phone, then run a drill.') + '</p><div class="row"><button class="btn" id="pushOn">' + t('Ring for lows on this phone') + '</button><button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button></div>', 'warnc');
+    else if (cov && cov.state === 'untested') html += card('<h2>' + t('Alerts not tested yet') + '</h2><p class="small">' + t('Run a drill: su94r sends a test to every channel and records which ones reached you.') + '</p><button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button>');
+    const mo = S.recent && S.recent.morning;
+    if (mo && mo.lows && mo.lows.length && !S.morningSeen) {
+      const n = mo.lows.length, u = mo.unanswered;
+      const lowest = mo.lows.reduce((a, b) => ((b.lowest || 999) < (a.lowest || 999) ? b : a));
+      const head = u ? (u === n ? (n === 1 ? t('Last night: a low, not answered') : t('Last night: {n} lows, none answered', { n })) : t('Last night: {n} lows, {u} not answered', { n, u })) : (n === 1 ? t('Last night: a low, answered') : t('Last night: {n} lows, all answered', { n }));
+      html += card('<h2>' + esc(head) + '</h2>' + (lowest.lowest ? '<p>' + esc(t('Lowest {v} at {time}.', { v: fmt(lowest.lowest, L.units) + ' ' + L.units, time: clock(lowest.lowestAt || lowest.since) })) + '</p>' : '') +
+        (u ? '<p class="small">' + t('Check that this phone rings for su94r at night (Do Not Disturb lets it through).') + '</p><div class="row"><button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button><button class="btn ghost" id="morningOk">' + t('Close') + '</button></div>' : '<button class="btn ghost" id="morningOk">' + t('Close') + '</button>'), u ? 'warnc' : '');
+    }
     const mode = S.recent && S.recent.mode && S.recent.mode.until > now ? S.recent.mode : null;
     if (mode) {
       html += card('<div class="row"><div style="flex:1"><b>' + esc(t(mode.kind === 'exercise' ? '🏃 Exercise mode' : '🤒 Sick-day mode')) + '</b><div class="small muted">' +
@@ -477,7 +497,7 @@
     }
     html += '<div class="row" style="justify-content:center;margin:4px 0 8px">' +
       (S.me && S.me.canLog && !mode ? '<button class="btn ghost" data-mode-ask="exercise">' + t('Exercise mode') + '</button><button class="btn ghost" data-mode-ask="sick">' + t('Sick day') + '</button>' : '') +
-      '<button class="btn ghost" id="bedBtn">' + t('Bedside screen') + '</button></div>';
+      '<button class="btn ghost" id="driveBtn">' + t('🚗 Can I drive?') + '</button><button class="btn ghost" id="bedBtn">' + t('Bedside screen') + '</button></div>';
     main(html);
   }
 
@@ -980,6 +1000,37 @@
     renderNow();
   }
 
+  // ---------- do alerts reach anyone? (coverage.js) ----------
+  async function loadCover() {
+    if (!(S.me && S.me.role === 'me')) return null;
+    try { S.cover = await api('app/coverage'); } catch (e) { /* keep the last */ }
+    return S.cover;
+  }
+  async function drill() {
+    try { const r = await api('app/drill', { method: 'POST', body: {} }); toast(r.text); } catch (e) { toast(e.message); }
+    setTimeout(() => loadCover().then(() => { if (S.tab === 'now' && !$('sheet')) renderNow(); if (S.tab === 'more') renderMore(); }), 60e3);
+  }
+  function coverCard(c) {
+    const words = { 'me.ntfy': 'ntfy', 'me.telegram': 'Telegram', 'me.push': t('the su94r app'), 'family.ntfy': 'ntfy (family)', 'family.telegram': 'Telegram (family)', 'family.push': t('a family phone') };
+    const reach = [];
+    if (c.me.phones) reach.push(t('the app on {n} phone(s)', { n: c.me.phones }));
+    if (c.me.telegram) reach.push(t('{n} Telegram chat(s)', { n: c.me.telegram }));
+    let h = '<h2>' + t('Alert check') + '</h2><p>' + esc(t('Reaches: {list}.', { list: reach.length ? reach.join(', ') : t('nothing yet') })) + '</p>';
+    if (c.drill) {
+      const got = Object.keys(c.drill.got || {}).filter((k) => c.drill.got[k] >= c.drill.at);
+      h += '<p class="small">' + esc(got.length ? t('Answered the last drill ({when}): {list}.', { when: ago(c.drill.at), list: got.map((k) => words[k] || k).join(', ') }) : t('No answer to the last drill yet ({when}).', { when: ago(c.drill.at) })) + '</p>';
+    }
+    h += '<p class="small muted">' + esc(c.calls && c.calls.enabled && c.calls.ready ? t('Phone calls for unanswered lows: on, {n} number(s).', { n: c.calls.numbers }) : t('Phone calls for unanswered lows: set up in su94r Mini (Low alerts → Phone calls).')) + '</p>';
+    return card(h + '<button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button>');
+  }
+  async function driveSheet() {
+    sheet('<h3>' + t('🚗 Can I drive?') + '</h3><p class="muted">' + t('Checking…') + '</p>', [[t('Close'), 'btn ghost', closeSheet]]);
+    let r;
+    try { r = await api('app/drive?pid=' + encodeURIComponent(cur().pid)); } catch (e) { sheet('<h3>' + t('🚗 Can I drive?') + '</h3><p>' + esc(e.message) + '</p>', [[t('Close'), 'btn ghost', closeSheet]]); return; }
+    const color = { stop: 'var(--l)', snack: 'var(--h)', watch: 'var(--h)', ok: 'var(--in)', unknown: 'var(--muted)' }[r.level];
+    sheet('<h3 style="color:' + color + '">' + esc(r.title) + '</h3>' + r.lines.map((x, i) => '<p class="' + (i === r.lines.length - 1 ? 'note' : '') + '">' + esc(x) + '</p>').join(''), [[t('Close'), 'btn ghost', closeSheet]]);
+  }
+
   // ---------- goals, streaks and the months (daily.js) ----------
   async function loadTrend(force) {
     const pid = cur().pid;
@@ -1327,6 +1378,7 @@
     else pc += '<p>' + (role === 'family' ? t('Ring this phone when a low is not handled.') : t('Ring this phone for lows, with an “I\'m OK” button. No other app needed.')) + '</p><button class="btn" id="pushOn">' + t('Ring for lows on this phone') + '</button>';
     pc += '<p class="note">' + t('Your phone\'s silent and Do Not Disturb settings still apply; for nights, let su94r (or Chrome) through.') + '</p>';
     html += card(pc);
+    if (role === 'me') { const c = await loadCover(); if (S.tab !== 'more') return; if (c) html += coverCard(c); }
     html += card('<h2>' + t('Language') + '</h2><div class="segm" role="group" aria-label="' + t('Language') + '"><button data-lang="en" aria-pressed="' + (S.lang === 'en') + '">English</button><button data-lang="es" aria-pressed="' + (S.lang === 'es') + '">Español</button></div>');
     html += card('<h2>' + t('Install') + '</h2>' + install);
     if (!S.extras) { try { S.extras = await api('share/extras'); } catch (e) { S.extras = {}; } }
@@ -1438,13 +1490,16 @@
     else if (el.id === 'bedBtn') bedOpen();
     else if (el.id === 'emEdit') emergencyEdit();
     else if (el.id === 'goalBtn') askGoal();
+    else if (el.id === 'drillBtn') { el.disabled = true; drill(); }
+    else if (el.id === 'driveBtn') driveSheet();
+    else if (el.id === 'morningOk') { S.morningSeen = true; renderNow(); }
     else if (el.id === 'visitAdd') addVisit();
     else if (d.visitdel) { api('app/appointments/remove', { method: 'POST', body: { id: d.visitdel, pid: cur().pid } }).then(() => { toast(t('Removed.')); if (S.tab === 'more') renderMore(); }).catch((x) => toast(x.message)); }
     else if (el.id === 'calNew') calendarNew();
     else if (el.id === 'calOff') calendarOff();
     else if (el.id === 'emNew') emergencyNew();
     else if (el.id === 'emOff') emergencyOff();
-    else if (el.id === 'pushOn') { el.disabled = true; pushOn().then(() => toast(t('Alerts are on. Send a test to hear one.'))).catch((x) => toast(x.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
+    else if (el.id === 'pushOn') { el.disabled = true; pushOn().then(() => toast(t('Alerts are on. Send a test to hear one.'))).catch((x) => toast(x.message)).then(() => loadCover()).then(() => { if (S.tab === 'more') renderMore(); else if (S.tab === 'now') renderNow(); }); }
     else if (el.id === 'pushOff') { el.disabled = true; pushOff().then(() => toast(t('App alerts are off on this phone.'))).catch((x) => toast(x.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
     else if (el.id === 'pushTest') { el.disabled = true; api('app/push/test', { method: 'POST', body: {} }).then(() => toast(t('Test sent. It should ring in a few seconds.'))).catch((x) => toast(x.message)).then(() => { el.disabled = false; }); }
     else if (d.allow) {
@@ -1490,6 +1545,8 @@
     await refreshRecent();
     show(S.justLinked ? 'more' : S.tab);
     loadTrend().then(() => { if (S.tab === 'now' && !$('sheet')) renderNow(); });
+    loadCover().then(() => { if (S.tab === 'now' && !$('sheet')) renderNow(); });
+    setInterval(loadCover, 30 * MIN);
     setInterval(() => loadTrend(true), 30 * MIN);
     setInterval(refreshLive, 60e3);
     setInterval(refreshRecent, 120e3);

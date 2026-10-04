@@ -214,6 +214,26 @@
             "busca patrones",
             "qué patrones tiene {name}"
           ]
+        },
+        {
+          "name": "DriveIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "puedo manejar",
+            "puedo manejar ahora",
+            "puedo conducir",
+            "es seguro manejar",
+            "estoy bien para manejar",
+            "debería manejar",
+            "si puedo manejar",
+            "puede {name} manejar",
+            "es seguro que {name} maneje"
+          ]
         }
       ],
       "types": [
