@@ -2,7 +2,8 @@
 // made-up readings: a share code links the phone; Now, History, Log, Report and More render on a
 // phone-sized screen without sideways scrolling; a dose logs after the confirm sheet; a second
 // dose shows the double-dose warning; Undo works; a meal photo fills in the carbs; a family
-// member's phone cannot log.
+// member's phone cannot log; exercise mode turns on and off; the bedside screen turns red for a
+// low and "I'm OK" stops it; the owner's emergency card saves, gets a QR picture and its page shows.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
 import path from 'node:path';
@@ -75,8 +76,9 @@ const server = http.createServer(async (req, res) => {
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const request = new Request(url, { method: req.method, headers: req.headers, body: req.method === 'GET' ? undefined : body });
   // The proxy serves the app's own files and the meal photo; everything else is su94r-cgm.
+  const proxied = url.pathname === '/app/qr' || /^\/e\/[0-9a-f]{64}$/.test(url.pathname);
   const appFile = req.method === 'GET' && ['/app', '/app/', '/app/app.js', '/app/sw.js', '/app/manifest.webmanifest', '/app/icon.svg', '/app/icon-192.png', '/app/icon-512.png', '/app/apple-touch-icon.png'].includes(url.pathname);
-  const r = appFile || url.pathname === '/app/meal'
+  const r = appFile || proxied || url.pathname === '/app/meal'
     ? await proxy.fetch(request, { CGM_URL: `http://localhost:${PORT}`, AI: ai })
     : await handleCgm(url.pathname.slice(1), request, ENV, deps);
   res.writeHead(r.status, Object.fromEntries(r.headers));
@@ -262,6 +264,67 @@ checks.esHistory = (await page.textContent('#main')).includes('Día por día');
 await page.click('#tabs button[data-tab="more"]');
 await page.click('button[data-lang="en"]');
 await page.waitForSelector('#tabs button[data-tab="now"] span >> text=Now');
+
+// Exercise mode from Now, then off again.
+await tab('now');
+await page.waitForSelector('button[data-mode-ask="exercise"]');
+await page.click('button[data-mode-ask="exercise"]');
+await page.click('#sheet button[data-b="1"]');
+await page.waitForSelector('text=🏃 Exercise mode');
+checks.exerciseOn = nightRow.mode === 'exercise' && Date.parse(nightRow.mode_until) - Date.now() > 110 * MIN;
+checks.modeFits = await noSideScroll();
+await shot('21-exercise-mode');
+await page.click('button[data-mode="off"]');
+await page.waitForSelector('button[data-mode-ask="sick"]');
+checks.modeOff = nightRow.mode === null;
+
+// The bedside screen: dim when fine, red for a low nobody answered, "I'm OK" stops it.
+await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));   // the reading after the low scene
+await page.waitForTimeout(1500);
+await page.click('#bedBtn');
+await page.waitForSelector('#bed .bed-clock');
+checks.bedDim = !(await page.evaluate(() => document.getElementById('bed').classList.contains('alarm')));
+await shot('22-bedside');
+nightRow.state = { p1: { since: Date.now() - 10 * MIN, notified: Date.now() - 2 * MIN, count: 1, ackHash: 'x' } };
+await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+await page.waitForSelector('#bed.alarm', { timeout: 70000 });
+checks.bedAlarm = true;
+await shot('23-bedside-alarm');
+await page.click('#bed button[data-bed="ok"]');
+await page.waitForFunction(() => !document.getElementById('bed').classList.contains('alarm'), null, { timeout: 15000 });
+checks.bedAck = Boolean(nightRow.state.p1.ackAt);
+await page.click('#bed button[data-bed="close"]');
+checks.bedClosed = !(await page.$('#bed'));
+nightRow.state = {};
+
+// The emergency card: edit, make the link, see the QR picture, open the page.
+await tab('more');
+await page.waitForSelector('#emEdit');
+await page.click('#emEdit');
+await page.fill('#emNote', 'Type 1 diabetes, uses insulin.');
+await page.fill('#emN0', 'Mom');
+await page.fill('#emP0', '239 555 0101');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('#main >> text=Type 1 diabetes, uses insulin.');
+checks.cardSaved = nightRow.emergency && nightRow.emergency.contacts[0].phone === '239 555 0101';
+await page.click('#emNew');
+await page.waitForSelector('#emQr[src^="data:image/png"]');
+checks.cardQr = true;
+checks.cardFits = await noSideScroll();
+await shot('24-emergency-card');
+const cardLink = await page.evaluate(() => localStorage.getItem('su94rAppCard'));
+const cardPage = await ctx.newPage();
+cardPage.on('pageerror', (e) => errors.push(e.message));
+await cardPage.goto(cardLink + '#preview');
+await cardPage.waitForSelector('.name');
+const cardText = await cardPage.textContent('main');
+checks.cardPage = cardText.includes('Alex T') && cardText.includes('Type 1 diabetes, uses insulin.') && cardText.includes('Call Mom') && cardText.includes('4 glucose tabs');
+checks.cardPageFits = await cardPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
+await cardPage.screenshot({ path: path.join(OUT, 'app-25-emergency-page.png'), fullPage: true });
+await cardPage.click('#lang');
+checks.cardPageEs = (await cardPage.textContent('main')).includes('Llamar al 911');
+await cardPage.screenshot({ path: path.join(OUT, 'app-26-emergency-page-es.png'), fullPage: true });
+await cardPage.close();
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

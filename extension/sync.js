@@ -25,7 +25,7 @@ const QUOTA = sync.QUOTA_BYTES || 102400;
 const DAY_MS = 864e5;
 
 /** Settings every computer shares. Alert on/off and sound stay per computer. */
-export const SHARED_SETTINGS = ['alerts', 'meds', 'units', 'rapidInsulin', 'sensorDays', 'sensorReminder', 'projection', 'quietDevices', 'screenLink', 'supplies', 'place', 'heatNote', 'googleClientId'];
+export const SHARED_SETTINGS = ['alerts', 'meds', 'units', 'rapidInsulin', 'sensorDays', 'sensorReminder', 'projection', 'quietDevices', 'screenLink', 'supplies', 'place', 'heatNote', 'googleClientId', 'keyRotatedAt'];
 const PER_DEVICE_ALERT_KEYS = ['enabled', 'sound'];
 
 export const utcDay = (t) => new Date(t).toISOString().slice(0, 10);

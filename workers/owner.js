@@ -16,6 +16,11 @@
 //   GET  connect/status                 what is set up (no secrets)
 //   POST connect                        { session, name } → { key }
 //   POST connect/session?key=<key>      { session } keeps the server's LibreLinkUp session fresh
+//   POST owner/rotate?key=<key>         a new key for this su94r Mini (the old one still works)
+//   POST owner/rotate/done?key=<new>    { old: sha256(old key) } the old key stops working
+//
+// Changing the key takes two steps so su94r Mini is never locked out: it saves the new key
+// first, proves it holds it, and only then is the old one turned off.
 
 import { sha256, randomToken } from './screens.js';
 
@@ -120,4 +125,30 @@ export async function isOwnerKey(screens, key) {
   if (!row || row.kind !== 'owner') return false;
   if (!row.last_seen || Date.now() - Date.parse(row.last_seen) > 60e3) screens.update(row.id, { last_seen: new Date().toISOString() }).catch(() => {});
   return true;
+}
+
+/**
+ * owner/rotate and owner/rotate/done; null when the path is not one. Only a su94r Mini key can
+ * change itself (the DISPLAY_KEY set on the server is changed there, not here).
+ */
+export async function rotateRoute(path, request, url, { screens, json }) {
+  if (path !== 'owner/rotate' && path !== 'owner/rotate/done') return null;
+  if (!screens.ready) return json({ error: 'not configured' }, 503);
+  if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+  const key = url.searchParams.get('key');
+  if (!(await isOwnerKey(screens, key))) return json({ error: 'unauthorized' }, 401);
+  const row = await screens.byToken(await sha256(key));
+  if (path === 'owner/rotate') {
+    const fresh = randomToken();
+    const now = new Date().toISOString();
+    await screens.insert({ id: crypto.randomUUID(), secret_hash: await sha256(randomToken()), token_hash: await sha256(fresh), kind: 'owner', name: row.name || 'su94r Mini', expires_at: now, claimed_at: now });
+    return json({ key: fresh });
+  }
+  const body = await request.json().catch(() => ({}));
+  const old = String(body.old || '');
+  if (!/^[0-9a-f]{64}$/.test(old) || old === row.token_hash) return json({ error: 'old key hash needed' }, 400);
+  const was = await screens.byToken(old).catch(() => null);
+  const isOwner = Boolean(was && was.kind === 'owner');
+  if (isOwner) await screens.update(was.id, { revoked: true });
+  return json({ ok: true, revoked: isOwner });
 }

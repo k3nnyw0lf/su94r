@@ -39,7 +39,7 @@ import { screenStore, pairStart, pairPoll, pairClaim, screenFor, shareNew, share
 import { inboxStore, inboxRoute } from './inbox.js';
 import { mcpRoute } from './mcp.js';
 import { nightscoutRoute, makeNsLink } from './nightscout.js';
-import { ownerStore, connectRoute, isOwnerKey } from './owner.js';
+import { ownerStore, connectRoute, isOwnerKey, rotateRoute } from './owner.js';
 import { nightStore, nightRoute, alertFanOut } from './night.js';
 import { pushStore, pushToPhones } from './webpush.js';
 import { supplyStore } from './supplies.js';
@@ -48,6 +48,7 @@ import { forecastStore, cleanForecasts } from './forecast.js';
 import { historyStore, historyRoute } from './history.js';
 import { doctorNew, doctorData } from './doctor.js';
 import { appRoute, APP_PATHS } from './app.js';
+import { emergencyRoute } from './emergency.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
 
 const CORS = {
@@ -456,6 +457,19 @@ export async function handleCgm(path, request, env, deps = {}) {
       onSession: (s) => adoptSession(env, s),
     });
     if (connect) return connect;
+    const rotate = await rotateRoute(path, request, url, { screens: deps.screens || screenStore(env), json });
+    if (rotate) return rotate;
+    if (path === 'emergency' || path.startsWith('emergency/')) {
+      const pstore = deps.pushStore || pushStore(env);
+      const tg = deps.telegram || telegramStore(env);
+      return await emergencyRoute(path, request, url, {
+        screens: deps.screens || screenStore(env), night: deps.night || nightStore(env), json, keyOk, snapshot: () => snapshot(env),
+        notify: (row, role, msg) => alertFanOut(env, row, {
+          push: deps.push, telegram: (r, m) => telegramAlert(tg, r, m, { api: deps.tgApi }),
+          webpush: deps.webpush || ((r, m) => pushToPhones(pstore, r, m)),
+        })(role, msg),
+      });
+    }
     const inbox = await inboxRoute(path, request, url, env, { store: deps.inbox || inboxStore(env), json, keyOk });
     if (inbox) return inbox;
     const mcp = await mcpRoute(path, request, url, env, {

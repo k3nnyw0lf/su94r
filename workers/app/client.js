@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -135,6 +135,25 @@
     'Notifications were not allowed. Allow them for su94r in the phone\'s settings, then try again.': 'No se permitieron las notificaciones. Permítelas para su94r en la configuración del teléfono e intenta otra vez.',
     // source names, kinds and amounts
     'phone': 'teléfono', 'meal': 'comida', 'rapid': 'rápida', 'regular': 'regular', 'long-acting': 'de acción prolongada', 'pre-mixed': 'premezclada',
+    // modes, bedside screen, emergency card
+    '🏃 Exercise mode': '🏃 Modo ejercicio', '🤒 Sick-day mode': '🤒 Modo día de enfermedad', 'End': 'Terminar', 'Exercise mode': 'Modo ejercicio', 'Sick day': 'Día de enfermedad', 'Bedside screen': 'Pantalla de noche',
+    'Low soon warns earlier. Ends at {time}.': '“Baja pronto” avisa antes. Termina a las {time}.', 'A check-in every 4 hours while awake. Ends at {time}.': 'Una revisión cada 4 horas mientras estás despierto. Termina a las {time}.',
+    'Low soon warns earlier, from 10 mg/dL above your low line and 30 minutes ahead. It ends by itself.': '“Baja pronto” avisa antes: desde 10 mg/dL por encima de tu línea de baja y con 30 minutos de anticipación. Termina sola.',
+    'A check-in every 4 hours while awake (every 2 when above 250): ketones, fluids, your sick-day plan. It ends by itself.': 'Una revisión cada 4 horas mientras estás despierto (cada 2 por encima de 250): cetonas, líquidos y tu plan para días de enfermedad. Termina sola.',
+    'Last reading {ago}': 'Última lectura {ago}', 'Quiet until {time}': 'Silencio hasta las {time}', 'Quiet 10 min': 'Silenciar 10 min',
+    'Keeps the screen on. Turns red and beeps for a low. Keep the phone charging and its volume up.': 'Mantiene la pantalla encendida. Se pone roja y pita con una baja. Deja el teléfono cargando y con el volumen alto.',
+    'Emergency card': 'Tarjeta de emergencia', 'No note yet.': 'Todavía no hay nota.', 'No one to call yet.': 'Todavía no hay a quién llamar.',
+    'A page anyone can open from a QR code when you cannot speak for yourself: what you wrote, what to do for a low (your plan), the glucose now if you allow it, and whom to call.': 'Una página que cualquiera puede abrir con un código QR cuando no puedas hablar por ti: lo que escribiste, qué hacer con una baja (tu plan), la glucosa ahora si lo permites y a quién llamar.',
+    'Shows the glucose now.': 'Muestra la glucosa actual.', 'Does not show the glucose.': 'No muestra la glucosa.', 'Opening it tells you and your family.': 'Al abrirla te avisa a ti y a tu familia.', 'Opening it tells no one.': 'Al abrirla no avisa a nadie.',
+    'Edit card': 'Editar tarjeta', 'QR code of the emergency card': 'Código QR de la tarjeta de emergencia', 'Open the card': 'Abrir la tarjeta', 'New link': 'Enlace nuevo', 'Make the card link': 'Crear el enlace de la tarjeta',
+    'Long-press the picture to save it, then set it as your lock-screen picture, or print it for your wallet.': 'Mantén presionada la imagen para guardarla y ponla en la pantalla de bloqueo, o imprímela para la cartera.',
+    'A card link was made on {date} (on another device). Make a new link to show its code here; the old one stops working.': 'Se hizo un enlace de tarjeta el {date} (en otro dispositivo). Crea un enlace nuevo para ver su código aquí; el anterior deja de funcionar.',
+    'Last opened {ago}.': 'Última vez abierta: {ago}.', 'Phone': 'Teléfono', 'What responders should know': 'Lo que deben saber quienes te ayuden',
+    'for example: Type 1 diabetes, uses insulin. Allergic to penicillin.': 'por ejemplo: Diabetes tipo 1, usa insulina. Alérgico a la penicilina.', 'Whom to call (up to 3)': 'A quién llamar (hasta 3)',
+    'Show the glucose now': 'Mostrar la glucosa actual', 'Tell me and my family when it is opened': 'Avisarme a mí y a mi familia cuando la abran', 'Card language (the reader can switch)': 'Idioma de la tarjeta (quien la lea puede cambiarlo)',
+    'The card link is ready.': 'El enlace de la tarjeta está listo.', 'Make a new card link?': '¿Crear un enlace nuevo?', 'The old QR code stops working. Replace it wherever you saved or printed it.': 'El código QR anterior deja de funcionar. Reemplázalo donde lo hayas guardado o impreso.',
+    'Turn the card off?': '¿Apagar la tarjeta?', 'Its QR code stops working at once. You can make a new one later.': 'Su código QR deja de funcionar enseguida. Puedes crear uno nuevo después.', 'The card is off.': 'La tarjeta está apagada.',
+    'MEDICAL INFORMATION': 'INFORMACIÓN MÉDICA', 'Scan for what to do': 'Escanea para saber qué hacer',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -385,6 +404,12 @@
         '<div class="quick" style="justify-content:flex-start">' + [10, 15, 20, 30].concat([10, 15, 20, 30].indexOf(plan.grams) < 0 ? [plan.grams] : []).sort((a, b) => a - b).map((x) => '<button data-treat-g="' + x + '"' + (x === g ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + x + ' g</button>').join('') + '</div>' +
         '<button class="btn wide" id="treatBtn" data-g="' + g + '">' + esc(t('I treated it with {g} g', { g })) + '</button><p class="note">' + esc(t('Logs the carbs, stops the reminders, and rechecks in {n} min.', { n: plan.minutes })) + '</p>');
     }
+    const mode = S.recent && S.recent.mode && S.recent.mode.until > now ? S.recent.mode : null;
+    if (mode) {
+      html += card('<div class="row"><div style="flex:1"><b>' + esc(t(mode.kind === 'exercise' ? '🏃 Exercise mode' : '🤒 Sick-day mode')) + '</b><div class="small muted">' +
+        esc(t(mode.kind === 'exercise' ? 'Low soon warns earlier. Ends at {time}.' : 'A check-in every 4 hours while awake. Ends at {time}.', { time: clock(mode.until) })) + '</div></div>' +
+        (S.me && S.me.canLog ? '<button class="btn ghost" data-mode="off">' + t('End') + '</button>' : '') + '</div>');
+    }
     let top = '<div class="big state-' + state + '"><span class="v">' + (l ? fmt(l.mg, units) : '—') + '</span>' +
       (l && !stale ? '<span class="a" aria-label="' + esc(ARROW_WORD()[l.trend] || '') + '">' + (ARROW[l.trend] || '') + '</span>' : '') + '<span class="u">' + esc(units) + '</span></div>';
     top += '<div class="sub">' + (people().length > 1 || (c.info && c.info.name) ? esc(c.info ? c.info.name : '') + ' · ' : '') +
@@ -408,6 +433,9 @@
             : t('Sensor ends in {n} days ({date})', { n: Math.floor(left / DAY), date: new Date(ends).toLocaleDateString(LOC(), { weekday: 'short', month: 'short', day: 'numeric' }) });
       html += '<p class="small" style="text-align:center;color:' + (left < DAY ? 'var(--h)' : 'var(--muted)') + '">' + esc(when) + '</p>';
     }
+    html += '<div class="row" style="justify-content:center;margin:4px 0 8px">' +
+      (S.me && S.me.canLog && !mode ? '<button class="btn ghost" data-mode-ask="exercise">' + t('Exercise mode') + '</button><button class="btn ghost" data-mode-ask="sick">' + t('Sick day') + '</button>' : '') +
+      '<button class="btn ghost" id="bedBtn">' + t('Bedside screen') + '</button></div>';
     main(html);
   }
 
@@ -723,6 +751,185 @@
     renderNow();
   }
 
+  // ---------- exercise and sick-day modes (night.js) ----------
+  function askMode(kind) {
+    const hours = kind === 'exercise' ? [1, 2, 4] : [12, 24, 48];
+    sheet('<h3>' + t(kind === 'exercise' ? 'Exercise mode' : 'Sick day') + '</h3><p class="muted">' + t(kind === 'exercise' ? 'Low soon warns earlier, from 10 mg/dL above your low line and 30 minutes ahead. It ends by itself.' : 'A check-in every 4 hours while awake (every 2 when above 250): ketones, fluids, your sick-day plan. It ends by itself.') + '</p>',
+      hours.map((h) => [h + ' h', 'btn', () => setMode(kind, h)]).concat([[t('Cancel'), 'btn ghost', closeSheet]]));
+  }
+  async function setMode(kind, hours) {
+    try { const r = await api('app/mode', { method: 'POST', body: { mode: kind, hours } }); closeSheet(); toast(r.text); }
+    catch (e) { toast(e.message); return; }
+    await refreshRecent();
+  }
+
+  // ---------- bedside screen ----------
+  // A dim clock for the nightstand that keeps the screen on, turns red and beeps for a low (or a
+  // low alert nobody answered), with "I'm OK" on phones that may log. The phone's silent switch
+  // and volume still apply; the alerts (app, ntfy, Telegram) stay the first line.
+  const bed = { el: null, timer: null, data: null, lock: null, audio: null, beepAt: 0, quietUntil: 0 };
+  async function bedOpen() {
+    if (bed.el) return;
+    const el = document.createElement('div');
+    el.id = 'bed'; el.className = 'bed'; el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', t('Bedside screen'));
+    el.addEventListener('click', bedClick);
+    document.body.appendChild(el);
+    bed.el = el;
+    // Made on the tap that opened it, so the phone lets it make sound later.
+    try { bed.audio = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { bed.audio = null; }
+    document.addEventListener('visibilitychange', bedLock);
+    bed.timer = setInterval(bedTick, 5000);
+    bed.data = setInterval(() => { refreshLive(); refreshRecent(); }, 60e3);
+    bedTick();
+    await bedLock();
+  }
+  function bedClose() {
+    if (!bed.el) return;
+    clearInterval(bed.timer); clearInterval(bed.data);
+    document.removeEventListener('visibilitychange', bedLock);
+    try { if (bed.lock) bed.lock.release(); } catch (e) { /* already gone */ }
+    try { if (bed.audio) bed.audio.close(); } catch (e) { /* already gone */ }
+    bed.el.remove(); bed.el = null; bed.lock = null; bed.audio = null;
+  }
+  async function bedLock() {
+    if (!bed.el || document.visibilityState !== 'visible' || !navigator.wakeLock) return;
+    try { bed.lock = await navigator.wakeLock.request('screen'); } catch (e) { bed.lock = null; }
+  }
+  function beep() {
+    const a = bed.audio; if (!a) return;
+    if (a.state === 'suspended') a.resume().catch(() => {});
+    [0, 0.35, 0.7].forEach((d) => {
+      const o = a.createOscillator(), g = a.createGain();
+      o.type = 'square'; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, a.currentTime + d);
+      g.gain.exponentialRampToValueAtTime(0.4, a.currentTime + d + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + d + 0.25);
+      o.connect(g); g.connect(a.destination);
+      o.start(a.currentTime + d); o.stop(a.currentTime + d + 0.3);
+    });
+  }
+  function bedTick() {
+    if (!bed.el) return;
+    const c = cur(), L = c.live, now = Date.now();
+    const l = L && L.latest;
+    const fresh = Boolean(l && now - l.t <= 15 * MIN);
+    const ep = S.recent && S.recent.lows ? S.recent.lows[c.pid] : null;
+    const low = fresh && l.mg < L.low;
+    const alarm = low || Boolean(ep && !ep.acked);
+    const quiet = now < bed.quietUntil;
+    if (alarm && !quiet && now - bed.beepAt >= 3000) { bed.beepAt = now; beep(); }
+    bed.el.classList.toggle('alarm', alarm);
+    const plan = S.recent && S.recent.plan && S.recent.plan.text;
+    let h = '<button class="bed-x" data-bed="close" aria-label="' + esc(t('Close')) + '">✕</button>';
+    h += '<div class="bed-clock">' + esc(new Date(now).toLocaleTimeString(LOC(), { hour: 'numeric', minute: '2-digit' })) + '</div>';
+    h += '<div class="bed-g">' + (l ? esc(fmt(l.mg, L.units)) + ' <span>' + (fresh ? (ARROW[l.trend] || '') : '') + '</span>' : '—') + '</div>';
+    h += '<div class="bed-sub">' + esc(l ? (fresh ? ago(l.t) : t('Last reading {ago}', { ago: ago(l.t) })) : t('no reading yet')) + '</div>';
+    if (alarm) {
+      h += '<div class="bed-msg">' + esc(low ? t(l.mg < 55 ? 'Urgent low' : 'Low') + (plan ? ' · ' + t('Your plan: {plan}', { plan }) : '') : t('A low alert is waiting')) + '</div>';
+      h += '<div class="bed-row">' + (S.me && S.me.canLog ? '<button class="btn" data-bed="ok">' + esc(t('I\'m OK')) + '</button>' : '') +
+        '<button class="btn ghost" data-bed="quiet">' + esc(quiet ? t('Quiet until {time}', { time: clock(bed.quietUntil) }) : t('Quiet 10 min')) + '</button></div>';
+    } else h += '<div class="bed-note">' + esc(t('Keeps the screen on. Turns red and beeps for a low. Keep the phone charging and its volume up.')) + '</div>';
+    bed.el.innerHTML = h;
+  }
+  async function bedClick(e) {
+    const b = e.target.closest('button[data-bed]'); if (!b) return;
+    const what = b.dataset.bed;
+    if (what === 'close') { bedClose(); return; }
+    if (what === 'quiet') { bed.quietUntil = Date.now() + 10 * MIN; bedTick(); return; }
+    b.disabled = true;
+    try {
+      const r = await api('app/ack', { method: 'POST', body: {} });
+      const l = cur().live && cur().live.latest;
+      bed.quietUntil = Date.now() + (l && l.mg < 55 ? 5 : 15) * MIN;      // a reading still low beeps again after that
+      toast(r.text);
+    } catch (x) { toast(x.message); }
+    await refreshRecent();
+    bedTick();
+  }
+
+  // ---------- emergency card (emergency.js; the owner's phone) ----------
+  async function emergencyCard() {
+    let em;
+    try { em = await api('app/emergency'); } catch (e) { return card('<h2>' + t('Emergency card') + '</h2><p class="muted">' + esc(e.message) + '</p>'); }
+    S.emergency = em;
+    if (!em.link) store.del(K.card);
+    const link = em.link ? store.get(K.card) : null;
+    const c = em.card;
+    let h = '<h2>' + t('Emergency card') + '</h2><p class="muted small">' + t('A page anyone can open from a QR code when you cannot speak for yourself: what you wrote, what to do for a low (your plan), the glucose now if you allow it, and whom to call.') + '</p>';
+    h += '<p>' + (c.note ? esc(c.note) : '<span class="muted">' + t('No note yet.') + '</span>') + '</p>';
+    h += c.contacts.length ? '<ul class="list">' + c.contacts.map((x) => '<li><span>' + esc(x.name) + '</span><span class="src">' + esc(x.phone) + '</span></li>').join('') + '</ul>' : '<p class="muted small">' + t('No one to call yet.') + '</p>';
+    h += '<p class="small muted">' + esc((c.glucose ? t('Shows the glucose now.') : t('Does not show the glucose.')) + ' ' + (c.tell ? t('Opening it tells you and your family.') : t('Opening it tells no one.'))) + '</p>';
+    h += '<div class="row"><button class="btn ghost" id="emEdit">' + t('Edit card') + '</button></div>';
+    if (link) {
+      h += '<div class="qr-box"><img id="emQr" alt="' + esc(t('QR code of the emergency card')) + '"></div>' +
+        '<p class="note">' + t('Long-press the picture to save it, then set it as your lock-screen picture, or print it for your wallet.') + '</p>' +
+        '<div class="row"><a class="btn ghost" href="' + esc(link) + '#preview" target="_blank" rel="noopener">' + t('Open the card') + '</a><button class="btn ghost" data-copy="' + esc(link) + '">' + t('Copy') + '</button><button class="btn ghost" id="emNew">' + t('New link') + '</button><button class="btn ghost" id="emOff">' + t('Turn off') + '</button></div>';
+    } else if (em.link) {
+      h += '<p class="small">' + esc(t('A card link was made on {date} (on another device). Make a new link to show its code here; the old one stops working.', { date: new Date(em.link.since).toLocaleDateString(LOC(), { month: 'short', day: 'numeric' }) })) + '</p>' +
+        '<div class="row"><button class="btn" id="emNew">' + t('New link') + '</button><button class="btn ghost" id="emOff">' + t('Turn off') + '</button></div>';
+    } else h += '<button class="btn" id="emNew">' + t('Make the card link') + '</button>';
+    if (em.link && em.link.lastSeen) h += '<p class="note">' + esc(t('Last opened {ago}.', { ago: ago(Date.parse(em.link.lastSeen)) })) + '</p>';
+    return card(h);
+  }
+  /** The card's QR as a picture to save (lock screen, wallet): the server draws the code, the phone adds the words. */
+  async function emergencyQr() {
+    const img = $('emQr'); const link = store.get(K.card);
+    if (!img || !link) return;
+    try {
+      const r = await fetch('/app/qr', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: link }) });
+      if (!r.ok) return;
+      const url = URL.createObjectURL(new Blob([await r.text()], { type: 'image/svg+xml' }));
+      const qr = new Image();
+      qr.onload = () => {
+        const cv = document.createElement('canvas'); cv.width = 600; cv.height = 780;
+        const g = cv.getContext('2d');
+        g.fillStyle = '#fff'; g.fillRect(0, 0, 600, 780);
+        g.fillStyle = '#b42318'; g.fillRect(0, 0, 600, 120);
+        g.fillStyle = '#fff'; g.textAlign = 'center'; g.font = 'bold 40px system-ui, sans-serif'; g.fillText(t('MEDICAL INFORMATION'), 300, 76);
+        g.drawImage(qr, 50, 150, 500, 500);
+        g.fillStyle = '#1f2328'; g.font = '30px system-ui, sans-serif'; g.fillText(t('Scan for what to do'), 300, 720);
+        URL.revokeObjectURL(url);
+        img.src = cv.toDataURL('image/png');
+      };
+      qr.src = url;
+    } catch (e) { /* the link buttons still work */ }
+  }
+  function emergencyEdit() {
+    const c = (S.emergency && S.emergency.card) || { note: '', contacts: [], glucose: true, tell: true, lang: S.lang };
+    const who = (k) => { const x = c.contacts[k] || {}; return '<div class="row" style="flex-wrap:nowrap"><input id="emN' + k + '" placeholder="' + esc(t('Name')) + '" value="' + esc(x.name || '') + '" maxlength="40"><input id="emP' + k + '" type="tel" inputmode="tel" placeholder="' + esc(t('Phone')) + '" value="' + esc(x.phone || '') + '" maxlength="20"></div>'; };
+    sheet('<h3>' + t('Emergency card') + '</h3>' +
+      '<label for="emNote">' + t('What responders should know') + '</label><textarea id="emNote" rows="3" maxlength="300" placeholder="' + esc(t('for example: Type 1 diabetes, uses insulin. Allergic to penicillin.')) + '">' + esc(c.note) + '</textarea>' +
+      '<label>' + t('Whom to call (up to 3)') + '</label>' + who(0) + who(1) + who(2) +
+      '<label class="check"><input type="checkbox" id="emG"' + (c.glucose ? ' checked' : '') + '> ' + t('Show the glucose now') + '</label>' +
+      '<label class="check"><input type="checkbox" id="emT"' + (c.tell ? ' checked' : '') + '> ' + t('Tell me and my family when it is opened') + '</label>' +
+      '<label for="emL">' + t('Card language (the reader can switch)') + '</label><select id="emL"><option value="en"' + (c.lang === 'en' ? ' selected' : '') + '>English</option><option value="es"' + (c.lang === 'es' ? ' selected' : '') + '>Español</option></select>',
+      [[t('Save'), 'btn', emergencySave], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+  async function emergencySave() {
+    const contacts = [0, 1, 2].map((k) => ({ name: $('emN' + k).value.trim(), phone: $('emP' + k).value.trim() })).filter((x) => x.name || x.phone);
+    try {
+      await api('app/emergency/save', { method: 'POST', body: { note: $('emNote').value, contacts, glucose: $('emG').checked, tell: $('emT').checked, lang: $('emL').value } });
+      closeSheet(); toast(t('Saved.'));
+    } catch (e) { toast(e.message); return; }
+    if (S.tab === 'more') renderMore();
+  }
+  function emergencyNew() {
+    const go = async () => {
+      try { const r = await api('app/emergency/new', { method: 'POST', body: { pid: cur().pid } }); store.set(K.card, location.origin + '/e/' + r.token); closeSheet(); toast(t('The card link is ready.')); }
+      catch (e) { toast(e.message); return; }
+      if (S.tab === 'more') renderMore();
+    };
+    if (!(S.emergency && S.emergency.link)) { go(); return; }
+    sheet('<h3>' + t('Make a new card link?') + '</h3><p>' + t('The old QR code stops working. Replace it wherever you saved or printed it.') + '</p>', [[t('New link'), 'btn warn', go], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+  function emergencyOff() {
+    sheet('<h3>' + t('Turn the card off?') + '</h3><p>' + t('Its QR code stops working at once. You can make a new one later.') + '</p>', [[t('Turn off'), 'btn warn', async () => {
+      try { await api('app/emergency/remove', { method: 'POST', body: {} }); store.del(K.card); closeSheet(); toast(t('The card is off.')); }
+      catch (e) { toast(e.message); return; }
+      if (S.tab === 'more') renderMore();
+    }], [t('Cancel'), 'btn ghost', closeSheet]]);
+  }
+
   // ---------- Report ----------
   async function renderReport() {
     const c = cur();
@@ -808,6 +1015,11 @@
           : '<p class="muted small">' + t('A family member who lives with you can log doses and meals too. Their doses get the same double-dose check.') + '</p><ul class="list">' +
             phones.map((p) => '<li><span>' + esc(p.name) + '</span><span class="src">' + t(p.canLog ? 'can log' : 'reads only') + '</span><button data-allow="' + esc(p.id) + '" data-on="' + (p.canLog ? '0' : '1') + '">' + t(p.canLog ? 'Stop logging' : 'Allow logging') + '</button></li>').join('') + '</ul>'));
     }
+    if (role === 'me') {
+      const em = await emergencyCard();
+      if (S.tab !== 'more') return;
+      html += em;
+    }
     let sup = null;
     try { sup = await api('app/supplies?pid=' + encodeURIComponent(cur().pid)); } catch (e) { sup = null; }
     if (S.tab !== 'more') return;
@@ -822,6 +1034,7 @@
       '<button class="btn ghost" id="unlink">' + t('Unlink this phone') + '</button>');
     html += '<p class="note" style="text-align:center">' + t('su94r · not a medical device. Readings come from LibreLinkUp and can be a few minutes behind.') + '</p>';
     main(html);
+    emergencyQr();
   }
 
   // ---------- navigation and events ----------
@@ -876,6 +1089,12 @@
     else if (d.treatG) { S.treatGrams = Number(d.treatG); renderNow(); }
     else if (el.id === 'treatBtn') askToTreat(Number(d.g));
     else if (el.id === 'ackBtn') sendAck();
+    else if (d.modeAsk) askMode(d.modeAsk);
+    else if (d.mode) setMode(d.mode);
+    else if (el.id === 'bedBtn') bedOpen();
+    else if (el.id === 'emEdit') emergencyEdit();
+    else if (el.id === 'emNew') emergencyNew();
+    else if (el.id === 'emOff') emergencyOff();
     else if (el.id === 'pushOn') { el.disabled = true; pushOn().then(() => toast(t('Alerts are on. Send a test to hear one.'))).catch((x) => toast(x.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
     else if (el.id === 'pushOff') { el.disabled = true; pushOff().then(() => toast(t('App alerts are off on this phone.'))).catch((x) => toast(x.message)).then(() => { if (S.tab === 'more') renderMore(); }); }
     else if (el.id === 'pushTest') { el.disabled = true; api('app/push/test', { method: 'POST', body: {} }).then(() => toast(t('Test sent. It should ring in a few seconds.'))).catch((x) => toast(x.message)).then(() => { el.disabled = false; }); }

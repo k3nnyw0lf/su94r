@@ -132,6 +132,20 @@ a{color:var(--accent)}
 .report .vh{background:var(--vh)}.report .hh{background:var(--h)}.report .in{background:var(--in)}.report .lo{background:var(--l)}.report .vl{background:var(--vl)}
 .report table{border-collapse:collapse;font-size:14px}.report td,.report th{padding:4px 8px 4px 0;text-align:left}.report .num{text-align:right;font-weight:600}
 .report .agp{width:100%;height:auto;display:block}.report .agp text{fill:var(--muted);font-size:11px}
+.sheet textarea{display:block;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);margin:4px 0 6px;font:inherit;font-size:16px;color:inherit;resize:vertical}
+.sheet .row input{margin:2px 0}.sheet label.check{display:flex;gap:8px;align-items:center;font-size:15px;color:var(--fg);margin-top:10px}.sheet label.check input{width:auto;margin:0}
+.qr-box{text-align:center;margin:12px 0 4px}.qr-box img{width:min(260px,70vw);height:auto;border:1px solid var(--line);border-radius:12px}
+.bed{position:fixed;inset:0;z-index:25;background:#000;color:#6e2a26;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:24px;text-align:center}
+.bed-clock{font-size:min(19vw,140px);font-weight:300;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums;color:#7a2f2a}
+.bed-g{font-size:min(14vw,72px);font-weight:700;color:#5c2622}.bed-g span{font-size:.7em}
+.bed-sub,.bed-note{font-size:14px;color:#4a1f1c;max-width:420px}
+.bed-x{position:absolute;top:calc(12px + env(safe-area-inset-top));right:12px;background:transparent;border:1px solid #3a1816;color:#6e2a26;border-radius:10px;padding:6px 12px;font-size:16px}
+.bed.alarm{background:#b42318;animation:bedpulse 2s ease-in-out infinite}
+.bed.alarm .bed-clock,.bed.alarm .bed-g,.bed.alarm .bed-sub,.bed.alarm .bed-x{color:#fff;border-color:#fff}
+.bed-msg{font-size:20px;font-weight:700;color:#fff;max-width:520px}.bed-row{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap;justify-content:center}
+.bed.alarm .btn{background:#fff;color:#b42318}.bed.alarm .btn.ghost{background:transparent;color:#fff;border-color:#fff}
+@keyframes bedpulse{50%{background:#8f1d13}}
+@media (prefers-reduced-motion:reduce){.bed.alarm{animation:none}}
 @media print{.top,nav.tabs,.chips,.noprint{display:none!important}body{padding:0;background:#fff;color:#000}.card{border:0}}
 </style>
 </head>

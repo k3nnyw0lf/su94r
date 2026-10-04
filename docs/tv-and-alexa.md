@@ -24,6 +24,8 @@ LibreView does not answer requests that come from Cloudflare Workers (HTTP 403),
 
 On your own computers you can skip the click: put a `connect-here.json` file with `{ "server": "https://<your-proxy>.workers.dev" }` in the extension folder; su94r Mini connects by itself within 5 minutes while nothing is connected. Remove the file afterwards (it is never committed).
 
+**Changing su94r Mini's key**: Settings → Alexa and screens → Another server… → **Change key** (su94r Mini 2.20.0 also does it once by itself). It takes two steps so nothing is locked out: the server gives a new key (`owner/rotate`), su94r Mini saves it, then turns the old one off with the new one (`owner/rotate/done`, the old key's SHA-256 only). The time of the change travels with the link in Chrome sync, so other computers keep the new key instead of changing it again. Alexa, the phone app, paired screens, doctor links and the emergency card keep working; a TV that opened the old big-screen link (`/d/<key>`) needs the new one.
+
 Optional Supabase secrets:
 
 | Name | Value |
@@ -86,6 +88,12 @@ A family member's phone reads everything, and logs only when you allow it: tick 
 
 su94r Mini → Health vault → **Live link for my doctor**: name it, choose 1 week, 30 or 90 days, **Make the link**. Copy, scan or email it. The link (`/r/<token>`) always shows the latest 14-day report from the server's history: time in ranges, GMI, variability, the daily pattern (AGP) and logged insulin. It is read-only and cannot see the live glucose. su94r keeps only a fingerprint of it, so it is shown once; it ends by itself, or at once with **Remove**. Code: `workers/doctor.js`.
 
+### Emergency card
+
+su94r Mini → Health vault → **Emergency card**, or the owner's phone → More → **Emergency card**: write what responders should know ("Type 1 diabetes, uses insulin. Allergic to penicillin."), up to three people to call, whether to show the glucose now, and whether opening it tells you and your family. **Make the card link** gives a QR code: save it as the phone's lock-screen picture (the app makes a picture with "MEDICAL INFORMATION" on it), or **Print a wallet card** in su94r Mini.
+
+Whoever scans it sees the page `/e/<token>`: the name, the note, the glucose now (if allowed), a **Call 911** button, what to do for a low (your own low plan's grams, minutes and words, and the standard first aid: if they cannot swallow, call 911, nothing by mouth, glucagon if there is a kit, on their side), and the people to call, in English or Spanish (the reader can switch). Opening it pushes "The emergency card was opened" to you and your family at most every 30 minutes (not from **Open it** in su94r Mini or the app, which are previews). One card link at a time: a new one turns the old one off, and **Turn it off** stops it at once. su94r keeps only a fingerprint of the link; the computer or phone that made it keeps the link to show its QR again. Code: `workers/emergency.js`; the details are `su94r_night.emergency`.
+
 ## 3. Alexa skill (private, on your own Amazon account)
 
 **With the ASK CLI** (no clicking in the console): sign in once with `ask configure` (if it says there is no Vendor ID, first open <https://developer.amazon.com/alexa/console/ask> and finish the free developer profile). Then:
@@ -135,6 +143,9 @@ The server itself checks every 5 minutes (a database cron calls `night/tick`, se
 3. Family: they subscribe to the care topic (second QR code) and you switch on **Tell caregivers too**; the care ladder (`src/lib/care/escalation.js`) decides when they hear.
 4. **Low soon**: while still in range, a fall that projects under the low line within 20 minutes is pushed first ("Low soon: 98 ↘, likely under 70 in about 12 min"), once per fall, repeated after 15 minutes at most 3 times. **Sensor and signal**: no readings for 30 minutes (and when they are back), and the day before a sensor ends (14- or 15-day sensors). Both can be switched off under **Levels and warnings**.
 5. **Sunday summary**: every Sunday from 6 PM, su94r Mini sends a plain-language summary of the week against the week before (time in range, lows and when, average, GMI, steadiness) to ntfy and Telegram (`night/notify`). **Send this week's summary now** in the same card.
+
+6. **Exercise and sick days** (su94r Mini → Low alerts → Exercise and sick days, or the phone app's Now tab): **Exercise mode** (1, 2 or 4 hours) makes Low soon warn earlier, from 10 mg/dL above the low line and 30 minutes ahead, even when Low soon is otherwise off. **Sick day** (12, 24 or 48 hours) sends a check-in every 4 hours while awake (every 2 when above 250 mg/dL): ketones, fluids, the sick-day plan; it describes and never doses. Both end by themselves (`su94r_night.mode`, `mode_until`).
+7. **Bedside screen** (the phone app's Now tab): a dim red clock for the nightstand that keeps the screen on, turns red and beeps for a low or a low alert nobody answered, with **I'm OK** (`app/ack`, phones that may log) and **Quiet 10 min**. Keep the phone charging with its volume up; the phone's silent switch still applies, and the alerts above stay the first line.
 
 **Doctor visit pack**: su94r Mini → Glucose report (the standard AGP: time in ranges, GMI, CV, percentiles by time of day, logged insulin and meals) now makes a real PDF without a print dialog: **Download PDF**, **Save PDF to Drive** (folder "su94r") or **Send PDF to Telegram** (`tg/document`, your own chats).
 

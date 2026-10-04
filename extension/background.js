@@ -11,7 +11,7 @@ import {
   pushSettings, mergeSettings, stampChanges, syncedShared, SHARED_SETTINGS,
 } from './sync.js';
 import { isLegacy, answerHandover, bringOver, offerHandover, KNOWN_OLD_IDS } from './handover.js';
-import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport } from './voice.js';
+import { exchangeDoses, inboxItems, ackInbox, refreshServerSession, connectServer, DEFAULT_SERVER, nightNotify, historyImport, dosesImport, rotateKey, rotateKeyDone, parseScreenLink } from './voice.js';
 import { agp, lowEpisodes, weeklyText } from './agp.js';
 import { findPatterns } from './patterns.js';
 import { parseBody } from './vault-import.js';
@@ -150,6 +150,7 @@ chrome.alarms.onAlarm.addListener(async (a) => {
     if (!LEGACY) weeklySummary().catch(() => {});
     if (!LEGACY) copyHistoryOnce().catch(() => {});
     if (!LEGACY) copyDosesOnce().catch(() => {});
+    if (!LEGACY) rotateServerKey().catch(() => {});
     if (LEGACY && !(await retired())) offerHandover();
     if (!LEGACY) {
       flushSyncQueue();
@@ -325,6 +326,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     careNow: () => careTick(),
     calendarNow: () => careRefresh('calendar'),
     weatherNow: () => careRefresh('weather'),
+    rotateKey: () => rotateServerKey(true),
   };
   const handler = handlers[msg?.type];
   if (!handler) return false;
@@ -865,6 +867,46 @@ async function autoConnect() {
   } catch (err) {
     await done({ ok: false, message: err.message, code: err.code || null });
   }
+}
+
+// ---- changing su94r Mini's key (owner/rotate on the server) ----
+// Once by itself (before 2.19.0 the key could reach the server's request logs), and whenever
+// Settings asks. The new key is saved before the old one is turned off, so a failure in between
+// leaves both working; turning the old one off is retried until the server confirms. The time
+// of the change travels with the link in Chrome sync, so other computers do not change it again.
+const sha256hex = async (t) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(t))))].map((b) => b.toString(16).padStart(2, '0')).join('');
+let rotating = null;
+function rotateServerKey(force = false) {
+  rotating ??= doRotateKey(force).finally(() => { rotating = null; });
+  return rotating;
+}
+
+async function doRotateKey(force) {
+  const { keyRevokePending } = await local.get('keyRevokePending');
+  const before = await getSettings();
+  const current = parseScreenLink(before.screenLink);
+  if (keyRevokePending && current) {
+    if (keyRevokePending === await sha256hex(current.key)) await local.remove('keyRevokePending');
+    else { await rotateKeyDone(before.screenLink, keyRevokePending); await local.remove('keyRevokePending'); }
+    if (!force) return { ok: true, changed: false };
+  }
+  if (!current) return { ok: false, error: 'Connect su94r Mini to your su94r server first.' };
+  if (!force && before.keyRotatedAt) return { ok: true, changed: false };
+  const r = await rotateKey(before.screenLink);
+  if (!/^[0-9a-f]{64}$/.test(String(r.key || ''))) throw new Error('The server did not send a new key.');
+  const oldHash = await sha256hex(current.key);
+  await local.set({ keyRevokePending: oldHash });
+  const link = `${current.base}/d/${r.key}`;
+  await local.set({ settings: withDefaults({ ...(await getSettings()), screenLink: link, keyRotatedAt: Date.now() }) });
+  await rotateKeyDone(link, oldHash);
+  await local.remove('keyRevokePending');
+  if (!force) {
+    chrome.notifications.create('su94r-key', {
+      type: 'basic', iconUrl: 'icons/icon128.png', title: 'su94r Mini changed its server key',
+      message: 'Alexa, the phone app and paired screens keep working. A TV that opened the old big-screen link needs the new one (Settings → Alexa and screens).',
+    });
+  }
+  return { ok: true, changed: true };
 }
 
 // ---- health connections: the phone inbox and Google Health (connectors.js) ----

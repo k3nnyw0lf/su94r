@@ -33,6 +33,8 @@ import { handleHealthIngest } from './health-ingest.js';
 import { handleStart, handleCallback, handleSync } from './google-health.js';
 import { displayPage } from './display.js';
 import { doctorPage, REPORT_SCRIPT } from './doctor.js';
+import { emergencyPage } from './emergency.js';
+import qrcode from '../extension/vendor/qrcode.mjs';
 import { MEAL_PROMPT, parseMealAnswer } from './meal.js';
 import { APP_PAGE, APP_CLIENT, APP_SW, APP_ICON_SVG, APP_MANIFEST, APP_ICONS } from './app-assets.js';
 
@@ -51,7 +53,8 @@ const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest',
   '/app/me', '/app/history', '/app/report', '/app/recent', '/app/log', '/app/undo', '/app/phones', '/app/phones/allow', '/screens/allow',
   '/app/push/key', '/app/push/subscribe', '/app/push/unsubscribe', '/app/push/test', '/app/treat',
   '/app/supplies', '/app/supplies/save', '/app/supplies/remove', '/doses/import',
-  '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/patterns']);
+  '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/patterns', '/app/mode', '/app/ack',
+  '/app/emergency', '/app/emergency/save', '/app/emergency/new', '/app/emergency/remove']);
 
 const MAX_BODY = 2 * 1024 * 1024;
 
@@ -221,19 +224,41 @@ async function nightscoutReadings(request) {
   });
 }
 
+/**
+ * The QR code of this server's own emergency-card link, as SVG, for the phone app (it has no QR
+ * library). The link comes in the body, so it is never in a request log; nothing else is drawn.
+ */
+async function appQr(request, url) {
+  const { text } = await request.json().catch(() => ({}));
+  const link = String(text || '');
+  const prefix = `${url.origin}/e/`;
+  if (!link.startsWith(prefix) || !/^[0-9a-f]{64}$/.test(link.slice(prefix.length))) return json({ error: 'Only this server\'s card links.' }, 400);
+  const qr = qrcode(0, 'M');
+  qr.addData(link);
+  qr.make();
+  return new Response(qr.createSvgTag(6, 12), { headers: { ...CORS, 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' } });
+}
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg|history)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg|history|owner|emergency)(\/|$)/.test(path)) return await forward(request, url, env);
       if (path === '/app') return Response.redirect(`${url.origin}/app/${url.search}`, 301);
       if (path === '/app/meal' && request.method === 'POST') return await appMeal(request, env);
+      if (path === '/app/qr' && request.method === 'POST') return await appQr(request, url);
       if (path.startsWith('/app/') && request.method === 'GET') { const f = appFile(path); if (f) return f; }
       if (path === '/tv' || path === '/tv/') {
         // Pairing screen: shows a code; su94r Mini enters it; the screen keeps its own token.
         return new Response(displayPage('', { pair: true }), {
+          headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' },
+        });
+      }
+      if (/^\/e\/[0-9a-f]{64}$/.test(path)) {
+        // The emergency card: the page holds nothing; /emergency/data checks the link.
+        return new Response(emergencyPage(), {
           headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' },
         });
       }

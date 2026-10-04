@@ -738,6 +738,15 @@ $('connect-server').addEventListener('click', async () => {
   refreshScreens();
 });
 
+$('rotate-key').addEventListener('click', async () => {
+  if (!confirm('Change su94r Mini\'s server key? Alexa, the phone app and paired screens keep working. A TV that opened the big-screen link will need the new link.')) return;
+  say('Changing the key…');
+  const r = await chrome.runtime.sendMessage({ type: 'rotateKey' }).catch((e) => ({ ok: false, error: e.message }));
+  if (r?.ok && r.changed !== false) say('Key changed. The old key no longer works; the big-screen link above is the new one.', 'ok');
+  else say(r?.error || 'The key was not changed.', 'error');
+  refresh();
+});
+
 $('save-screen-link').addEventListener('click', async () => {
   const link = $('screen-link').value.trim();
   if (!link) {

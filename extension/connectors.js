@@ -6,7 +6,7 @@
 
 import { getToken, GOOGLE_HOSTS, BUILT_IN_CLIENT_ID, signOutGoogle } from './google.js';
 import { HEALTH_SCOPES } from './ghealth.js';
-import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgAllow, tgEnabled, tgTest } from './voice.js';
+import { parseScreenLink, newInbox, removeInbox, inboxAddress, inboxBase, newAiConnector, aiAddress, removeScreen, newNsLink, nightSetup, nightSave, nightTest, nightEchoTest, shareNew, shareUrl, allowLogging, doctorNew, doctorUrl, emergencyGet, emergencySave, emergencyNew, emergencyRemove, emergencyUrl, listScreens, tgStatus, tgConfig, tgLink, tgRemove, tgAllow, tgEnabled, tgTest } from './voice.js';
 import qrcode from './vendor/qrcode.mjs';
 
 const store = chrome.storage.local;
@@ -72,6 +72,31 @@ function qrImage(h, text, label) {
   qr.addData(text);
   qr.make();
   return h('img', { class: 'qr', src: qr.createDataURL(5, 4), alt: label, title: label, width: String(qr.getModuleCount() * 5 + 40) });
+}
+
+/** A credit-card-sized emergency card to print, cut out and keep in the wallet. */
+function printWalletCard(url, card) {
+  const qr = qrcode(0, 'M');
+  qr.addData(url);
+  qr.make();
+  const esc = (t) => String(t || '').replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]);
+  const first = card.contacts[0];
+  const w = window.open('', '_blank');
+  if (!w) return;
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Emergency card</title><style>
+@page{margin:12mm}body{font:9pt Arial,Helvetica,sans-serif;color:#1f2328}
+.card{width:85.6mm;height:54mm;border:1px dashed #8c959f;border-radius:3mm;display:flex;overflow:hidden;box-sizing:border-box}
+.l{background:#b42318;color:#fff;width:14mm;display:flex;align-items:center;justify-content:center}
+.l span{transform:rotate(-90deg);white-space:nowrap;font-weight:700;font-size:10pt;letter-spacing:.04em}
+.m{display:flex;gap:3mm;align-items:center;padding:3mm}.m img{width:32mm;height:32mm}
+b{font-size:10pt}p{margin:1.2mm 0}.s{color:#57606a;font-size:7.5pt}
+</style></head><body><div class="card"><div class="l"><span>MEDICAL INFO</span></div><div class="m"><img src="${qr.createDataURL(4, 0)}" alt="">
+<div><b>${esc(card.note || 'Diabetes')}</b><p>Scan for what to do.<br>Escanea para saber qué hacer.</p>
+${first ? `<p>Call ${esc(first.name)}: ${esc(first.phone)}</p>` : ''}<p class="s">Emergency: 911</p></div></div></div>
+<p class="s">Cut along the dashed line.</p></body></html>`);
+  w.document.close();
+  w.focus();
+  w.print();
 }
 
 /** The share code on screen, if any: { url, role, canLog, until }. Kept only in this page. */
@@ -189,6 +214,72 @@ export const CONNECTORS = [
           action(ctx, msg, 'Remove', 'Removing…', () => removeScreen(settings.screenLink, s.id))))));
       }
       out.push(state(h, 'The report is built from the readings your su94r server keeps (up to 90 days). It fills in over the first two weeks.'));
+      return out;
+    },
+  },
+  {
+    id: 'emergency',
+    icon: '🆘',
+    name: 'Emergency card',
+    what: 'A QR code for your wallet, your phone\'s lock screen or your meter case. Whoever scans it sees what you wrote (diabetes, insulin, allergies), what to do for a low (your own low plan and the standard first aid), your glucose now if you allow it, and whom to call, in English or Spanish. Opening it tells you and your family. It works with every computer off until you turn it off.',
+    async render(ctx) {
+      const { h, settings } = ctx;
+      if (!parseScreenLink(settings.screenLink)) return needServer(h);
+      const msg = h('div', { class: 'state' });
+      let em;
+      try { em = await emergencyGet(settings.screenLink); } catch (e) { return state(h, `Could not reach your su94r server: ${e.message}`, 'warn'); }
+      // The card link is kept on this computer only (the server keeps a fingerprint), to show its QR again.
+      const { emergencyLink } = await store.get('emergencyLink');
+      if (!em.link && emergencyLink) await store.remove('emergencyLink');
+      const url = em.link ? emergencyLink : null;
+      const c = em.card;
+      const note = h('textarea', { rows: '2', maxlength: '300', class: 'grow', placeholder: 'for example: Type 1 diabetes, uses insulin. Allergic to penicillin.', 'aria-label': 'What responders should know' });
+      note.value = c.note;
+      const who = [0, 1, 2].map((k) => {
+        const x = c.contacts[k] || {};
+        return [h('input', { type: 'text', maxlength: '40', placeholder: 'Name', value: x.name || '', 'aria-label': `Person to call ${k + 1}` }),
+          h('input', { type: 'tel', maxlength: '20', placeholder: 'Phone', value: x.phone || '', 'aria-label': `Their phone ${k + 1}` })];
+      });
+      const glucose = h('input', { type: 'checkbox', checked: c.glucose, id: 'em-glucose' });
+      const tell = h('input', { type: 'checkbox', checked: c.tell, id: 'em-tell' });
+      const lang = h('select', { 'aria-label': 'Language of the card' }, h('option', { value: 'en', selected: c.lang === 'en' }, 'English'), h('option', { value: 'es', selected: c.lang === 'es' }, 'Español'));
+      const save = () => emergencySave(settings.screenLink, {
+        note: note.value, glucose: glucose.checked, tell: tell.checked, lang: lang.value,
+        contacts: who.map(([n, p]) => ({ name: n.value.trim(), phone: p.value.trim() })).filter((x) => x.name || x.phone),
+      });
+      const make = async () => {
+        if (em.link && !confirm('Make a new card link? The old QR code stops working; replace it wherever you saved or printed it.')) return { ok: false, message: 'Kept the card link you have.' };
+        const r = await emergencyNew(settings.screenLink, settings.vaultOwner || '');
+        if (!r.ok) return r;
+        await store.set({ emergencyLink: emergencyUrl(settings.screenLink, r.token) });
+      };
+      const out = [
+        url ? state(h, `On.${em.link.lastSeen ? ` Last opened ${ctx.when(em.link.lastSeen)}.` : ' Not opened yet.'}`, 'on')
+          : em.link ? state(h, 'A card link exists, made on another computer or in the phone app. Make a new link to show its QR here (the old one stops working).')
+            : state(h, 'No card link yet: fill in the card, save, then make the link.'),
+        h('p', { class: 'sub-h' }, 'The card'),
+        h('div', { class: 'actions' }, note),
+        ...who.map((pair) => h('div', { class: 'actions' }, ...pair)),
+        h('div', { class: 'actions' }, h('label', { for: 'em-glucose' }, glucose, ' Show my glucose now'), h('label', { for: 'em-tell' }, tell, ' Tell me and my family when it is opened'), lang),
+        h('div', { class: 'actions' }, action(ctx, msg, 'Save the card', 'Saving…', save, 'primary')),
+      ];
+      if (url) {
+        out.push(
+          h('div', { class: 'qr-row' }, qrImage(h, url, 'Scan to open the emergency card')),
+          copyable(h, url),
+          h('div', { class: 'actions' },
+            h('button', { type: 'button', class: 'ghost', onclick: () => openTab(`${url}#preview`) }, 'Open it'),
+            h('button', { type: 'button', class: 'ghost', onclick: () => printWalletCard(url, c) }, 'Print a wallet card'),
+            action(ctx, msg, 'New link', 'Making the link…', make),
+            action(ctx, msg, 'Turn it off', 'Turning off…', async () => { await emergencyRemove(settings.screenLink); await store.remove('emergencyLink'); })),
+          state(h, 'For the lock screen: right-click the code, Save image, and send it to your phone; or make the link in the phone app (More → Emergency card) and save its picture there.'),
+        );
+      } else {
+        out.push(h('div', { class: 'actions' },
+          action(ctx, msg, em.link ? 'New link' : 'Make the card link', 'Making the link…', make, em.link ? 'ghost' : 'primary'),
+          em.link ? action(ctx, msg, 'Turn it off', 'Turning off…', async () => { await emergencyRemove(settings.screenLink); }) : null));
+      }
+      out.push(msg, state(h, 'The low steps on the card use your low plan (Low alerts on your phone → My low plan). Opening it from "Open it" here does not tell anyone.'));
       return out;
     },
   },
@@ -335,6 +426,15 @@ export const CONNECTORS = [
             h('div', { class: 'actions' }, plan),
             h('div', { class: 'actions' }, action(ctx, msg, 'Save my plan', 'Saving…', () => nightSave(settings.screenLink, { treatGrams: Number(grams.value), treatMinutes: Number(minutes.value), treatPlan: plan.value.trim() }), 'primary')));
         })(),
+        h('details', v.mode ? { open: true } : {},
+          h('summary', {}, 'Exercise and sick days'),
+          state(h, v.mode
+            ? `${v.mode === 'exercise' ? 'Exercise mode' : 'Sick-day mode'} is on until ${new Date(v.modeUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}; it ends by itself.`
+            : 'Exercise mode: "Low soon" warns earlier (from 10 mg/dL above your low line, 30 minutes ahead). Sick day: a check-in every 4 hours while awake (every 2 when above 250 mg/dL): ketones, fluids, your sick-day plan. Both end by themselves; the phone app has the same buttons on Now.', v.mode ? 'on' : ''),
+          h('div', { class: 'actions' }, v.mode
+            ? action(ctx, msg, 'End it now', 'Saving…', () => nightSave(settings.screenLink, { mode: 'off' }))
+            : [action(ctx, msg, 'Exercise mode for 2 hours', 'Saving…', () => nightSave(settings.screenLink, { mode: 'exercise', modeHours: 2 })),
+              action(ctx, msg, 'Sick day for 24 hours', 'Saving…', () => nightSave(settings.screenLink, { mode: 'sick', modeHours: 24 }))])),
         h('details', {},
           h('summary', {}, 'Sunday summary'),
           state(h, `Every Sunday from 6 PM this computer sends your phone (ntfy and Telegram) a plain-language summary of the week against the week before: time in range, lows and when, average, GMI and steadiness. It is ${settings.weeklySummary === false ? 'off' : 'on'}.`),

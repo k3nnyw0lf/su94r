@@ -21,6 +21,10 @@
 //   POST night/test?key=<owner>     a test alert to the owner's phone
 //   POST night/ack?t=<token>        the notification's "I'm OK" button
 //
+// Modes (night/setup { mode, modeHours }, or the app's app/mode), each ending by itself:
+//   exercise  "Low soon" warns earlier: from 10 mg/dL above the low line, 30 minutes ahead
+//   sick      a sick-day check every 4 hours while awake (every 2 when above 250 mg/dL)
+//
 // Every alert goes to ntfy, to the linked Telegram chats and to the phones that turned on alerts
 // in the su94r app (webpush.js), each by role. A low treated from the app (app/treat in app.js)
 // stops the reminders and is rechecked after the owner's plan's minutes; still low, they resume.
@@ -43,7 +47,27 @@ export const NIGHT_DEFAULTS = {
   night_start: 22, night_end: 7, care_enabled: false, soon_enabled: true, watch_enabled: true, sensor_days: 14,
   echo_low_url: null, echo_soon_url: null, echo_always: false,
   treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
+  mode: null, mode_until: null,
 };
+
+export const EXERCISE_MARGIN = 10;                 // mg/dL above the low line that "Low soon" watches in exercise mode
+const SICK_KETONE_MGDL = 250;
+const MODE_HOURS = { exercise: { def: 2, max: 12 }, sick: { def: 24, max: 72 } };
+
+/** 'exercise', 'sick' or null: the mode in force now (a mode ends by itself at mode_until). */
+export function activeMode(row, now = Date.now()) {
+  return (row?.mode === 'exercise' || row?.mode === 'sick') && row.mode_until && Date.parse(row.mode_until) > now ? row.mode : null;
+}
+
+/** The columns for a mode turned on for `hours` (default 2 for exercise, 24 for sick) or off. */
+export function modeFields(mode, hours, now = Date.now()) {
+  if (mode === 'off' || mode === null || mode === '') return { mode: null, mode_until: null };
+  const h = MODE_HOURS[mode];
+  if (!h) throw Object.assign(new Error('Pick exercise or sick day.'), { status: 400 });
+  const n = Number(hours);
+  const len = Number.isFinite(n) && n > 0 ? Math.min(h.max, Math.max(0.5, n)) : h.def;
+  return { mode, mode_until: new Date(now + len * 60 * MIN).toISOString() };
+}
 
 /** The alert in one language: msg.es holds the Spanish words, and "I'm OK" becomes "Estoy bien". */
 export function inLanguage(msg, lang) {
@@ -151,6 +175,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   };
   const night = hourIn(localHour(now, cfg.time_zone), cfg.night_start, cfg.night_end);
   if (!cfg.enabled) return { state, sent, skipped: 'off' };
+  const exercise = activeMode(cfg, now) === 'exercise';
 
   // The Echo in the room says it out loud (an Alexa routine fired by its trigger link): at night,
   // for a severe low at any hour, or always when the owner chose so. Each reminder fires again.
@@ -186,10 +211,11 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
   // "Low soon": in range now, but falling so that it is likely under the low line within
   // 20 minutes. Once per fall, repeated after 15 minutes (at most 3 times) until "I'm OK".
   async function lowSoon(p, l, last) {
-    const low = cfg.low_mgdl;
+    // Exercise mode watches a higher line, further ahead, and a gentler fall.
+    const low = cfg.low_mgdl + (exercise ? EXERCISE_MARGIN : 0);
     const rate = rateOf(p, l, last);
-    const projected = rate == null ? null : l.mg + rate * SOON_MIN;
-    const falling = l.trend === 1 || l.trend === 2 || (rate != null && rate <= -1.5);
+    const projected = rate == null ? null : l.mg + rate * (exercise ? 30 : SOON_MIN);
+    const falling = l.trend === 1 || l.trend === 2 || (rate != null && rate <= (exercise ? -1 : -1.5));
     const soon = state._soon[p.pid];
     if (projected != null && falling && rate < 0 && projected < low && l.mg < low + 45) {
       if (soon && (soon.ackAt || soon.count >= 3 || now - soon.at < 15 * MIN)) return;
@@ -199,8 +225,8 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       state._soon[p.pid] = { at: now, count: (soon?.count || 0) + 1, ackHash: await sha256(token) };
       await send(cfg.self_topic, {
         title: `${who(p)}Low soon: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(),
-        message: `Falling about ${Math.abs(rate).toFixed(1)} mg/dL a minute: likely under ${fmt(p, low)} in about ${mins} min${severeSoon ? ', and fast' : ''}. Have fast sugar ready. Tap "I'm OK" once you have handled it.`,
-        es: { title: `${who(p)}Baja pronto: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `Bajando unos ${Math.abs(rate).toFixed(1)} mg/dL por minuto: probablemente por debajo de ${fmt(p, low)} en unos ${mins} min${severeSoon ? ', y rápido' : ''}. Ten azúcar rápida a mano. Toca "Estoy bien" cuando lo hayas atendido.` },
+        message: `${exercise ? 'Exercise mode. ' : ''}Falling about ${Math.abs(rate).toFixed(1)} mg/dL a minute: likely under ${fmt(p, low)} in about ${mins} min${severeSoon ? ', and fast' : ''}. Have fast sugar ready. Tap "I'm OK" once you have handled it.`,
+        es: { title: `${who(p)}Baja pronto: ${fmt(p, l.mg)} ${ARROWS[l.trend] || ''}`.trim(), message: `${exercise ? 'Modo ejercicio. ' : ''}Bajando unos ${Math.abs(rate).toFixed(1)} mg/dL por minuto: probablemente por debajo de ${fmt(p, low)} en unos ${mins} min${severeSoon ? ', y rápido' : ''}. Ten azúcar rápida a mano. Toca "Estoy bien" cuando lo hayas atendido.` },
         priority: night || severeSoon ? 5 : 4,
         tags: ['chart_with_downwards_trend'],
         actions: [{ action: 'http', label: "I'm OK", url: ackUrl(token), method: 'POST', clear: true }],
@@ -263,7 +289,7 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
         recovered.add(p.pid);
       }
       delete state[p.pid];
-      if (cfg.soon_enabled !== false) await lowSoon(p, l, last);
+      if (cfg.soon_enabled !== false || exercise) await lowSoon(p, l, last);
       continue;
     }
 
@@ -414,6 +440,15 @@ export async function acknowledge(row, token, now = Date.now()) {
   return null;
 }
 
+/** "I'm OK" from a phone that may log (the bedside screen): every open low and Low soon warning. */
+export function acknowledgeAll(row, now = Date.now()) {
+  const state = structuredClone(row.state || {});
+  let count = 0;
+  const eps = [...Object.entries(state).filter(([k]) => isLowKey(k)).map(([, ep]) => ep), ...Object.values(state._soon || {})];
+  for (const ep of eps) if (ep && !ep.ackAt) { ep.ackAt = now; ep.ackHash = null; count += 1; }
+  return { state, count };
+}
+
 // Trigger links of the free Virtual Smart Home skill (an Alexa routine per link). They are
 // private keys: stored here, never shown back.
 export const ECHO_URL = /^https:\/\/(www\.)?virtualsmarthome\.xyz\/url_routine_trigger\/[^\s]{10,500}$/;
@@ -455,6 +490,7 @@ function settingsPatch(body, row) {
   const ne = int(body.nightEnd, 0, 23);
   if (ne !== undefined) out.night_end = ne;
   if (typeof body.timeZone === 'string' && TZ_OK(body.timeZone)) out.time_zone = body.timeZone;
+  if (body.mode !== undefined) Object.assign(out, modeFields(body.mode, body.modeHours));
   return out;
 }
 
@@ -471,6 +507,7 @@ function publicView(row, base) {
     selfTopic: row.self_topic, selfUrl: topicUrl(row.self_topic),
     careTopic: row.care_topic, careUrl: topicUrl(row.care_topic),
     lastTickAt: row.last_tick_at, lastResult: row.last_result || null, openLows: open, signInWarnedAt: meta.authWarnAt || null,
+    mode: activeMode(row), modeUntil: activeMode(row) ? row.mode_until : null,
   };
 }
 
@@ -533,6 +570,25 @@ export async function reminders(row, people, state, send, { doses = null, suppli
     }
     for (const k of Object.keys(state._supply)) if (!rows.some((r) => `${r.pid}:${r.item}` === k)) delete state._supply[k];
   }
+  // Sick day: a check every 4 hours while awake, every 2 while above 250 mg/dL. It describes;
+  // the sick-day plan is the doctor's.
+  if (activeMode(cfg, now) === 'sick') {
+    state._sick = state._sick || {};
+    const asleep = hourIn(localHour(now, cfg.time_zone), cfg.night_start, cfg.night_end);
+    for (const p of asleep ? [] : people) {
+      const l = p.latest && now - p.latest.t <= STALE_MS ? p.latest : null;
+      const high = Boolean(l && l.mg >= SICK_KETONE_MGDL);
+      if (now - (state._sick[p.pid] || 0) < (high ? 2 : 4) * 60 * MIN) continue;
+      state._sick[p.pid] = now;
+      if (high) {
+        await say(p, `Sick day: ${fmt(p, l.mg)}, check ketones`, 'Above 250 mg/dL while sick: a ketone check is due now. Drink fluids and follow your sick-day plan. Call your doctor if ketones are moderate or high, or you cannot keep fluids down.', 'thermometer', 'sick',
+          { title: `Día de enfermedad: ${fmt(p, l.mg)}, mide cetonas`, message: 'Por encima de 250 mg/dL estando enfermo: toca medir cetonas ahora. Toma líquidos y sigue tu plan para días de enfermedad. Llama a tu médico si las cetonas están moderadas o altas, o si no puedes retener líquidos.' });
+      } else {
+        await say(p, `Sick day check${l ? `: ${fmt(p, l.mg)}` : ''}`, 'Time for the 4-hour sick-day check: ketones, fluids, and your sick-day plan.', 'thermometer', 'sick',
+          { title: `Revisión de día de enfermedad${l ? `: ${fmt(p, l.mg)}` : ''}`, message: 'Toca la revisión de cada 4 horas: cetonas, líquidos y tu plan para días de enfermedad.' });
+      }
+    }
+  } else if (state._sick) delete state._sick;
   return sent;
 }
 

@@ -22,6 +22,10 @@
 //   GET  app/supplies?pid=          insulin and sensors on hand (supplies.js)
 //   POST app/supplies/save          { pid, item, onHand, warnAt, refillOn }
 //   POST app/supplies/remove        { pid, item }
+//   POST app/mode                   { mode: 'exercise'|'sick'|'off', hours } (night.js modes)
+//   POST app/ack                    "I'm OK" for every open low (the bedside screen)
+//   GET  app/emergency              (owner's phone) the emergency card (emergency.js); POST
+//                                   app/emergency/save, app/emergency/new, app/emergency/remove
 //
 // The owner's own phone ('me') logs. A family member's phone reads, and logs too once the owner
 // allows it (su94r_screens.can_log: su94r Mini, or the owner's phone here). Paired TVs and widgets
@@ -32,7 +36,8 @@ import { asMarkers } from './doses.js';
 import { reportFor } from './doctor.js';
 import { doubleDoseWarning, kindWord } from '../extension/insulin.js';
 import { pushTo, pushEndpointOk } from './webpush.js';
-import { startTreatment, NIGHT_DEFAULTS } from './night.js';
+import { startTreatment, NIGHT_DEFAULTS, activeMode, modeFields, acknowledgeAll, EXERCISE_MARGIN } from './night.js';
+import { emergencyManage } from './emergency.js';
 import { supplyStatus, supplyRow } from './supplies.js';
 import { labRow } from './labs.js';
 import { parseLog } from './tglog.js';
@@ -41,7 +46,8 @@ import { asMarkers as markersOf } from './doses.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
-  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns']);
+  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns', 'app/mode', 'app/ack',
+  'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -125,7 +131,15 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       if (tr && now - tr.t < 3 * 60 * MIN) treating[p.pid] = { t: tr.t, grams: tr.grams, by: tr.by || '', recheckAt: tr.recheckAt, done: Boolean(tr.done) };
     }
     const plan = { grams: row?.treat_grams ?? NIGHT_DEFAULTS.treat_grams, minutes: row?.treat_minutes ?? NIGHT_DEFAULTS.treat_minutes, text: row?.treat_plan || '' };
-    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14, at: now });
+    const mode = activeMode(row, now);
+    return json({ events: events.map((e) => ({ ...e, by: by(e.id), mine: e.id.startsWith(mine) && now - createdAt(e.id) < UNDO_MS })), estimates, lows, treating, plan, sensorDays: row?.sensor_days || 14,
+      mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null, at: now });
+  }
+
+  // The emergency card: the owner's own phone keeps it up to date (emergency.js).
+  if (path.startsWith('app/emergency')) {
+    if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    return emergencyManage(path.slice(4), request, { screens, night, json, snapshot, es });
   }
 
   // The owner's phone decides which family phones may log.
@@ -215,6 +229,29 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   // Logging: the owner's own phone, and family phones the owner allowed.
   if (!canLog) return json({ error: T('This phone can\'t log yet. The owner can allow it in su94r Mini (Share to another phone) or in their own su94r app (More).', 'Este teléfono todavía no puede registrar. El dueño lo puede permitir en su94r Mini (Compartir con otro teléfono) o en su propia app su94r (Más).') }, 403);
   if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+
+  // Exercise and sick-day modes, and "I'm OK" from the bedside screen (night.js).
+  if (path === 'app/mode' || path === 'app/ack') {
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    const b = await request.json().catch(() => ({}));
+    const row = await night.get();
+    if (path === 'app/ack') {
+      const { state, count } = acknowledgeAll(row, now);
+      if (count) await night.patch({ state });
+      return json({ ok: true, count, text: count ? T('Got it. Reminders for this low stop; a severe low still tells you once.', 'Entendido. Los recordatorios de esta baja paran; una baja severa avisa una vez más.') : T('Nothing to stop right now.', 'No hay nada que parar ahora.') });
+    }
+    let fields;
+    try { fields = modeFields(b.mode, b.hours, now); } catch { return json({ ok: false, error: T('Pick exercise or sick day.', 'Elige ejercicio o día de enfermedad.') }, 400); }
+    await night.patch(fields);
+    const until = fields.mode_until ? Date.parse(fields.mode_until) : null;
+    const at = until ? new Date(until).toLocaleTimeString(es ? 'es-US' : 'en-US', { timeZone: row.time_zone || 'America/New_York', hour: 'numeric', minute: '2-digit' }) : '';
+    const line = (row.low_mgdl ?? NIGHT_DEFAULTS.low_mgdl) + EXERCISE_MARGIN;
+    const text = fields.mode === 'exercise' ? T(`Exercise mode until ${at}: Low soon warns earlier, from ${line} mg/dL.`, `Modo ejercicio hasta las ${at}: "Baja pronto" avisa antes, desde ${line} mg/dL.`)
+      : fields.mode === 'sick' ? T(`Sick-day mode until ${at}: a check every 4 hours while awake.`, `Modo día de enfermedad hasta las ${at}: una revisión cada 4 horas mientras estás despierto.`)
+        : T('Mode off.', 'Modo apagado.');
+    return json({ ok: true, mode: fields.mode, until, text });
+  }
+
   if (!doses?.ready) return json({ error: 'The dose store is not set up' }, 503);
   const body = await request.json().catch(() => ({}));
 

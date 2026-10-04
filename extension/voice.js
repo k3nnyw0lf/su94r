@@ -37,6 +37,10 @@ async function call(link, path, { method = 'GET', body } = {}) {
 export const exchangeDoses = (link, markers, removed, forecasts = []) => call(link, 'voice/sync', { method: 'POST', body: { markers, removed, forecasts } });
 /** The logged insulin of the last 90 days, once (missed-dose reminders and the report learn from it). */
 export const dosesImport = (link, markers) => call(link, 'doses/import', { method: 'POST', body: { markers } });
+/** A new key for this su94r Mini; the old one keeps working until rotateKeyDone turns it off. */
+export const rotateKey = (link) => call(link, 'owner/rotate', { method: 'POST', body: {} });
+/** With the new key in `link`: turns off the key whose SHA-256 is `oldHash`. */
+export const rotateKeyDone = (link, oldHash) => call(link, 'owner/rotate/done', { method: 'POST', body: { old: oldHash } });
 export const claimScreen = (link, code, name) => call(link, 'pair/claim', { method: 'POST', body: { code, name } });
 export const listScreens = (link) => call(link, 'screens');
 export const removeScreen = (link, id) => call(link, 'screens/remove', { method: 'POST', body: { id } });
@@ -106,6 +110,12 @@ export const shareUrl = (link, invite) => `${parseScreenLink(link).base}/app/#jo
 // read-only, expires. The token is shown once; the server keeps only its hash.
 export const doctorNew = (link, name, days, lang = 'en') => call(link, 'doctor/new', { method: 'POST', body: { name, days, lang } });
 export const doctorUrl = (link, token) => `${parseScreenLink(link).base}/r/${token}`;
+/** The emergency card (workers/emergency.js): its details, and one card link at a time. */
+export const emergencyGet = (link) => call(link, 'emergency');
+export const emergencySave = (link, card) => call(link, 'emergency/save', { method: 'POST', body: card });
+export const emergencyNew = (link, pid) => call(link, 'emergency/new', { method: 'POST', body: { pid } });
+export const emergencyRemove = (link) => call(link, 'emergency/remove', { method: 'POST', body: {} });
+export const emergencyUrl = (link, token) => `${parseScreenLink(link).base}/e/${token}`;
 
 // Low alerts on Telegram (server: workers/telegram.js): one bot of the owner's, chats linked by a
 // one-time t.me link and Start. The bot token goes to the server once and never comes back.
