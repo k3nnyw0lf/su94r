@@ -27,7 +27,10 @@
 //                                   rechecks after the owner's plan's minutes (night.js)
 //   GET  app/patterns?pid=          what repeats in the last 14 days (extension/patterns.js)
 //   POST app/parse                  { text } what a spoken "4 units rapid" means (nothing is logged)
-//   GET  app/labs?pid=              lab results (labs.js); POST app/labs/save, app/labs/remove
+//   GET  app/labs?pid=              lab results (labs.js) and the sites they live on (Quest, Labcorp,
+//                                   LibreView, the owner's MyChart and pharmacy); POST app/labs/save,
+//                                   app/labs/remove
+//   POST app/links                  (owner's phone) { mychart, pharmacy } for those buttons (labs.js)
 //   GET  app/supplies?pid=          insulin and sensors on hand (supplies.js)
 //   POST app/supplies/save          { pid, item, onHand, warnAt, refillOn }
 //   POST app/supplies/remove        { pid, item }
@@ -58,7 +61,7 @@ import { pushTo, pushEndpointOk } from './webpush.js';
 import { startTreatment, NIGHT_DEFAULTS, activeMode, modeFields, acknowledgeAll, EXERCISE_MARGIN } from './night.js';
 import { emergencyManage } from './emergency.js';
 import { supplyStatus, supplyRow } from './supplies.js';
-import { labRow } from './labs.js';
+import { labRow, portalLinks, portalButtons, portalChoices } from './labs.js';
 import { parseLog } from './tglog.js';
 import { findPatterns } from '../extension/patterns.js';
 import { asMarkers as markersOf } from './doses.js';
@@ -74,7 +77,7 @@ import { rateOf } from './night.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
   'app/push/key', 'app/push/subscribe', 'app/push/unsubscribe', 'app/push/test', 'app/treat', 'app/supplies', 'app/supplies/save', 'app/supplies/remove',
-  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/patterns', 'app/mode', 'app/ack',
+  'app/parse', 'app/labs', 'app/labs/save', 'app/labs/remove', 'app/links', 'app/patterns', 'app/mode', 'app/ack',
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
   'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
   'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove',
@@ -209,6 +212,17 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
     await night.patch({ goal_tir: tir });
     return json({ ok: true, goal: tir });
+  }
+
+  // The owner's MyChart and pharmacy, for the buttons on the Lab results card (labs.js).
+  if (path === 'app/links') {
+    if (!owner) return json({ ok: false, error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    const r = portalLinks(await request.json().catch(() => ({})));
+    if (r.error) return json({ ok: false, error: es ? (LAB_ES[r.error] || r.error) : r.error }, 400);
+    await night.patch({ portal_links: r.links });
+    return json({ ok: true, portals: portalButtons(r.links) });
   }
 
   // The emergency card: the owner's own phone keeps it up to date (emergency.js).
@@ -346,7 +360,10 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     if (!labs?.ready) return json({ error: 'Lab results are not set up on the server.' }, 503);
     const pid = await pidFor(url.searchParams.get('pid'));
     const rows = pid ? await labs.list(pid) : [];
-    return json({ labs: rows.map((r) => ({ id: r.id, takenOn: r.taken_on, kind: r.kind, name: r.name, value: Number(r.value), unit: r.unit || '' })), canEdit: canLog });
+    let saved = null;
+    try { if (night?.ready) saved = (await night.get()).portal_links; } catch { /* the built-in sites only */ }
+    return json({ labs: rows.map((r) => ({ id: r.id, takenOn: r.taken_on, kind: r.kind, name: r.name, value: Number(r.value), unit: r.unit || '' })), canEdit: canLog,
+      portals: portalButtons(saved), ...(owner ? portalChoices(saved) : {}) });
   }
 
   if (path === 'app/parse') {
@@ -655,6 +672,8 @@ const LAB_ES = {
   'Type the result as a number.': 'Escribe el resultado como número.',
   'An A1c is a percentage between 3 and 20.': 'La A1c es un porcentaje entre 3 y 20.',
   'Name the test, for example LDL cholesterol.': 'Escribe el nombre de la prueba, por ejemplo colesterol LDL.',
+  'That MyChart address does not look right. Copy it from the address bar while signed in.': 'Esa dirección de MyChart no parece correcta. Cópiala de la barra de direcciones con la sesión iniciada.',
+  'That pharmacy address does not look right.': 'Esa dirección de farmacia no parece correcta.',
 };
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];

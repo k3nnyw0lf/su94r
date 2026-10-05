@@ -44,6 +44,75 @@ export function labRow(pid, body, now = Date.now()) {
   return { pid, kind, name, value: Math.round(value * 100) / 100, unit, taken_on: takenOn };
 }
 
+// Where results live online, for the buttons on the app's Lab results card. Quest, Labcorp and
+// LibreView are the same for everyone; the owner adds their doctor's MyChart and their pharmacy
+// (su94r_night.portal_links, migration 20261005a_su94r_portal_links.sql). The buttons only open
+// the sites; nothing here signs in anywhere. Only https addresses are kept or shown.
+export const PORTALS = [
+  { id: 'quest', name: 'Quest', url: 'https://myquest.questdiagnostics.com/dashboard' },
+  { id: 'labcorp', name: 'Labcorp', url: 'https://patient.labcorp.com/' },
+  { id: 'libreview', name: 'LibreView', url: 'https://www.libreview.com/' },
+];
+export const PHARMACIES = [
+  { id: 'cvs', name: 'CVS', url: 'https://www.cvs.com/pharmacy' },
+  { id: 'walgreens', name: 'Walgreens', url: 'https://www.walgreens.com/pharmacy' },
+  { id: 'publix', name: 'Publix', url: 'https://www.publix.com/pharmacy' },
+  { id: 'amazon', name: 'Amazon Pharmacy', url: 'https://pharmacy.amazon.com/' },
+];
+export const MYCHART_FINDER = 'https://www.mychart.org/';
+
+/** A typed or pasted web address as https, or '' when it is not one (http, no real host, a password in it). */
+export function httpsUrl(text) {
+  let s = String(text || '').trim();
+  if (!s) return '';
+  if (!/^[a-z][a-z0-9+.-]*:/i.test(s)) s = `https://${s}`;
+  let u;
+  try { u = new URL(s); } catch { return ''; }
+  if (u.protocol !== 'https:' || u.username || u.password || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(u.hostname)) return '';
+  return u.href.length <= 300 ? u.href : '';
+}
+
+/** Checks the owner's MyChart and pharmacy (a pharmacy id from PHARMACIES or an address). Returns { links } or { error }. */
+export function portalLinks(body) {
+  const links = {};
+  const my = String(body?.mychart ?? '').trim();
+  if (my) {
+    const url = httpsUrl(my);
+    if (!url) return { error: 'That MyChart address does not look right. Copy it from the address bar while signed in.' };
+    links.mychart = { url };
+  }
+  const ph = String(body?.pharmacy ?? '').trim();
+  if (ph) {
+    const known = PHARMACIES.find((p) => p.id === ph);
+    const url = known ? known.url : httpsUrl(ph);
+    if (!url) return { error: 'That pharmacy address does not look right.' };
+    links.pharmacy = known ? { id: known.id, url } : { url };
+  }
+  return { links };
+}
+
+/** The buttons: the built-in sites, then the owner's MyChart and pharmacy when set. */
+export function portalButtons(saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  const list = PORTALS.map((p) => ({ ...p }));
+  const my = httpsUrl(s.mychart?.url);
+  if (my) list.push({ id: 'mychart', name: 'MyChart', url: my });
+  const known = PHARMACIES.find((p) => p.id === s.pharmacy?.id);
+  const ph = known ? known.url : httpsUrl(s.pharmacy?.url);
+  if (ph) list.push({ id: 'pharmacy', name: known ? known.name : new URL(ph).hostname.replace(/^www\./, ''), url: ph });
+  return list;
+}
+
+/** What the owner's phone needs to change them: the saved choices and the pharmacy list. */
+export function portalChoices(saved) {
+  const s = saved && typeof saved === 'object' ? saved : {};
+  return {
+    links: { mychart: httpsUrl(s.mychart?.url), pharmacy: s.pharmacy?.id || httpsUrl(s.pharmacy?.url) },
+    pharmacies: PHARMACIES.map(({ id, name }) => ({ id, name })),
+    finder: MYCHART_FINDER,
+  };
+}
+
 /** For the report: the last year's results and the latest A1c. */
 export function labsForReport(rows, now = Date.now()) {
   const year = rows.filter((r) => Date.parse(r.taken_on) >= now - YEAR);

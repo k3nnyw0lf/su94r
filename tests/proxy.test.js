@@ -10,7 +10,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import proxy, { nightscoutEntriesUrl } from '../workers/proxy.js';
+import proxy, { nightscoutEntriesUrl, FORWARDED } from '../workers/proxy.js';
+import { APP_PATHS } from '../workers/app.js';
 import { handleCgm, resetCaches } from '../workers/cgm-core.js';
 import { describePerson } from '../workers/alexa.js';
 import { validateSeries } from '../src/lib/cgm/validate.js';
@@ -22,6 +23,11 @@ const ACCOUNT_ID = createHash('sha256').update('user-1').digest('hex');
 const fmt = (t) => { const d = new Date(t); let h = d.getUTCHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}/${d.getUTCFullYear()} ${h}:${String(d.getUTCMinutes()).padStart(2, '0')}:${String(d.getUTCSeconds()).padStart(2, '0')} ${ap}`; };
 const meas = (t, mg, trend = 3) => ({ FactoryTimestamp: fmt(t), ValueInMgPerDl: mg, Value: mg, GlucoseUnits: 1, TrendArrow: trend });
+
+describe('the proxy forwards every phone-app route', () => {
+  // A route missing here answers "proxy alive" instead of reaching the server (app/history, app/links).
+  it.each([...APP_PATHS])('%s', (p) => expect(FORWARDED.has(`/${p}`)).toBe(true));
+});
 
 let latestMg = 128;
 let calls = [];

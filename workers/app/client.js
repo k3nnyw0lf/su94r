@@ -92,6 +92,11 @@
     'Lab results': 'Resultados de laboratorio', 'None yet. An A1c typed in here shows in the report and the doctor\'s link next to the GMI.': 'Ninguno todavía. Una A1c anotada aquí aparece en el informe y en el enlace del médico junto al GMI.',
     'Add a lab result': 'Agregar un resultado', 'Test': 'Prueba', 'A1c (%)': 'A1c (%)', 'Another test': 'Otra prueba', 'Name': 'Nombre', 'for example LDL cholesterol': 'por ejemplo colesterol LDL',
     'Unit': 'Unidad', 'for example mg/dL': 'por ejemplo mg/dL', 'Result': 'Resultado', 'Date of the test': 'Fecha de la prueba', 'Saved. It shows in the report.': 'Guardado. Aparece en el informe.',
+    'Results and refills online': 'Resultados y recetas en línea', 'Each opens the site in a new tab; you sign in there. su94r never signs in for you.': 'Cada uno abre el sitio en otra pestaña; ahí inicias sesión tú. su94r nunca inicia sesión por ti.',
+    'Add your MyChart and pharmacy': 'Agregar tu MyChart y tu farmacia', 'Change MyChart or pharmacy': 'Cambiar MyChart o farmacia', 'Your MyChart and pharmacy': 'Tu MyChart y tu farmacia',
+    'Your doctor\'s MyChart address': 'La dirección del MyChart de tu médico',
+    'Not sure? <a href="{url}" target="_blank" rel="noopener noreferrer">Find your MyChart</a>, sign in, then copy the address from the address bar.': '¿No sabes cuál es? <a href="{url}" target="_blank" rel="noopener noreferrer">Busca tu MyChart</a>, inicia sesión y copia la dirección de la barra de direcciones.',
+    'Pharmacy': 'Farmacia', 'No pharmacy': 'Sin farmacia', 'Another pharmacy': 'Otra farmacia', 'Its website': 'Su sitio web',
     // supplies
     'Supplies': 'Suministros', 'Add supplies': 'Agregar suministros', 'What': 'Qué', 'On hand now (units of insulin, or sensors)': 'Lo que tienes ahora (unidades de insulina o sensores)',
     'A U-100 pen holds 300 units; a 10 mL vial 1000.': 'Una pluma U-100 trae 300 unidades; un frasco de 10 mL, 1000.', 'Remind me when it is down to': 'Avísame cuando quede',
@@ -1434,8 +1439,43 @@
     let labs = null;
     try { labs = await api('app/labs?pid=' + encodeURIComponent(c.pid)); } catch (e) { labs = null; }
     if (S.tab !== 'report' || !labs) return;
+    S.labsView = labs;
     $('main').insertAdjacentHTML('beforeend', card('<h2>' + t('Lab results') + '</h2>' + (labs.labs.length ? '<ul class="list">' + labs.labs.map((l) => '<li><span class="t">' + esc(l.takenOn) + '</span><span>' + esc(l.name) + ' <b>' + esc(String(l.value)) + (l.unit ? ' ' + esc(l.unit) : '') + '</b></span>' + (labs.canEdit ? '<button data-lab-del="' + esc(l.id) + '" style="margin-left:auto">' + t('Remove') + '</button>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">' + t('None yet. An A1c typed in here shows in the report and the doctor\'s link next to the GMI.') + '</p>') +
-      (labs.canEdit ? '<button class="btn ghost" id="labAdd">' + t('Add a lab result') + '</button>' : ''), 'noprint'));
+      (labs.canEdit ? '<button class="btn ghost" id="labAdd">' + t('Add a lab result') + '</button>' : '') + portalsHtml(labs), 'noprint'));
+  }
+
+  // Quest, Labcorp, LibreView and the owner's MyChart and pharmacy (workers/labs.js): links that open
+  // the site; the person signs in there.
+  function portalsHtml(labs) {
+    const sites = (labs.portals || []).filter((p) => /^https:\/\//.test(p.url));
+    if (!sites.length) return '';
+    const set = labs.links && (labs.links.mychart || labs.links.pharmacy);
+    return '<h2 style="margin-top:18px">' + t('Results and refills online') + '</h2><div class="row" id="portals">' +
+      sites.map((p) => '<a class="btn ghost" data-portal="' + esc(p.id) + '" href="' + esc(p.url) + '" target="_blank" rel="noopener noreferrer">' + esc(p.name) + '</a>').join('') + '</div>' +
+      '<p class="note">' + t('Each opens the site in a new tab; you sign in there. su94r never signs in for you.') + '</p>' +
+      (labs.links ? '<button class="btn ghost" id="linksEdit">' + t(set ? 'Change MyChart or pharmacy' : 'Add your MyChart and pharmacy') + '</button>' : '');
+  }
+  function editLinks() {
+    const v = S.labsView || {};
+    const now = v.links || { mychart: '', pharmacy: '' };
+    const list = v.pharmacies || [];
+    const other = Boolean(now.pharmacy) && !list.some((p) => p.id === now.pharmacy);
+    sheet('<h3>' + t('Your MyChart and pharmacy') + '</h3>' +
+      '<label for="lkMy">' + t('Your doctor\'s MyChart address') + '</label><input id="lkMy" type="url" inputmode="url" autocomplete="off" maxlength="300" placeholder="https://mychart.example.org/MyChart/" value="' + esc(now.mychart || '') + '">' +
+      '<p class="small muted">' + t('Not sure? <a href="{url}" target="_blank" rel="noopener noreferrer">Find your MyChart</a>, sign in, then copy the address from the address bar.', { url: esc(v.finder || 'https://www.mychart.org/') }) + '</p>' +
+      '<label for="lkPh">' + t('Pharmacy') + '</label><select id="lkPh"><option value="">' + t('No pharmacy') + '</option>' +
+      list.map((p) => '<option value="' + esc(p.id) + '"' + (p.id === now.pharmacy ? ' selected' : '') + '>' + esc(p.name) + '</option>').join('') +
+      '<option value="other"' + (other ? ' selected' : '') + '>' + t('Another pharmacy') + '</option></select>' +
+      '<div id="lkOther"' + (other ? '' : ' hidden') + '><label for="lkPhUrl">' + t('Its website') + '</label><input id="lkPhUrl" type="url" inputmode="url" autocomplete="off" maxlength="300" placeholder="https://" value="' + esc(other ? now.pharmacy : '') + '"></div>',
+      [[t('Save'), 'btn', saveLinks], [t('Cancel'), 'btn ghost', closeSheet]]);
+    $('lkPh').onchange = () => { $('lkOther').hidden = $('lkPh').value !== 'other'; };
+  }
+  async function saveLinks() {
+    const ph = $('lkPh').value;
+    const body = { mychart: $('lkMy').value, pharmacy: ph === 'other' ? $('lkPhUrl').value : ph };
+    try { await api('app/links', { method: 'POST', body }); closeSheet(); toast(t('Saved.')); }
+    catch (e) { toast(e.message); return; }
+    if (S.tab === 'report') renderReport();
   }
 
   function editLab() {
@@ -1592,6 +1632,7 @@
     else if (d.notedel) removeNote(d.notedel);
     else if (el.id === 'micBtn') listen(el);
     else if (el.id === 'labAdd') editLab();
+    else if (el.id === 'linksEdit') editLinks();
     else if (d.labDel) removeLab(d.labDel);
     else if (d.undo) undo(d.undo);
     else if (d.supply !== undefined) editSupply(d.supply);

@@ -182,6 +182,19 @@ await page.click('#sheet button[data-b="0"]');
 await page.waitForSelector('text=Latest A1c');
 checks.labInReport = labRows.length === 1 && (await page.textContent('.report')).includes('Latest A1c 7.1%');
 await shot('9b-report-labs');
+// Results online: Quest and the others open in a new tab; the owner adds MyChart and a pharmacy.
+await page.waitForSelector('#portals a[data-portal="quest"]');
+checks.portalsShown = (await page.getAttribute('#portals a[data-portal="quest"]', 'href')) === 'https://myquest.questdiagnostics.com/dashboard' &&
+  (await page.getAttribute('#portals a[data-portal="quest"]', 'target')) === '_blank' && (await page.$$('#portals a')).length === 3;
+await page.click('#linksEdit');
+await page.waitForSelector('#lkMy');
+await page.fill('#lkMy', 'mychart.example.org/MyChart/');
+await page.selectOption('#lkPh', 'publix');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('#portals a[data-portal="pharmacy"]');
+checks.portalsSaved = nightRow.portal_links?.pharmacy?.id === 'publix' && (await page.textContent('#portals')).includes('MyChart') && (await page.textContent('#portals')).includes('Publix');
+checks.portalsFit = await noSideScroll();
+await shot('9c-report-online');
 await tab('more');
 await page.waitForSelector('#unlink');
 await shot('10-more');

@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { handleCgm, resetCaches } from '../workers/cgm-core.js';
 import { spokenNumbers } from '../workers/app.js';
-import { labRow, labsForReport } from '../workers/labs.js';
+import { labRow, labsForReport, httpsUrl, portalLinks, portalButtons } from '../workers/labs.js';
 import { REPORT_SCRIPT } from '../workers/doctor.js';
 import { sha256 } from '../workers/screens.js';
 
@@ -54,6 +54,33 @@ describe('lab results', () => {
   });
 });
 
+describe('where results live online', () => {
+  it('keeps only https addresses', () => {
+    expect(httpsUrl('mychart.example.org/MyChart/')).toBe('https://mychart.example.org/MyChart/');
+    expect(httpsUrl('  https://www.pharmacy.example/rx ')).toBe('https://www.pharmacy.example/rx');
+    for (const bad of ['http://mychart.example.org/', 'javascript:alert(1)', 'data:text/html,hi', 'https://user:pw@example.org/', 'https://localhost/', 'not an address', '']) expect(httpsUrl(bad)).toBe('');
+    expect(portalLinks({ mychart: 'javascript:alert(1)' }).error).toMatch(/MyChart/);
+    expect(portalLinks({ pharmacy: 'http://rx.example.com' }).error).toMatch(/pharmacy/);
+    expect(portalLinks({ mychart: '', pharmacy: 'publix' })).toEqual({ links: { pharmacy: { id: 'publix', url: 'https://www.publix.com/pharmacy' } } });
+    expect(portalLinks({ mychart: 'mychart.example.org/MyChart/', pharmacy: 'https://www.pharmacy.example/rx' })).toEqual({ links: { mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { url: 'https://www.pharmacy.example/rx' } } });
+    expect(portalLinks({})).toEqual({ links: {} });
+  });
+
+  it('the buttons: Quest, Labcorp and LibreView, then the owner\'s own', () => {
+    expect(portalButtons(null)).toEqual([
+      { id: 'quest', name: 'Quest', url: 'https://myquest.questdiagnostics.com/dashboard' },
+      { id: 'labcorp', name: 'Labcorp', url: 'https://patient.labcorp.com/' },
+      { id: 'libreview', name: 'LibreView', url: 'https://www.libreview.com/' },
+    ]);
+    expect(portalButtons({ mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { url: 'https://www.pharmacy.example/rx' } }).slice(3)).toEqual([
+      { id: 'mychart', name: 'MyChart', url: 'https://mychart.example.org/MyChart/' },
+      { id: 'pharmacy', name: 'pharmacy.example', url: 'https://www.pharmacy.example/rx' },
+    ]);
+    expect(portalButtons({ pharmacy: { id: 'cvs', url: 'https://evil.example/' } })[3]).toEqual({ id: 'pharmacy', name: 'CVS', url: 'https://www.cvs.com/pharmacy' });
+    expect(portalButtons({ mychart: { url: 'javascript:alert(1)' }, pharmacy: { url: 'http://x.example' } })).toHaveLength(3);
+  });
+});
+
 describe('in the app', () => {
   let screens, saved;
   beforeEach(async () => {
@@ -92,5 +119,27 @@ describe('in the app', () => {
     expect(report.labs).toHaveLength(1);
     await call('app/labs/remove', 'a'.repeat(64), { id: '0' });
     expect(saved).toHaveLength(0);
+  });
+
+  it('the owner sets their MyChart and pharmacy; every phone gets the buttons', async () => {
+    let row = { id: 1, state: {} };
+    const night = { ready: true, async get() { return structuredClone(row); }, async patch(p) { row = { ...row, ...structuredClone(p) }; } };
+    const go = (p, token, body) => handleCgm(p, new Request(`https://x/${p}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), ENV,
+      { screens, labs: labs(), store: { ready: true, async between() { return []; }, async upsert() { return 0; } }, night, history: { ready: true, async range() { return []; } }, forecasts: { ready: false } });
+    const before = await (await go('app/labs', 'a'.repeat(64))).json();
+    expect(before.portals.map((p) => p.id)).toEqual(['quest', 'labcorp', 'libreview']);
+    expect(before.links).toEqual({ mychart: '', pharmacy: '' });
+    expect(before.pharmacies.map((p) => p.id)).toEqual(['cvs', 'walgreens', 'publix', 'amazon']);
+    expect((await go('app/links', 'b'.repeat(64), { mychart: 'https://mychart.example.org/' })).status).toBe(403);
+    expect((await go('app/links', 'a'.repeat(64), { mychart: 'http://mychart.example.org/' })).status).toBe(400);
+    expect(row.portal_links).toBeUndefined();
+    expect(await (await go('app/links', 'a'.repeat(64), { mychart: 'mychart.example.org/MyChart/', pharmacy: 'publix' })).json()).toMatchObject({ ok: true });
+    expect(row.portal_links).toEqual({ mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { id: 'publix', url: 'https://www.publix.com/pharmacy' } });
+    const family = await (await go('app/labs', 'b'.repeat(64))).json();
+    expect(family.portals.slice(3).map((p) => p.name)).toEqual(['MyChart', 'Publix']);
+    expect(family.links).toBeUndefined();
+    expect((await (await go('app/labs', 'a'.repeat(64))).json()).links).toEqual({ mychart: 'https://mychart.example.org/MyChart/', pharmacy: 'publix' });
+    await go('app/links', 'a'.repeat(64), { mychart: '', pharmacy: '' });
+    expect(row.portal_links).toEqual({});
   });
 });

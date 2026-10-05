@@ -47,13 +47,13 @@ const CORS = {
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 
-const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
+export const FORWARDED = new Set(['/libre/login', '/libre/readings', '/glucose/latest', '/display/data', '/alexa', '/voice/sync',
   '/pair/start', '/pair/poll', '/pair/claim', '/screen/data', '/screen/glance', '/screens', '/screens/remove',
   '/share/new', '/share/claim', '/share/extras', '/doctor/new', '/doctor/data',
   '/app/me', '/app/history', '/app/report', '/app/recent', '/app/log', '/app/undo', '/app/phones', '/app/phones/allow', '/screens/allow',
   '/app/push/key', '/app/push/subscribe', '/app/push/unsubscribe', '/app/push/test', '/app/treat',
   '/app/supplies', '/app/supplies/save', '/app/supplies/remove', '/doses/import',
-  '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/patterns', '/app/mode', '/app/ack',
+  '/app/parse', '/app/labs', '/app/labs/save', '/app/labs/remove', '/app/links', '/app/patterns', '/app/mode', '/app/ack',
   '/app/emergency', '/app/emergency/save', '/app/emergency/new', '/app/emergency/remove',
   '/app/edit', '/app/remove', '/app/food', '/app/meals', '/app/meals/remove', '/app/notes', '/app/note', '/app/notes/remove',
   '/app/trend', '/app/goal', '/app/appointments', '/app/appointments/save', '/app/appointments/remove', '/app/calendar', '/app/calendar/new', '/app/calendar/remove',
