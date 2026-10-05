@@ -42,6 +42,8 @@
 //   GET  app/checks?pid=&days=      those entries; POST app/checks/remove { id }
 //   GET  app/meds                   the pills su94r Mini lists (for logging them here)
 //   GET  app/export?pid=&days=90    everything as CSV (export.js)
+//   GET  app/insights?pid=          lows and their treatment, and meal rises by insulin timing (insights.js)
+//   POST app/timezone               (owner's phone) { tz } night hours and reminders in that time zone
 //   POST app/goal                   (owner's phone) { tir } the time-in-range goal, 50 to 95
 //   GET  app/appointments?pid=      doctor visits ahead (calendar.js); POST …/save, …/remove
 //   GET  app/calendar               (owner's phone) the calendar feed link; POST …/new, …/remove
@@ -73,6 +75,7 @@ import { coverageOf, runDrill } from './coverage.js';
 import { driveCheck } from './drive.js';
 import { checkRow, sensorVsMeter, ketoneLevel, KETONE_WORDS } from './checks.js';
 import { exportCsv } from './export.js';
+import { lowReview, mealTiming } from './insights.js';
 import { rateOf } from './night.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
@@ -81,7 +84,7 @@ export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/re
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
   'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
   'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove',
-  'app/coverage', 'app/drill', 'app/drive', 'app/check', 'app/checks', 'app/checks/remove', 'app/meds', 'app/export']);
+  'app/coverage', 'app/drill', 'app/drive', 'app/check', 'app/checks', 'app/checks/remove', 'app/meds', 'app/export', 'app/insights', 'app/timezone']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -184,10 +187,23 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
       notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob,
       checks: recentChecks.map((c) => ({ ...c, mine: canLog && (c.id.startsWith(chkMine) || owner) })),
-      morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, at: now });
+      morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, tz: row?.time_zone || null, at: now });
   }
 
   // The goal and the calendar feed link: the owner's own phone.
+  if (path === 'app/timezone') {
+    if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    const b = await request.json().catch(() => ({}));
+    const tz = String(b.tz || '');
+    let ok = false;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); ok = /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/.test(tz); } catch { ok = false; }
+    if (!ok) return json({ ok: false, error: T('That is not a time zone.', 'Esa no es una zona horaria.') }, 400);
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    await night.patch({ time_zone: tz });
+    return json({ ok: true, tz, text: T(`Night hours, reminders and days now follow ${tz.replace(/_/g, ' ')} time.`, `Las horas de noche, los recordatorios y los días ahora siguen la hora de ${tz.replace(/_/g, ' ')}.`) });
+  }
+
   if (path === 'app/coverage' || path === 'app/drill') {
     if (!owner) return json({ error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
     if (!night?.ready) return json({ error: 'Low alerts are not set up on the server.' }, 503);
@@ -259,6 +275,18 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     try { if (notes?.ready) noted = await notes.between(pid, now - 14 * DAY, now + MIN); } catch { /* without notes */ }
     const mmol = person.units === 'mmol/L';
     return json(findPatterns(points, events, { now, tz, low: person.low ?? 70, high: person.high ?? 180, fmt: (mg) => (mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg))), unit: mmol ? 'mmol/L' : 'mg/dL', lang: es ? 'es' : 'en', notes: noted }));
+  }
+
+  if (path === 'app/insights') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    const p = (await people()).find((x) => x.pid === pid) || {};
+    let points = [], events = [];
+    try { if (history?.ready && pid) points = await history.range(pid, now - 14 * DAY - 4 * 3600e3, now + MIN); } catch { /* none */ }
+    try { if (doses?.ready && pid) events = markersOf(await doses.between(pid, now - 14 * DAY - 3600e3, now)); } catch { /* none */ }
+    const mmol = p.units === 'mmol/L';
+    const fmtv = (mg) => (mmol ? `${(mg / 18.0182).toFixed(1)} mmol/L` : `${Math.round(mg)} mg/dL`);
+    const lang = es ? 'es' : 'en';
+    return json({ lows: lowReview(points, events, { now, low: p.low ?? 70, fmt: fmtv, lang }), timing: mealTiming(points, events, { now, fmt: fmtv, lang }) });
   }
 
   if (path === 'app/checks' && request.method === 'GET') {

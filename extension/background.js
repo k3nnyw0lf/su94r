@@ -352,7 +352,8 @@ function serial(fn) {
 
 const validEvent = (e) => e && typeof e.id === 'string' && e.p && Number.isFinite(e.t) && typeof e.type === 'string';
 // What the su94r server shares with Alexa and Telegram: every insulin dose, and meals said to Alexa or logged in Telegram.
-const voiced = (e) => e.type === 'insulin' || (e.type === 'meal' && (e.source === 'alexa' || e.source === 'telegram' || e.source === 'phone'));
+// Insulin and meals go to the server (meals logged here too, since 2.25.0: meal timing and the phone app see them).
+const voiced = (e) => e.type === 'insulin' || e.type === 'meal';
 
 function addEvents(list) {
   return serial(async () => {

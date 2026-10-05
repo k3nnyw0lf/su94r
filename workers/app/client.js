@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal', wunit: 'su94rAppWeightUnit' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal', wunit: 'su94rAppWeightUnit', tzSkip: 'su94rAppTzSkip' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -206,6 +206,11 @@
     'Meter check': 'Revisión con glucómetro', 'Ketone result': 'Resultado de cetonas', 'meter': 'glucómetro', 'urine': 'orina',
     'Export': 'Exportar', 'A spreadsheet (CSV) of the last 90 days: readings, insulin, carbs, notes, meter readings, ketones, weight, exercise and pills. For a PDF, print the report from the Report tab.': 'Una hoja de cálculo (CSV) de los últimos 90 días: lecturas, insulina, carbohidratos, notas, glucómetro, cetonas, peso, ejercicio y pastillas. Para un PDF, imprime el informe en la pestaña Informe.',
     'Download the spreadsheet': 'Descargar la hoja de cálculo', 'Preparing…': 'Preparando…',
+    // lows review, meal timing, travel
+    'Lows and their treatment': 'Bajas y su tratamiento', 'Insulin timing and meals': 'Momento de la insulina y comidas',
+    'From the last 14 days. It describes; it does not advise.': 'De los últimos 14 días. Describe; no aconseja.',
+    'You seem to be in {tz}': 'Parece que estás en {tz}', 'Night hours, reminders and days follow {home} time. Switch them to {tz} time while you are here?': 'Las horas de noche, los recordatorios y los días siguen la hora de {home}. ¿Cambiarlos a la hora de {tz} mientras estás aquí?',
+    'Switch to {tz}': 'Cambiar a {tz}', 'Not now': 'Ahora no',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -472,6 +477,13 @@
     const cov = S.cover && (S.me && S.me.role === 'me') ? S.cover : null;
     if (cov && cov.state === 'none') html += card('<h2>' + t('Your low alerts reach no phone') + '</h2><p>' + t('A low at night would ring nowhere. Turn on alerts on this phone, then run a drill.') + '</p><div class="row"><button class="btn" id="pushOn">' + t('Ring for lows on this phone') + '</button><button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button></div>', 'warnc');
     else if (cov && cov.state === 'untested') html += card('<h2>' + t('Alerts not tested yet') + '</h2><p class="small">' + t('Run a drill: su94r sends a test to every channel and records which ones reached you.') + '</p><button class="btn ghost" id="drillBtn">' + t('Run an alert drill') + '</button>');
+    const here = (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) { return ''; } })();
+    const home = S.recent && S.recent.tz;
+    const skipTz = store.get(K.tzSkip) || '';
+    if (S.me && S.me.role === 'me' && home && here && here !== home && skipTz !== here + '|' + new Date().toDateString()) {
+      const nice = (z) => z.split('/').pop().replace(/_/g, ' ');
+      html += card('<h2>' + esc(t('You seem to be in {tz}', { tz: nice(here) })) + '</h2><p class="small">' + esc(t('Night hours, reminders and days follow {home} time. Switch them to {tz} time while you are here?', { home: nice(home), tz: nice(here) })) + '</p><div class="row"><button class="btn" data-tz="' + esc(here) + '">' + esc(t('Switch to {tz}', { tz: nice(here) })) + '</button><button class="btn ghost" id="tzSkip">' + t('Not now') + '</button></div>');
+    }
     const mo = S.recent && S.recent.morning;
     if (mo && mo.lows && mo.lows.length && !S.morningSeen) {
       const n = mo.lows.length, u = mo.unanswered;
@@ -587,6 +599,12 @@
       if (pr) html += card('<h2>' + t('Patterns') + '</h2>' + (pr.data.patterns.length ? '<ul class="pat">' + pr.data.patterns.map((p) => '<li>' + esc(p.text) + '</li>').join('') + '</ul><p class="note">' + t('From the last 14 days. It describes what repeated; it does not advise.') + '</p>' : '<p class="muted">' + esc(pr.data.note || t('No clear patterns yet.')) + '</p>'));
       else { const lang = S.lang; api('app/patterns?pid=' + encodeURIComponent(c.pid)).then((data) => { S.patterns = { pid: c.pid, lang, at: Date.now(), data }; if (S.tab === 'history' && !S.dayView) renderHistory(); }).catch(() => {}); }
     }
+    if (days >= 7) {
+      const ins = S.insights && S.insights.pid === c.pid && S.insights.lang === S.lang && Date.now() - S.insights.at < 10 * MIN ? S.insights : null;
+      if (ins) html += card('<h2>' + t('Lows and their treatment') + '</h2>' + ins.data.lows.lines.map((x) => '<p class="small">' + esc(x) + '</p>').join('') +
+        '<h2 style="margin-top:14px">' + t('Insulin timing and meals') + '</h2>' + ins.data.timing.lines.map((x) => '<p class="small">' + esc(x) + '</p>').join('') + '<p class="note">' + t('From the last 14 days. It describes; it does not advise.') + '</p>');
+      else { const lang = S.lang; api('app/insights?pid=' + encodeURIComponent(c.pid)).then((data) => { S.insights = { pid: c.pid, lang, at: Date.now(), data }; if (S.tab === 'history' && !S.dayView) renderHistory(); }).catch(() => {}); }
+    }
     html += trendHtml;
     if (days > 1) {
       const byDay = new Map();
@@ -657,9 +675,7 @@
       const favs = S.meals && S.meals.pid === cur().pid ? S.meals.list : null;
       if (!favs) loadMeals();
       m += '<button class="btn ghost" id="scanBtn" style="display:block;width:100%;margin-top:8px">' + t('📦 Scan a barcode') + '</button>';
-      if (favs && favs.length) m += '<div class="muted small" style="margin-top:10px">' + t('Favorites') + '</div><div class="quick" style="justify-content:flex-start">' + favs.map((f, k) => '<button data-fav="' + k + '"' + (L.mealName === f.name ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + esc(f.name) + ' · ' + f.carbs + ' g</button>').join('') + '</div>';
-      const chosen = favs && favs.find((f) => f.name === L.mealName);
-      if (chosen) m += '<p class="small">' + esc(t('★ {name}', { name: chosen.name })) + ' <button class="btn ghost" style="padding:4px 10px" data-favdel="' + esc(chosen.id) + '">' + t('Remove from favorites') + '</button></p>';
+      m += '<div id="favBox">' + favHtml(favs, L) + '</div>';
     }
     const html = card('<h2>' + t('Log') + '</h2>' + mic + '<div class="kinds">' + kindBtn('rapid', t('Rapid insulin')) + kindBtn('basal', t('Long-acting')) + kindBtn('carbs', t('Carbs')) + kindBtn('note', t('Note')) + '</div>' + kinds2 + m +
       '<div class="row" style="margin-top:10px"><label class="muted small" for="otherKind">' + t('Other insulin') + '</label><select id="otherKind"><option value="">—</option>' +
@@ -928,13 +944,23 @@
   }
 
   // ---------- favorite meals ----------
+  // Drawn into their own box: when they arrive, only that box changes, so a photo being picked
+  // (the file input) is never replaced mid-way.
+  function favHtml(favs, L) {
+    if (!favs || !favs.length) return '';
+    let h = '<div class="muted small" style="margin-top:10px">' + t('Favorites') + '</div><div class="quick" style="justify-content:flex-start">' + favs.map((f, k) => '<button data-fav="' + k + '"' + (L.mealName === f.name ? ' style="background:var(--fg);color:var(--bg);border-color:var(--fg)"' : '') + '>' + esc(f.name) + ' · ' + f.carbs + ' g</button>').join('') + '</div>';
+    const chosen = favs.find((f) => f.name === L.mealName);
+    if (chosen) h += '<p class="small">' + esc(t('★ {name}', { name: chosen.name })) + ' <button class="btn ghost" style="padding:4px 10px" data-favdel="' + esc(chosen.id) + '">' + t('Remove from favorites') + '</button></p>';
+    return h;
+  }
   async function loadMeals() {
     const pid = cur().pid;
     if (S.mealsLoading === pid) return;
     S.mealsLoading = pid;
     try { S.meals = { pid, list: (await api('app/meals?pid=' + encodeURIComponent(pid))).meals || [] }; } catch (e) { S.meals = { pid, list: [] }; }
     S.mealsLoading = null;
-    if (S.tab === 'log' && S.log.kind === 'carbs' && !$('sheet')) renderLog();
+    const box = $('favBox');
+    if (box && S.log.kind === 'carbs' && S.meals.pid === cur().pid) box.innerHTML = favHtml(S.meals.list, S.log);
   }
 
   // ---------- barcode: the camera where the browser can read barcodes, typing everywhere ----------
@@ -1644,6 +1670,8 @@
     else if (el.id === 'bedBtn') bedOpen();
     else if (el.id === 'emEdit') emergencyEdit();
     else if (el.id === 'goalBtn') askGoal();
+    else if (d.tz) { el.disabled = true; api('app/timezone', { method: 'POST', body: { tz: d.tz } }).then((r) => { toast(r.text); return refreshRecent(); }).catch((x) => toast(x.message)); }
+    else if (el.id === 'tzSkip') { try { store.set(K.tzSkip, Intl.DateTimeFormat().resolvedOptions().timeZone + '|' + new Date().toDateString()); } catch (x) { /* fine */ } renderNow(); }
     else if (el.id === 'drillBtn') { el.disabled = true; drill(); }
     else if (el.id === 'driveBtn') driveSheet();
     else if (el.id === 'morningOk') { S.morningSeen = true; renderNow(); }

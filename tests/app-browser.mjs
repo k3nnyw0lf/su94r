@@ -9,7 +9,9 @@
 // Now shows active insulin; History shows the goal, streaks and the months; a doctor visit reaches
 // the calendar feed; with no phone to ring the owner's Now says so, a drill goes out, last night's
 // unanswered lows show, and "Can I drive?" answers; a meter reading far from the sensor, high ketones,
-// a pill, weight and exercise log, and the spreadsheet downloads.
+// a pill, weight and exercise log, and the spreadsheet downloads; the big screen's family and car
+// layouts show active insulin and the last meal, and a low turns the car layout red with its line;
+// History reviews lows and meal timing; a phone in another time zone offers to switch.
 //   node tests/app-browser.mjs  (needs playwright-core and Microsoft Edge)
 import http from 'node:http';
 import fs from 'node:fs';
@@ -96,7 +98,7 @@ const server = http.createServer(async (req, res) => {
   const body = chunks.length ? Buffer.concat(chunks) : undefined;
   const request = new Request(url, { method: req.method, headers: req.headers, body: req.method === 'GET' ? undefined : body });
   // The proxy serves the app's own files and the meal photo; everything else is su94r-cgm.
-  const proxied = url.pathname === '/app/qr' || /^\/e\/[0-9a-f]{64}$/.test(url.pathname) || /^\/cal\/[0-9a-f]{64}\.ics$/.test(url.pathname);
+  const proxied = url.pathname.startsWith('/d/') || url.pathname === '/app/qr' || /^\/e\/[0-9a-f]{64}$/.test(url.pathname) || /^\/cal\/[0-9a-f]{64}\.ics$/.test(url.pathname);
   const appFile = req.method === 'GET' && ['/app', '/app/', '/app/app.js', '/app/sw.js', '/app/manifest.webmanifest', '/app/icon.svg', '/app/icon-192.png', '/app/icon-512.png', '/app/apple-touch-icon.png'].includes(url.pathname);
   const r = appFile || proxied || url.pathname === '/app/meal'
     ? await proxy.fetch(request, { CGM_URL: `http://localhost:${PORT}`, AI: ai })
@@ -535,6 +537,46 @@ checks.googleLink = gHref.startsWith('https://calendar.google.com/calendar/r?cid
 checks.insightsFits = await noSideScroll();
 await page.locator('h2:has-text("Calendar")').scrollIntoViewIfNeeded();
 await page.screenshot({ path: path.join(OUT, 'app-32-calendar.png'), fullPage: true });
+
+// History: lows and meal timing. Now: a phone in another time zone than the night hours.
+await page.click('#tabs button[data-tab="history"]');
+await page.click('button[data-days="14"]');
+await page.waitForSelector('h2:has-text("Lows and their treatment")', { timeout: 20000 });
+checks.lowsCard = /lows? in 14 days|No lows/.test(await page.textContent('#main')) && (await page.textContent('#main')).includes('Insulin timing and meals');
+const phoneZone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
+nightRow.time_zone = phoneZone === 'Europe/Madrid' ? 'Asia/Tokyo' : 'Europe/Madrid';
+await page.click('#tabs button[data-tab="now"]');
+await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+await page.waitForSelector('text=You seem to be in', { timeout: 20000 });
+await page.click('button[data-tz]');
+await page.waitForSelector('#toast >> text=now follow');
+checks.travelSwitch = nightRow.time_zone === phoneZone;
+
+// The big screen: family dashboard and car layouts.
+const tv = await ctx.newPage();
+tv.on('pageerror', (e) => errors.push(e.message));
+await tv.setViewportSize({ width: 1280, height: 800 });
+await tv.goto(`http://localhost:${PORT}/d/tv-key-123?view=family`);
+await tv.waitForSelector('.fcard');
+checks.familyView = /Active insulin about [\d.]+ u/.test(await tv.textContent('.fcard')) && (await tv.textContent('.fcard')).includes('Last meal');
+await tv.screenshot({ path: path.join(OUT, 'tv-family.png') });
+forceLow = true;
+resetCaches();
+await tv.goto(`http://localhost:${PORT}/d/tv-key-123?view=car`);
+await tv.waitForSelector('.car .tip');
+checks.carLow = (await tv.textContent('.tip')).includes('treat the low') && (await tv.getAttribute('#main', 'data-c')) === 'low';
+checks.soundAsk = Boolean(await tv.waitForSelector('#sndBtn', { timeout: 6000 }).catch(() => null));
+await tv.click('#sndBtn');
+await tv.waitForTimeout(300);
+checks.soundAllowed = !(await tv.$('#sndBtn'));
+await tv.screenshot({ path: path.join(OUT, 'tv-car-low.png') });
+await tv.click('#viewBtn');
+await tv.click('.viewMenu button[data-v="standard"]');
+await tv.waitForSelector('.read .val');
+checks.viewSwitch = (await tv.evaluate(() => localStorage.getItem('su94rView'))) === 'standard';
+await tv.close();
+forceLow = false;
+resetCaches();
 
 // Dark mode
 await page.emulateMedia({ colorScheme: 'dark' });

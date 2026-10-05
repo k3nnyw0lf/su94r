@@ -56,6 +56,7 @@ import { appointmentStore, calendarFeed } from './calendar.js';
 import { supplyStatus } from './supplies.js';
 import { dialer, callRoute, telnyxReady } from './calls.js';
 import { checkStore } from './checks.js';
+import { insulinOnBoard, lastDose, BOLUS_KINDS } from '../extension/insulin.js';
 import { exportCsv } from './export.js';
 import { drillSenders } from './night.js';
 import { telegramStore, telegramRoute, telegramAlert, telegramLinkFor, askMeal } from './telegram.js';
@@ -267,19 +268,37 @@ async function displayKeyOk(env, key, deps = {}) {
 
 async function displayData(url, env, deps) {
   if (!(await displayKeyOk(env, url.searchParams.get('key'), deps))) return json({ error: 'unauthorized' }, 401);
-  return displayPayload(env);
+  return displayPayload(env, {}, deps);
 }
 
-async function displayPayload(env, extra = {}) {
+async function displayPayload(env, extra = {}, deps = {}) {
   try {
     const snap = await snapshot(env);
     const since = Date.now() - 12 * 3600e3;
+    // For the family and car layouts: active insulin, the last meal and rapid dose, the learner's
+    // trusted 30-minute estimate. A failure leaves them out; the glucose still shows.
+    const now = Date.now();
+    let events = [], rapid;
+    try { const st = deps.store || doseStore(env); if (st.ready) events = asMarkers(await st.recent(null, now)); } catch { events = []; }
+    try { const n = deps.night || nightStore(env); if (n.ready) rapid = (await n.get()).rapid_insulin || undefined; } catch { /* default curve */ }
+    const fstore = deps.forecasts || forecastStore(env);
+    const extraFor = async (p) => {
+      const mine = events.filter((e) => e.p === p.pid);
+      const meal = mine.filter((e) => e.type === 'meal').sort((a, b) => b.t - a.t)[0];
+      const dose = lastDose(mine, p.pid, BOLUS_KINDS, now);
+      let soon = null;
+      try { const fc = fstore.ready ? await fstore.get(p.pid) : null; if (fc && fc.trusted && now - fc.at <= 20 * 60e3 && fc.h30) soon = fc.h30.mg; } catch { /* without */ }
+      return { iob: insulinOnBoard(mine, p.pid, { rapidInsulin: rapid }, now), meal: meal ? { t: meal.t, g: meal.amount ?? null } : null, dose: dose ? { t: dose.t, u: dose.amount ?? null, kind: dose.kind || 'rapid' } : null, soon };
+    };
+    const people = [];
+    for (const p of snap.people) people.push({ p, x: await extraFor(p).catch(() => ({})) });
     return json({
       at: snap.at,
-      people: snap.people.map((p) => ({
+      people: people.map(({ p, x }) => ({
         name: p.name, units: p.units, low: p.low, high: p.high, sensorStart: p.sensorStart,
         latest: p.latest,
         history: p.history.filter((q) => q.t >= since).map((q) => [q.t, q.mg]),
+        extra: x,
       })),
       ...extra,
     });
@@ -317,11 +336,11 @@ async function voiceSync(request, url, env, deps) {
   try { body = await request.json(); } catch { return json({ error: 'bad request' }, 400); }
   const now = Date.now();
   const markers = (Array.isArray(body?.markers) ? body.markers : [])
-    .filter((m) => m?.type === 'insulin' && Number.isFinite(m.t) && now - m.t < WINDOW_MS && m.t < now + 15 * 60e3)
+    .filter((m) => (m?.type === 'insulin' || m?.type === 'meal') && Number.isFinite(m.t) && now - m.t < WINDOW_MS && m.t < now + 15 * 60e3)
     .slice(0, 500);
   await store.upsert(markers.map((m) => ({
-    id: m.id, pid: m.p, t: m.t, kind: m.kind || 'rapid', amount: m.amount ?? null,
-    source: m.source === 'alexa' ? 'alexa' : 'extension',
+    id: m.id, pid: m.p, t: m.t, kind: m.type === 'meal' ? 'carbs' : m.kind || 'rapid', amount: m.amount ?? null,
+    source: ['alexa', 'telegram', 'phone'].includes(m.source) ? m.source : 'extension',
   })));
   if (['lyumjev', 'fiasp', 'novorapid', 'humalog', 'apidra'].includes(body?.rapidInsulin)) {
     const n = deps.night || nightStore(env);
@@ -370,7 +389,7 @@ async function screensRoute(path, request, url, env, deps) {
     // An AI connector's token reads through MCP only, never the screen feeds (names, sensor dates).
     if (!screen || (screen.kind !== 'screen' && screen.kind !== 'widget')) return json({ error: 'unauthorized' }, 401);
     if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
-    return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } });
+    return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } }, deps);
   }
   if (path === 'share/claim') {
     if (request.method !== 'POST') return json({ error: 'POST only' }, 405);

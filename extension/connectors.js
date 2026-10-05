@@ -429,6 +429,14 @@ export const CONNECTORS = [
             h('div', { class: 'actions' }, plan),
             h('div', { class: 'actions' }, action(ctx, msg, 'Save my plan', 'Saving…', () => nightSave(settings.screenLink, { treatGrams: Number(grams.value), treatMinutes: Number(minutes.value), treatPlan: plan.value.trim() }), 'primary')));
         })(),
+        (() => {
+          // This computer in another time zone than the night hours (travel): offer to switch.
+          let here = '';
+          try { here = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { here = ''; }
+          if (!here || !v.timeZone || here === v.timeZone) return null;
+          return h('div', {}, state(h, `This computer is in ${here.replace(/_/g, ' ')}, but night hours, reminders and days follow ${v.timeZone.replace(/_/g, ' ')} time.`, 'warn'),
+            h('div', { class: 'actions' }, action(ctx, msg, `Use ${here.split('/').pop().replace(/_/g, ' ')} time`, 'Saving…', () => nightSave(settings.screenLink, { timeZone: here }))));
+        })(),
         await (async () => {
           let c = null;
           try { c = await nightCoverage(settings.screenLink); } catch { /* shown as unknown */ }

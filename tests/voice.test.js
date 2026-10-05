@@ -134,7 +134,12 @@ describe('dose exchange with su94r Mini', () => {
     expect(r.doses.map((d) => d.id)).toEqual(['v1']);
     expect(r.doses[0]).toMatchObject({ p: 'p1', type: 'insulin', kind: 'short', amount: 4, source: 'alexa' });
     expect(store.rows.get('m1')).toMatchObject({ source: 'extension', amount: 3 });
-    expect(store.rows.has('meal')).toBe(false);
+    expect(store.rows.get('meal')).toMatchObject({ kind: 'carbs', amount: 40, source: 'extension' });   // meals too, since su94r Mini 2.25.0
+  });
+  it('a dose that came from the phone or Telegram keeps its source when a computer sends it back', async () => {
+    await sync({ markers: [{ id: 'app-1', p: 'p1', t: Date.now() - 60e3, type: 'insulin', kind: 'rapid', amount: 2, source: 'phone' }, { id: 'tg-1', p: 'p1', t: Date.now() - 60e3, type: 'meal', amount: 30, source: 'telegram' }] });
+    expect(store.rows.get('app-1').source).toBe('phone');
+    expect(store.rows.get('tg-1').source).toBe('telegram');
   });
   it('deletes only what the computer says it deleted', async () => {
     await store.upsert([

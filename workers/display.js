@@ -62,6 +62,26 @@ text{fill:var(--muted);font-size:max(12px,1.8vh)}
 .small .graph{margin-top:6px}
 .small .code{font-size:min(16vh,13vw)}
 .small .how{font-size:13px}
+/* Family dashboard and car layouts. */
+.fam{flex:1;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,40vw),1fr));gap:2.5vh 2vw;align-content:center;margin-top:1vh}
+.fcard{border-left:1.2vh solid var(--c);background:rgba(255,255,255,.05);border-radius:1.6vh;padding:2.4vh 2.4vw;display:flex;flex-direction:column;gap:1.2vh}
+.fcard .n{font-size:max(18px,4vh);font-weight:700}
+.fcard .r{display:flex;align-items:center;gap:1.4vw}
+.fcard .val{font-size:min(20vh,14vw)}
+.fcard .arrow{width:min(10vh,7vw);height:min(10vh,7vw)}
+.fcard .l{font-size:max(15px,2.8vh);color:var(--muted)}.fcard .l b{color:var(--fg);font-weight:650}
+.car{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2vh;text-align:center}
+.carv{display:flex;align-items:center;gap:3vw}
+.car .val{font-size:min(48vh,34vw)}
+.car .arrow{width:min(24vh,16vw);height:min(24vh,16vw)}
+.carm{color:var(--muted);font-size:max(18px,4vh)}
+.tip{font-size:max(20px,5vh);font-weight:750;color:var(--c);padding:1vh 2vw;border:.4vh solid var(--c);border-radius:1.4vh}
+.alarming{animation:pulse 1.2s ease-in-out infinite}
+.viewBtn{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:5;background:rgba(255,255,255,.08);color:var(--fg);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer}
+.viewMenu{position:fixed;left:50%;transform:translateX(-50%);bottom:54px;z-index:6;background:#0d1117;border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px}
+.viewMenu button{background:transparent;color:var(--fg);border:0;border-radius:8px;padding:10px 16px;font-size:16px;text-align:left;cursor:pointer}
+.viewMenu button[aria-pressed=true]{background:rgba(255,255,255,.12);font-weight:650}
+.sndBtn{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:6;background:#b42318;color:#fff;border:0;border-radius:20px;padding:10px 18px;font-size:16px;font-weight:650;cursor:pointer}
 /* A phone shared from su94r Mini (QR code): its options. */
 .optsBtn{position:fixed;right:12px;bottom:12px;z-index:5;background:rgba(255,255,255,.1);color:var(--fg);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer}
 .opts{position:fixed;top:0;left:0;right:0;bottom:0;z-index:10;background:rgba(0,0,0,.86);overflow:auto;cursor:auto;display:flex;justify-content:center;align-items:flex-start;padding:16px}
@@ -102,6 +122,57 @@ function graph(p,hours){
   if(p.latest)s+='<circle cx="'+x(p.latest.t)+'" cy="'+y(p.latest.mg)+'" r="8" fill="'+c+'"/>';
   el.innerHTML=s+'</svg>';
 }
+// ---- layouts: standard, family dashboard, car (chosen on this screen; ?view= also sets it) ----
+function view(){const q=new URLSearchParams(location.search).get('view');if(q==='car'||q==='family'||q==='standard'){try{localStorage.setItem('su94rView',q)}catch(e){}return q}try{return localStorage.getItem('su94rView')||'standard'}catch(e){return 'standard'}}
+const hm=(t)=>new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+function lines(p){const x=p.extra||{};const out=[];
+  if(x.iob>0)out.push('Active insulin <b>about '+x.iob+' u</b>');
+  if(x.dose)out.push('Last insulin <b>'+(x.dose.u!=null?x.dose.u+' u ':'')+'</b>at '+hm(x.dose.t));
+  if(x.meal)out.push('Last meal <b>'+(x.meal.g!=null?x.meal.g+' g ':'')+'</b>at '+hm(x.meal.t));
+  if(x.soon!=null)out.push('In 30 min <b>about '+fmt(x.soon,p.units)+'</b>');
+  return out}
+function value(p,c){const l=p.latest;return l?(l.mg<40?'LO':l.mg>400?'HI':fmt(l.mg,p.units)):'—'}
+function renderFamily(people){
+  const main=$('main');main.className='fam';delete main.dataset.c;$('title').textContent=people.length>1?people.length+' people':people[0].name;
+  main.innerHTML=people.map((p)=>{const c=cat(p),l=p.latest;return '<div class="fcard'+(c==='low'||c==='urgent'?' alarming':'')+'" data-c="'+c+'"><span class="n">'+esc(p.name)+'</span><div class="r"><span class="val">'+value(p,c)+'</span>'+(l&&c!=='stale'?arrow(l.trend):'')+'<span class="l">'+esc(p.units)+'<br>'+(l?(c==='stale'?'No reading for '+ago(l.t).replace(' ago',''):ago(l.t)):'')+'</span></div>'+lines(p).map((x)=>'<span class="l">'+x+'</span>').join('')+'</div>'}).join('');
+  return people.some((p)=>cat(p)==='low'||cat(p)==='urgent');
+}
+function renderCar(people){
+  const p=people[0],c=cat(p),l=p.latest,x=p.extra||{};
+  const main=$('main');main.className='car'+(c==='low'||c==='urgent'?' alarming':'');main.dataset.c=c;$('title').textContent=p.name;
+  let tip='';
+  if(l&&c!=='stale'){if(l.mg<=72)tip='Don’t drive: treat the low';else if(l.mg<90)tip='Under 90: eat before you drive';else if(x.soon!=null&&x.soon<90)tip='Falling toward 90: eat first'}
+  else if(c==='stale')tip='No fresh reading: check with a meter';
+  const low=c==='low'||c==='urgent';
+  main.innerHTML='<div class="carv"><span class="val">'+value(p,c)+'</span>'+(l&&c!=='stale'?arrow(l.trend):'')+'</div>'+
+    '<div class="carm">'+(l?ago(l.t):'')+(c!=='stale'&&delta(p)?' · '+delta(p):'')+(x.soon!=null?' · in 30 min ~'+fmt(x.soon,p.units):'')+(x.iob>0?' · insulin '+x.iob+' u':'')+'</div>'+
+    (tip?'<div class="tip">'+tip+'</div>':'')+(low&&snd&&Date.now()>=quiet?'<div class="carm">Tap the screen to silence for 10 minutes</div>':'')+
+    (people.length>1?'<div class="carm">'+people.slice(1).map((q)=>esc(q.name)+' '+value(q,cat(q))).join(' · ')+'</div>':'');
+  document.title=value(p,c)+' · '+p.name;
+  return low;
+}
+// The alarm: the browser plays sound only after a tap on the page, so a button asks for it once.
+let snd=null,quiet=0,alarmOn=false;
+function soundButton(){
+  if(view()==='standard'||snd||$('sndBtn'))return;
+  const b=document.createElement('button');b.id='sndBtn';b.className='sndBtn';b.textContent='🔔 Tap to allow the low alarm sound';
+  b.onclick=(e)=>{e.stopPropagation();try{snd=new (window.AudioContext||window.webkitAudioContext)();if(snd.resume)snd.resume()}catch(err){snd=null}b.remove()};
+  document.body.appendChild(b);
+}
+function beep(){
+  if(!snd||!alarmOn||Date.now()<quiet)return;
+  [0,0.3,0.6].forEach((d)=>{const o=snd.createOscillator(),g=snd.createGain();o.type='square';o.frequency.value=880;g.gain.setValueAtTime(0.0001,snd.currentTime+d);g.gain.exponentialRampToValueAtTime(0.5,snd.currentTime+d+0.02);g.gain.exponentialRampToValueAtTime(0.0001,snd.currentTime+d+0.22);o.connect(g);g.connect(snd.destination);o.start(snd.currentTime+d);o.stop(snd.currentTime+d+0.25)});
+}
+document.addEventListener('click',(e)=>{if(alarmOn&&snd&&!e.target.closest('button')){quiet=Date.now()+10*60e3;render()}});
+function viewButton(){
+  if($('viewBtn'))return;
+  const b=document.createElement('button');b.id='viewBtn';b.className='viewBtn';b.textContent='◧ View';
+  b.onclick=()=>{const old=$('viewMenu');if(old){old.remove();return}const m=document.createElement('div');m.id='viewMenu';m.className='viewMenu';
+    m.innerHTML=[['standard','Standard'],['family','Family dashboard'],['car','Car']].map((v)=>'<button data-v="'+v[0]+'" aria-pressed="'+(view()===v[0])+'">'+v[1]+'</button>').join('');
+    m.onclick=(e)=>{const v=e.target.getAttribute('data-v');if(!v)return;try{localStorage.setItem('su94rView',v)}catch(err){}if(location.search)history.replaceState(null,'',location.pathname+location.hash);m.remove();soundButton();render()};
+    document.body.appendChild(m)};
+  document.body.appendChild(b);
+}
 function render(){
   document.documentElement.classList.toggle('small',small());
   if(pairing)return;
@@ -110,6 +181,9 @@ function render(){
   if(!data){main.innerHTML='<div class="read"><div class="side">Loading\\u2026</div></div>';return}
   const people=[...data.people].sort((a,b)=>({urgent:0,low:1,stale:2,high:3,none:4,in:5}[cat(a)]-{urgent:0,low:1,stale:2,high:3,none:4,in:5}[cat(b)]));
   if(!people.length){main.innerHTML='<div class="read"><div class="side">No one is sharing with this account yet.</div></div>';return}
+  const v=view();
+  if(v==='car'||v==='family'){alarmOn=v==='car'?renderCar(people):renderFamily(people);const late=Date.now()-lastOk>3*60e3;$('status').className=late?'err':'';$('status').textContent=late?'Can’t reach the server — retrying':'Updated '+ago(data.at);return}
+  alarmOn=false;
   if(people.length===1){
     const p=people[0],c=cat(p),l=p.latest;$('title').textContent=p.name;
     main.className='one';main.dataset.c=c;
@@ -217,6 +291,7 @@ async function openOpts(first){
   $('unlink').onclick=()=>{if(confirm('Unlink this phone? It stops showing the glucose here.')){store.del('su94rScreenToken');store.del('su94rShared');store.del('su94rNsToken');location.reload()}};
 }
 join().then((ok)=>{if(ok)load()});setInterval(load,60e3);setInterval(render,15e3);setInterval(optsButton,2000);addEventListener('resize',render);
+setInterval(()=>{if(!pairing){viewButton();soundButton()}},2000);setInterval(beep,4000);
 setTimeout(()=>location.reload(),6*3600e3);
 if('wakeLock' in navigator){const lock=()=>navigator.wakeLock.request('screen').catch(()=>{});lock();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')lock()})}
 </script>
