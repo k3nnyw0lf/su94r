@@ -66,18 +66,19 @@ describe('where results live online', () => {
     expect(portalLinks({})).toEqual({ links: {} });
   });
 
-  it('the buttons: Quest, Labcorp and LibreView, then the owner\'s own', () => {
+  it('the buttons: Quest, Labcorp, LibreView and Fullscript, then the owner\'s own', () => {
     expect(portalButtons(null)).toEqual([
       { id: 'quest', name: 'Quest', url: 'https://myquest.questdiagnostics.com/dashboard' },
       { id: 'labcorp', name: 'Labcorp', url: 'https://patient.labcorp.com/' },
       { id: 'libreview', name: 'LibreView', url: 'https://www.libreview.com/' },
+      { id: 'fullscript', name: 'Fullscript', url: 'https://us.fullscript.com/login' },
     ]);
-    expect(portalButtons({ mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { url: 'https://www.pharmacy.example/rx' } }).slice(3)).toEqual([
+    expect(portalButtons({ mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { url: 'https://www.pharmacy.example/rx' } }).slice(4)).toEqual([
       { id: 'mychart', name: 'MyChart', url: 'https://mychart.example.org/MyChart/' },
       { id: 'pharmacy', name: 'pharmacy.example', url: 'https://www.pharmacy.example/rx' },
     ]);
-    expect(portalButtons({ pharmacy: { id: 'cvs', url: 'https://evil.example/' } })[3]).toEqual({ id: 'pharmacy', name: 'CVS', url: 'https://www.cvs.com/pharmacy' });
-    expect(portalButtons({ mychart: { url: 'javascript:alert(1)' }, pharmacy: { url: 'http://x.example' } })).toHaveLength(3);
+    expect(portalButtons({ pharmacy: { id: 'cvs', url: 'https://evil.example/' } })[4]).toEqual({ id: 'pharmacy', name: 'CVS', url: 'https://www.cvs.com/pharmacy' });
+    expect(portalButtons({ mychart: { url: 'javascript:alert(1)' }, pharmacy: { url: 'http://x.example' } })).toHaveLength(4);
   });
 });
 
@@ -127,7 +128,7 @@ describe('in the app', () => {
     const go = (p, token, body) => handleCgm(p, new Request(`https://x/${p}`, { method: body ? 'POST' : 'GET', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), ENV,
       { screens, labs: labs(), store: { ready: true, async between() { return []; }, async upsert() { return 0; } }, night, history: { ready: true, async range() { return []; } }, forecasts: { ready: false } });
     const before = await (await go('app/labs', 'a'.repeat(64))).json();
-    expect(before.portals.map((p) => p.id)).toEqual(['quest', 'labcorp', 'libreview']);
+    expect(before.portals.map((p) => p.id)).toEqual(['quest', 'labcorp', 'libreview', 'fullscript']);
     expect(before.links).toEqual({ mychart: '', pharmacy: '' });
     expect(before.pharmacies.map((p) => p.id)).toEqual(['cvs', 'walgreens', 'publix', 'amazon']);
     expect((await go('app/links', 'b'.repeat(64), { mychart: 'https://mychart.example.org/' })).status).toBe(403);
@@ -136,7 +137,7 @@ describe('in the app', () => {
     expect(await (await go('app/links', 'a'.repeat(64), { mychart: 'mychart.example.org/MyChart/', pharmacy: 'publix' })).json()).toMatchObject({ ok: true });
     expect(row.portal_links).toEqual({ mychart: { url: 'https://mychart.example.org/MyChart/' }, pharmacy: { id: 'publix', url: 'https://www.publix.com/pharmacy' } });
     const family = await (await go('app/labs', 'b'.repeat(64))).json();
-    expect(family.portals.slice(3).map((p) => p.name)).toEqual(['MyChart', 'Publix']);
+    expect(family.portals.slice(4).map((p) => p.name)).toEqual(['MyChart', 'Publix']);
     expect(family.links).toBeUndefined();
     expect((await (await go('app/labs', 'a'.repeat(64))).json()).links).toEqual({ mychart: 'https://mychart.example.org/MyChart/', pharmacy: 'publix' });
     await go('app/links', 'a'.repeat(64), { mychart: '', pharmacy: '' });

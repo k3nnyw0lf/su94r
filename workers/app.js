@@ -44,6 +44,9 @@
 //   GET  app/export?pid=&days=90    everything as CSV (export.js)
 //   GET  app/insights?pid=          lows and their treatment, and meal rises by insulin timing (insights.js)
 //   POST app/timezone               (owner's phone) { tz } night hours and reminders in that time zone
+//   GET  app/medals?pid=            medals earned and the next of each kind (medals.js); kept once earned
+//   GET  app/supplements            supplements (often a Fullscript plan) and refills due (supplements.js);
+//                                   POST app/supplements/save, app/supplements/remove (owner's phone)
 //   POST app/goal                   (owner's phone) { tir } the time-in-range goal, 50 to 95
 //   GET  app/appointments?pid=      doctor visits ahead (calendar.js); POST …/save, …/remove
 //   GET  app/calendar               (owner's phone) the calendar feed link; POST …/new, …/remove
@@ -76,6 +79,8 @@ import { driveCheck } from './drive.js';
 import { checkRow, sensorVsMeter, ketoneLevel, KETONE_WORDS } from './checks.js';
 import { exportCsv } from './export.js';
 import { lowReview, mealTiming } from './insights.js';
+import { medalsFor } from './medals.js';
+import { supplementRow, asPills, dueRefills, FULLSCRIPT_URL, MAX_SUPPLEMENTS } from './supplements.js';
 import { rateOf } from './night.js';
 
 export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/recent', 'app/log', 'app/undo', 'app/phones', 'app/phones/allow',
@@ -84,7 +89,8 @@ export const APP_PATHS = new Set(['app/me', 'app/history', 'app/report', 'app/re
   'app/emergency', 'app/emergency/save', 'app/emergency/new', 'app/emergency/remove',
   'app/edit', 'app/remove', 'app/food', 'app/meals', 'app/meals/remove', 'app/notes', 'app/note', 'app/notes/remove',
   'app/trend', 'app/goal', 'app/appointments', 'app/appointments/save', 'app/appointments/remove', 'app/calendar', 'app/calendar/new', 'app/calendar/remove',
-  'app/coverage', 'app/drill', 'app/drive', 'app/check', 'app/checks', 'app/checks/remove', 'app/meds', 'app/export', 'app/insights', 'app/timezone']);
+  'app/coverage', 'app/drill', 'app/drive', 'app/check', 'app/checks', 'app/checks/remove', 'app/meds', 'app/export', 'app/insights', 'app/timezone',
+  'app/medals', 'app/supplements', 'app/supplements/save', 'app/supplements/remove']);
 const MIN = 60e3, DAY = 864e5;
 const KINDS = new Set(['rapid', 'short', 'intermediate', 'basal', 'mix', 'carbs']);
 export const APP_MAX_UNITS = 100;
@@ -187,7 +193,8 @@ export async function appRoute(path, request, url, env, { screens, history, dose
       mode: mode ? { kind: mode, until: Date.parse(row.mode_until) } : null,
       notes: recentNotes.map((n) => ({ ...n, mine: n.id.startsWith(noteMine) || owner })), iob,
       checks: recentChecks.map((c) => ({ ...c, mine: canLog && (c.id.startsWith(chkMine) || owner) })),
-      morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, tz: row?.time_zone || null, at: now });
+      morning: row?.morning?.at && now - row.morning.at < 18 * 3600e3 ? row.morning : null, tz: row?.time_zone || null,
+      refills: dueRefills(row?.supplements, { now, tz: row?.time_zone || 'America/New_York' }), at: now });
   }
 
   // The goal and the calendar feed link: the owner's own phone.
@@ -289,6 +296,46 @@ export async function appRoute(path, request, url, env, { screens, history, dose
     return json({ lows: lowReview(points, events, { now, low: p.low ?? 70, fmt: fmtv, lang }), timing: mealTiming(points, events, { now, fmt: fmtv, lang }) });
   }
 
+  // Medals (medals.js): worked out from the saved days and the logs, and kept once earned.
+  if (path === 'app/medals') {
+    const pid = await pidFor(url.searchParams.get('pid'));
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* defaults */ }
+    const tz = row?.time_zone || 'America/New_York';
+    let days = [], logged = [], meters = [], carbs = [];
+    try { if (daily?.ready && pid) days = await daily.since(pid, new Date(now - 730 * DAY).toISOString().slice(0, 10)); } catch { /* none yet */ }
+    try { if (checks?.ready && pid) logged = await checks.between(pid, now - 730 * DAY, now + MIN, ['exercise', 'weight']); } catch { /* none */ }
+    try { if (checks?.ready && pid) meters = await checks.between(pid, now - 200 * DAY, now + MIN, ['meter']); } catch { /* none */ }
+    try { if (doses?.ready && pid) carbs = (await doses.between(pid, now - 30 * DAY, now + MIN)).filter((d) => d.kind === 'carbs'); } catch { /* none */ }
+    const all = row?.medals && typeof row.medals === 'object' ? row.medals : {};
+    const m = medalsFor({ days, checks: [...logged, ...meters], carbs, sensorStarts: row?.state?._sensors?.[pid] || [], goal: row?.goal_tir ?? 70, tz, now, kept: all[pid] || {} });
+    if (m.changed && pid && night?.ready) { try { await night.patch({ medals: { ...all, [pid]: m.kept } }); } catch { /* shown anyway; kept next time */ } }
+    return json({ earned: m.earned, next: m.next, canShare: owner });
+  }
+
+  // Supplements (supplements.js): the owner's phone keeps the list; every phone reads it.
+  if (path === 'app/supplements' || path === 'app/supplements/save' || path === 'app/supplements/remove') {
+    let row = null;
+    try { if (night?.ready) row = await night.get(); } catch { /* none */ }
+    const list = Array.isArray(row?.supplements) ? row.supplements : [];
+    if (path === 'app/supplements') return json({ items: list, canEdit: owner, fullscript: FULLSCRIPT_URL, refills: dueRefills(list, { now, tz: row?.time_zone || 'America/New_York' }) });
+    if (!owner) return json({ ok: false, error: T('Only the owner\'s own phone can change this.', 'Solo el teléfono del dueño puede cambiar esto.') }, 403);
+    if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+    if (!night?.ready) return json({ ok: false, error: 'Low alerts are not set up on the server.' }, 503);
+    const b = await request.json().catch(() => ({}));
+    let items;
+    if (path === 'app/supplements/remove') items = list.filter((s) => s.id !== String(b.id || ''));
+    else {
+      const old = list.find((s) => s.id === b.id);
+      if (!old && list.length >= MAX_SUPPLEMENTS) return json({ ok: false, error: T('That is as many as su94r keeps (30).', 'Es lo máximo que guarda su94r (30).') }, 400);
+      const r = supplementRow(b, { now, id: old ? old.id : null });
+      if (r.error) return json({ ok: false, error: es ? (SUPP_ES[r.error] || r.error) : r.error }, 400);
+      items = old ? list.map((s) => (s.id === old.id ? r.row : s)) : [...list, r.row];
+    }
+    await night.patch({ supplements: items });
+    return json({ ok: true, items });
+  }
+
   if (path === 'app/checks' && request.method === 'GET') {
     if (!checks?.ready) return json({ checks: [] });
     const pid = await pidFor(url.searchParams.get('pid'));
@@ -300,7 +347,7 @@ export async function appRoute(path, request, url, env, { screens, history, dose
   if (path === 'app/meds') {
     let row = null;
     try { if (night?.ready) row = await night.get(); } catch { /* none */ }
-    return json({ meds: (row?.meds || []).filter((m) => !m.isInsulin).map((m) => ({ name: m.name, times: m.times || [] })) });
+    return json({ meds: [...(row?.meds || []).filter((m) => !m.isInsulin).map((m) => ({ name: m.name, times: m.times || [] })), ...asPills(row?.supplements)] });
   }
 
   if (path === 'app/export') {
@@ -702,6 +749,11 @@ const LAB_ES = {
   'Name the test, for example LDL cholesterol.': 'Escribe el nombre de la prueba, por ejemplo colesterol LDL.',
   'That MyChart address does not look right. Copy it from the address bar while signed in.': 'Esa dirección de MyChart no parece correcta. Cópiala de la barra de direcciones con la sesión iniciada.',
   'That pharmacy address does not look right.': 'Esa dirección de farmacia no parece correcta.',
+};
+const SUPP_ES = {
+  'Name the supplement, for example Vitamin D3.': 'Escribe el nombre del suplemento, por ejemplo Vitamina D3.',
+  'Times look like 8:00 or 20:30, separated by commas.': 'Las horas se escriben como 8:00 o 20:30, separadas por comas.',
+  'That run-out date does not look right.': 'Esa fecha de fin no parece correcta.',
 };
 const ONES = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];

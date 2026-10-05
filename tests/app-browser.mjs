@@ -187,7 +187,7 @@ await shot('9b-report-labs');
 // Results online: Quest and the others open in a new tab; the owner adds MyChart and a pharmacy.
 await page.waitForSelector('#portals a[data-portal="quest"]');
 checks.portalsShown = (await page.getAttribute('#portals a[data-portal="quest"]', 'href')) === 'https://myquest.questdiagnostics.com/dashboard' &&
-  (await page.getAttribute('#portals a[data-portal="quest"]', 'target')) === '_blank' && (await page.$$('#portals a')).length === 3;
+  (await page.getAttribute('#portals a[data-portal="quest"]', 'target')) === '_blank' && (await page.$$('#portals a')).length === 4;
 await page.click('#linksEdit');
 await page.waitForSelector('#lkMy');
 await page.fill('#lkMy', 'mychart.example.org/MyChart/');
@@ -551,6 +551,46 @@ await page.waitForSelector('text=You seem to be in', { timeout: 20000 });
 await page.click('button[data-tz]');
 await page.waitForSelector('#toast >> text=now follow');
 checks.travelSwitch = nightRow.time_zone === phoneZone;
+
+// Medals: the card on History, a medal's sheet, sharing a picture without numbers; a new medal on Now.
+await page.click('#tabs button[data-tab="history"]');
+await page.waitForSelector('h2:has-text("Medals")', { timeout: 20000 });
+checks.medalsCard = (await page.$$('.medal')).length >= 3 && (await page.textContent('.medals')).includes('30-day in-range streak');
+checks.medalsKept = Boolean(nightRow.medals && nightRow.medals.p1 && nightRow.medals.p1.range30);
+await page.evaluate(() => { window.__shared = null; Object.defineProperty(navigator, 'canShare', { value: () => true, configurable: true }); Object.defineProperty(navigator, 'share', { value: async (d) => { window.__shared = { n: d.files.length, type: d.files[0].type, size: d.files[0].size, text: d.text }; }, configurable: true }); });
+await page.click('.medal[data-medal="range30"]');
+await page.waitForSelector('#sheet button[data-b="0"]');
+await page.click('#sheet button[data-b="0"]');
+await page.waitForFunction(() => window.__shared);
+const shared = await page.evaluate(() => window.__shared);
+checks.medalShared = shared.n === 1 && shared.type === 'image/png' && shared.size > 5000 && shared.text.includes('30-day in-range streak');
+await shot('33-medals');
+await page.evaluate(() => { const s = JSON.parse(localStorage.getItem('su94rAppMedals') || '{}'); s.p1 = []; localStorage.setItem('su94rAppMedals', JSON.stringify(s)); });
+await page.click('#tabs button[data-tab="now"]');
+await page.waitForSelector('text=New medal:', { timeout: 20000 });
+await page.click('#medalsOk');
+await page.waitForFunction(() => !document.body.textContent.includes('New medal:'));
+checks.medalBanner = true;
+
+// Supplements under More, with Fullscript; refills on Now.
+await page.click('#tabs button[data-tab="more"]');
+await page.waitForSelector('#fsLink');
+checks.fullscriptLink = (await page.getAttribute('#fsLink', 'href')) === 'https://us.fullscript.com/login';
+await page.click('button[data-supp=""]');
+await page.waitForSelector('#spName');
+await page.fill('#spName', 'Fish oil');
+await page.fill('#spDose', '2 softgels');
+await page.fill('#spTimes', '8:00, 20:00');
+await page.fill('#spOut', new Date(Date.now() + 3 * DAY).toISOString().slice(0, 10));
+await page.click('#sheet button[data-b="0"]');
+await page.waitForSelector('#suppList >> text=Fish oil');
+checks.supplementSaved = Array.isArray(nightRow.supplements) && nightRow.supplements[0].name === 'Fish oil' && nightRow.supplements[0].times.join(',') === '8:00,20:00';
+checks.moreFits = await noSideScroll();
+await shot('34-supplements');
+await page.click('#tabs button[data-tab="now"]');
+await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+await page.waitForSelector('text=Running out soon', { timeout: 20000 });
+checks.refillCard = (await page.textContent('#main')).includes('Fish oil: runs out');
 
 // The big screen: family dashboard and car layouts.
 const tv = await ctx.newPage();

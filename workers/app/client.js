@@ -10,7 +10,7 @@
 // (X-Su94r-Lang).
 (() => {
   'use strict';
-  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal', wunit: 'su94rAppWeightUnit', tzSkip: 'su94rAppTzSkip' };
+  const K = { token: 'su94rScreenToken', role: 'su94rShared', ns: 'su94rNsToken', last: 'su94rAppLast', me: 'su94rAppMe', tab: 'su94rAppTab', pid: 'su94rAppPid', range: 'su94rAppRange', days: 'su94rAppDays', lang: 'su94rAppLang', card: 'su94rAppCard', queue: 'su94rAppQueue', cal: 'su94rAppCal', wunit: 'su94rAppWeightUnit', tzSkip: 'su94rAppTzSkip', medals: 'su94rAppMedals' };
   const mem = {};
   const store = {
     get(k) { try { return localStorage.getItem(k); } catch (e) { return k in mem ? mem[k] : null; } },
@@ -211,6 +211,25 @@
     'From the last 14 days. It describes; it does not advise.': 'De los últimos 14 días. Describe; no aconseja.',
     'You seem to be in {tz}': 'Parece que estás en {tz}', 'Night hours, reminders and days follow {home} time. Switch them to {tz} time while you are here?': 'Las horas de noche, los recordatorios y los días siguen la hora de {home}. ¿Cambiarlos a la hora de {tz} mientras estás aquí?',
     'Switch to {tz}': 'Cambiar a {tz}', 'Not now': 'Ahora no',
+    // medals, supplements
+    'Medals': 'Medallas', 'Next': 'Siguiente', 'No medals yet. The first ones come quickly:': 'Todavía no hay medallas. Las primeras llegan rápido:',
+    'Medals celebrate habits, worked out from what is logged. Nothing is shared unless you tap Share.': 'Las medallas celebran hábitos, a partir de lo registrado. No se comparte nada a menos que toques Compartir.',
+    '3 days in range': '3 días en rango', '7-day in-range streak': 'Racha de 7 días en rango', '14-day in-range streak': 'Racha de 14 días en rango', '30-day in-range streak': 'Racha de 30 días en rango',
+    'A week with no lows': 'Una semana sin bajas', '30 days with no lows': '30 días sin bajas',
+    '150 active minutes in a week': '150 minutos activos en una semana', '3 active days in a row': '3 días activos seguidos', '7 active days in a row': '7 días activos seguidos', '30 active days in a row': '30 días activos seguidos',
+    'Down 1%': 'Bajaste 1%', 'Down 2.5%': 'Bajaste 2.5%', 'Down 5%': 'Bajaste 5%', 'Down 10%': 'Bajaste 10%', 'Held it for 4 weeks': 'Lo mantuviste 4 semanas',
+    'Weight milestone': 'Meta de peso', 'Kept the weight off': 'Mantuve mi peso',
+    'Meals logged 7 days in a row': 'Comidas registradas 7 días seguidos', 'Sensor checked with a meter': 'Sensor revisado con glucómetro', '30 days with su94r': '30 días con su94r',
+    '{have} of {need} days': '{have} de {need} días', '{have} of 150 min this week': '{have} de 150 min esta semana', '{have}% of {need}% down': '{have}% de {need}% menos',
+    '{n} times': '{n} veces', 'Earned {date}': 'Ganada el {date}', 'Share': 'Compartir', 'su94r medal': 'Medalla de su94r',
+    'I earned a su94r medal: {title} 🏅': 'Gané una medalla en su94r: {title} 🏅', 'Picture saved. Post it from your photos.': 'Imagen guardada. Publícala desde tus fotos.',
+    'Could not make the picture.': 'No se pudo crear la imagen.', 'New medal: {title}': 'Nueva medalla: {title}', 'and {n} more': 'y {n} más', 'See medals': 'Ver medallas',
+    'Supplements': 'Suplementos', 'Add a supplement': 'Agregar un suplemento', 'Edit supplement': 'Editar suplemento', 'Dose': 'Dosis', 'for example 1 capsule': 'por ejemplo 1 cápsula',
+    'for example Vitamin D3': 'por ejemplo Vitamina D3', 'Times (for reminders)': 'Horas (para recordatorios)', 'for example 8:00, 20:00': 'por ejemplo 8:00, 20:00',
+    'Runs out on (optional)': 'Se acaba el (opcional)', 'From my Fullscript plan': 'De mi plan de Fullscript', 'Reorder on Fullscript': 'Volver a pedir en Fullscript',
+    'None yet. Add what your Fullscript plan (or doctor) says; reminders work like pills.': 'Ninguno todavía. Agrega lo que dice tu plan de Fullscript (o tu médico); los recordatorios funcionan como las pastillas.',
+    'An hour after each time, if nothing is logged, a reminder with “Taken”. su94r cannot sign in to Fullscript; reorder there.': 'Una hora después de cada hora, si no se registró nada, un recordatorio con “Tomada”. su94r no puede iniciar sesión en Fullscript; vuelve a pedir allí.',
+    'runs out {date}': 'se acaba el {date}', 'Running out soon': 'Se acaban pronto', '{name}: runs out {date}': '{name}: se acaba el {date}', '{name}: ran out {date}': '{name}: se acabó el {date}',
     '{n} g of carbs': '{n} g de carbohidratos', '{n} unit of {k} insulin': '{n} unidad de insulina {k}', '{n} units of {k} insulin': '{n} unidades de insulina {k}', '{n} g carbs': '{n} g carbohidratos',
   };
   const S = {
@@ -484,6 +503,19 @@
       const nice = (z) => z.split('/').pop().replace(/_/g, ' ');
       html += card('<h2>' + esc(t('You seem to be in {tz}', { tz: nice(here) })) + '</h2><p class="small">' + esc(t('Night hours, reminders and days follow {home} time. Switch them to {tz} time while you are here?', { home: nice(home), tz: nice(here) })) + '</p><div class="row"><button class="btn" data-tz="' + esc(here) + '">' + esc(t('Switch to {tz}', { tz: nice(here) })) + '</button><button class="btn ghost" id="tzSkip">' + t('Not now') + '</button></div>');
     }
+    // A new medal (medals.js), and supplements running out (supplements.js).
+    loadMedals();
+    const fresh = newMedals();
+    if (fresh.length) {
+      const nm = fresh[fresh.length - 1];
+      html += card('<h2>' + esc(medalIcon(nm.id) + ' ' + t('New medal: {title}', { title: medalTitle(nm.id) })) + '</h2>' + (fresh.length > 1 ? '<p class="small muted">' + esc(t('and {n} more', { n: fresh.length - 1 })) + '</p>' : '') +
+        '<div class="row"><button class="btn" id="medalsSee">' + t('See medals') + '</button>' + (S.medals.data.canShare ? '<button class="btn ghost" data-medal-share="' + esc(nm.id) + '">' + t('Share') + '</button>' : '') + '<button class="btn ghost" id="medalsOk">' + t('Close') + '</button></div>', 'medalc');
+    }
+    const rf = S.recent && S.recent.refills;
+    if (rf && rf.length) {
+      html += card('<h2>' + t('Running out soon') + '</h2><ul class="list">' + rf.map((r) => '<li><span>' + esc(t(r.days < 0 ? '{name}: ran out {date}' : '{name}: runs out {date}', { name: r.name, date: medalDate(r.runsOut) })) + '</span></li>').join('') + '</ul>' +
+        (rf.some((r) => r.fullscript) ? '<div class="row" style="margin-top:8px"><a class="btn ghost" href="' + FULLSCRIPT + '" target="_blank" rel="noopener noreferrer">' + t('Reorder on Fullscript') + '</a></div>' : ''));
+    }
     const mo = S.recent && S.recent.morning;
     if (mo && mo.lows && mo.lows.length && !S.morningSeen) {
       const n = mo.lows.length, u = mo.unanswered;
@@ -605,7 +637,7 @@
         '<h2 style="margin-top:14px">' + t('Insulin timing and meals') + '</h2>' + ins.data.timing.lines.map((x) => '<p class="small">' + esc(x) + '</p>').join('') + '<p class="note">' + t('From the last 14 days. It describes; it does not advise.') + '</p>');
       else { const lang = S.lang; api('app/insights?pid=' + encodeURIComponent(c.pid)).then((data) => { S.insights = { pid: c.pid, lang, at: Date.now(), data }; if (S.tab === 'history' && !S.dayView) renderHistory(); }).catch(() => {}); }
     }
-    html += trendHtml;
+    html += trendHtml + medalsCard();
     if (days > 1) {
       const byDay = new Map();
       pts.forEach((p) => { const k = dateKey(p[0]); if (!byDay.has(k)) byDay.set(k, []); byDay.get(k).push(p); });
@@ -1526,6 +1558,132 @@
     if (S.tab === 'report') renderReport();
   }
 
+  // ---------- medals (workers/medals.js) ----------
+  // [icon, name in the app, name on a shared picture: nothing about health numbers].
+  const MEDAL_INFO = {
+    range3: ['🎯', '3 days in range'], range7: ['🎯', '7-day in-range streak'], range14: ['🎯', '14-day in-range streak'], range30: ['🏆', '30-day in-range streak'],
+    nolow7: ['🛡️', 'A week with no lows'], nolow30: ['🛡️', '30 days with no lows'],
+    week150: ['🏃', '150 active minutes in a week'], active3: ['🏃', '3 active days in a row'], active7: ['🏃', '7 active days in a row'], active30: ['🏅', '30 active days in a row'],
+    down1: ['⚖️', 'Down 1%', 'Weight milestone'], down2: ['⚖️', 'Down 2.5%', 'Weight milestone'], down5: ['⚖️', 'Down 5%', 'Weight milestone'], down10: ['⚖️', 'Down 10%', 'Weight milestone'],
+    held: ['💪', 'Held it for 4 weeks', 'Kept the weight off'],
+    meals7: ['📝', 'Meals logged 7 days in a row'], sensorcheck: ['🩸', 'Sensor checked with a meter'], days30: ['📅', '30 days with su94r'],
+  };
+  const FULLSCRIPT = 'https://us.fullscript.com/login';
+  const medalIcon = (id) => (MEDAL_INFO[id] || ['🏅'])[0];
+  const medalTitle = (id) => t((MEDAL_INFO[id] || ['', id])[1]);
+  const medalShareTitle = (id) => t((MEDAL_INFO[id] || [])[2] || (MEDAL_INFO[id] || ['', id])[1]);
+  const medalDate = (d) => { const x = new Date(d + 'T12:00:00'); return isNaN(x.getTime()) ? d : x.toLocaleDateString(LOC(), { month: 'short', day: 'numeric' }); };
+  const medalKey = (m) => m.id + ':' + (m.count || 1);
+  function medalProgress(n) {
+    if (n.id === 'week150') return t('{have} of 150 min this week', { have: n.have });
+    if (/^down/.test(n.id)) return t('{have}% of {need}% down', { have: n.have, need: n.need });
+    return t('{have} of {need} days', { have: n.have, need: n.need });
+  }
+  async function loadMedals(force) {
+    const pid = cur().pid;
+    if (!pid || S.medalsLoading === pid) return;
+    if (!force && S.medals && S.medals.pid === pid && Date.now() - S.medals.at < 30 * MIN) return;
+    if (!force && S.medalsFail && Date.now() - S.medalsFail < 5 * MIN) return;
+    S.medalsLoading = pid;
+    let data = null;
+    try { data = await api('app/medals?pid=' + encodeURIComponent(pid)); } catch (e) { S.medalsFail = Date.now(); }
+    S.medalsLoading = null;
+    if (!data) return;
+    S.medals = { pid, at: Date.now(), data };
+    // A phone that has not seen this person's medals yet takes the current ones as seen: no party for old ones.
+    const seen = readJson(K.medals) || {};
+    if (!seen[pid]) { seen[pid] = data.earned.map(medalKey); store.set(K.medals, JSON.stringify(seen)); }
+    if (S.tab === 'now') renderNow(); else if (S.tab === 'history' && !S.dayView) renderHistory();
+  }
+  function newMedals() {
+    const m = S.medals && S.medals.pid === cur().pid ? S.medals.data : null;
+    if (!m) return [];
+    const seen = (readJson(K.medals) || {})[S.medals.pid] || [];
+    return m.earned.filter((x) => seen.indexOf(medalKey(x)) < 0);
+  }
+  function markMedalsSeen() {
+    if (!S.medals) return;
+    const seen = readJson(K.medals) || {};
+    seen[S.medals.pid] = S.medals.data.earned.map(medalKey);
+    store.set(K.medals, JSON.stringify(seen));
+  }
+  function medalsCard() {
+    loadMedals();
+    const m = S.medals && S.medals.pid === cur().pid ? S.medals.data : null;
+    if (!m) return '';
+    markMedalsSeen();
+    let h = '<h2>' + t('Medals') + '</h2>';
+    h += m.earned.length ? '<div class="medals">' + m.earned.map((x) => '<button class="medal" data-medal="' + esc(x.id) + '"><span class="mi">' + medalIcon(x.id) + '</span><b>' + esc(medalTitle(x.id)) + '</b><span class="md">' + esc(x.count > 1 ? t('{n} times', { n: x.count }) : medalDate(x.on)) + '</span></button>').join('') + '</div>'
+      : '<p class="muted small">' + t('No medals yet. The first ones come quickly:') + '</p>';
+    if (m.next.length) h += '<h3 class="mh">' + t('Next') + '</h3><ul class="list nextm">' + m.next.map((n) => '<li><span class="mi2">' + medalIcon(n.id) + '</span><span class="nm"><span>' + esc(medalTitle(n.id)) + '</span><span class="prog"><i style="width:' + Math.max(0, Math.min(100, Math.round((n.have / n.need) * 100))) + '%"></i></span><span class="small muted">' + esc(medalProgress(n)) + '</span></span></li>').join('') + '</ul>';
+    return card(h + '<p class="note">' + t('Medals celebrate habits, worked out from what is logged. Nothing is shared unless you tap Share.') + '</p>');
+  }
+  function medalSheet(id) {
+    const m = S.medals && S.medals.data;
+    const x = m && m.earned.find((e) => e.id === id);
+    if (!x) return;
+    const buttons = m.canShare ? [[t('Share'), 'btn', () => shareMedal(id)]] : [];
+    buttons.push([t('Close'), 'btn ghost', closeSheet]);
+    sheet('<div style="text-align:center"><div style="font-size:72px;line-height:1.1">' + medalIcon(id) + '</div><h3>' + esc(medalTitle(id)) + '</h3><p class="muted small">' + esc(t('Earned {date}', { date: medalDate(x.on) })) + (x.count > 1 ? ' · ' + esc(t('{n} times', { n: x.count })) : '') + '</p></div>', buttons);
+  }
+  // A picture of the medal (its name only: no readings, percentages, weights or dates) through the
+  // phone's share sheet; where a browser cannot share pictures, it is saved instead.
+  async function shareMedal(id) {
+    const title = medalShareTitle(id);
+    const c = document.createElement('canvas'); c.width = 1080; c.height = 1080;
+    const g = c.getContext('2d');
+    const bg = g.createLinearGradient(0, 0, 1080, 1080); bg.addColorStop(0, '#0b3d2e'); bg.addColorStop(1, '#1a7f37');
+    g.fillStyle = bg; g.fillRect(0, 0, 1080, 1080);
+    g.fillStyle = 'rgba(255,255,255,.10)'; g.beginPath(); g.arc(540, 420, 250, 0, Math.PI * 2); g.fill();
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = '250px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif'; g.fillText(medalIcon(id), 540, 430);
+    g.fillStyle = '#ffffff'; g.font = '700 64px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+    wrapText(g, title, 540, 800, 920, 78);
+    g.fillStyle = 'rgba(255,255,255,.78)'; g.font = '500 40px system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'; g.fillText(t('su94r medal'), 540, 990);
+    const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+    if (!blob) { toast(t('Could not make the picture.')); return; }
+    const file = new File([blob], 'su94r-medal.png', { type: 'image/png' });
+    const text = t('I earned a su94r medal: {title} 🏅', { title });
+    try {
+      if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], text }); closeSheet(); return; }
+    } catch (e) { if (e && e.name === 'AbortError') return; }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'su94r-medal.png';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    closeSheet(); toast(t('Picture saved. Post it from your photos.'));
+  }
+  function wrapText(g, text, x, y, max, lh) {
+    const lines = []; let line = '';
+    for (const w of String(text).split(' ')) { const next = line ? line + ' ' + w : w; if (line && g.measureText(next).width > max) { lines.push(line); line = w; } else line = next; }
+    if (line) lines.push(line);
+    const shown = lines.slice(0, 3);
+    shown.forEach((l, i) => g.fillText(l, x, y + (i - (shown.length - 1) / 2) * lh));
+  }
+
+  // ---------- supplements (workers/supplements.js), often a Fullscript plan ----------
+  function suppSheet(id) {
+    const s = ((S.supps && S.supps.items) || []).find((x) => x.id === id) || { name: '', dose: '', times: [], runsOut: '', fullscript: true };
+    const buttons = [[t('Save'), 'btn', () => saveSupp(id)]];
+    if (id) buttons.push([t('Remove'), 'btn warn', () => removeSupp(id)]);
+    buttons.push([t('Cancel'), 'btn ghost', closeSheet]);
+    sheet('<h3>' + t(id ? 'Edit supplement' : 'Add a supplement') + '</h3>' +
+      '<label for="spName">' + t('Name') + '</label><input id="spName" maxlength="60" placeholder="' + esc(t('for example Vitamin D3')) + '" value="' + esc(s.name) + '">' +
+      '<label for="spDose">' + t('Dose') + '</label><input id="spDose" maxlength="40" placeholder="' + esc(t('for example 1 capsule')) + '" value="' + esc(s.dose || '') + '">' +
+      '<label for="spTimes">' + t('Times (for reminders)') + '</label><input id="spTimes" maxlength="40" placeholder="' + esc(t('for example 8:00, 20:00')) + '" value="' + esc((s.times || []).join(', ')) + '">' +
+      '<label for="spOut">' + t('Runs out on (optional)') + '</label><input id="spOut" type="date" value="' + esc(s.runsOut || '') + '">' +
+      '<label class="check"><input id="spFs" type="checkbox"' + (s.fullscript !== false ? ' checked' : '') + '> ' + t('From my Fullscript plan') + '</label>', buttons);
+  }
+  async function saveSupp(id) {
+    const body = { id: id || undefined, name: $('spName').value, dose: $('spDose').value, times: $('spTimes').value, runsOut: $('spOut').value, fullscript: $('spFs').checked };
+    try { await api('app/supplements/save', { method: 'POST', body }); closeSheet(); toast(t('Saved.')); } catch (e) { toast(e.message); return; }
+    S.medsList = null;
+    if (S.tab === 'more') renderMore();
+  }
+  async function removeSupp(id) {
+    try { await api('app/supplements/remove', { method: 'POST', body: { id } }); closeSheet(); toast(t('Removed.')); } catch (e) { toast(e.message); return; }
+    S.medsList = null;
+    if (S.tab === 'more') renderMore();
+  }
+
   // ---------- More ----------
   async function renderMore() {
     const role = (S.me && S.me.role) || store.get(K.role) || 'me';
@@ -1587,6 +1745,15 @@
       html += card('<h2>' + t('Supplies') + '</h2>' + (items.length ? '<ul class="list">' + items.map((s) => '<li><span>' + esc(supplyLabel(s.item)) + '</span><span class="src" style="' + (s.low || s.refillDue ? 'color:var(--h);font-weight:600' : '') + '">' + esc(t('{n} {u} left', { n: s.left, u: s.item === 'sensors' ? t('sensors') : t('units') })) + (s.daysLeft != null ? ' · ~' + s.daysLeft + ' d' : '') + (s.refillOn ? ' · ' + esc(t('refill {date}', { date: s.refillOn })) : '') + '</span>' + (sup.canEdit ? '<button data-supply="' + esc(s.item) + '">' + t('Edit') + '</button>' : '') + '</li>').join('') + '</ul>' : '<p class="muted">' + t('Nothing tracked yet.') + '</p>') +
         (sup.canEdit && items.length < 6 ? '<button class="btn ghost" data-supply="">' + t('Add insulin or sensors') + '</button>' : '') +
         '<p class="note">' + t('Counts down as doses are logged (pen priming is not counted) and as new sensors start. su94r reminds you by day when it runs low or a refill is due.') + '</p>');
+    }
+    let sp = null;
+    try { sp = await api('app/supplements'); } catch (e) { sp = null; }
+    if (S.tab !== 'more') return;
+    if (sp) {
+      S.supps = sp;
+      html += card('<h2>' + t('Supplements') + '</h2>' + (sp.items.length ? '<ul class="list" id="suppList">' + sp.items.map((s) => '<li><span><b>' + esc(s.name) + '</b>' + (s.dose ? ' · ' + esc(s.dose) : '') + '<span class="small muted" style="display:block">' + esc([(s.times || []).join(', '), s.runsOut ? t('runs out {date}', { date: medalDate(s.runsOut) }) : '', s.fullscript ? 'Fullscript' : ''].filter(Boolean).join(' · ')) + '</span></span>' + (sp.canEdit ? '<button data-supp="' + esc(s.id) + '" style="margin-left:auto">' + t('Edit') + '</button>' : '') + '</li>').join('') + '</ul>' : '<p class="muted small">' + t('None yet. Add what your Fullscript plan (or doctor) says; reminders work like pills.') + '</p>') +
+        '<div class="row" style="margin-top:8px">' + (sp.canEdit && sp.items.length < 30 ? '<button class="btn ghost" data-supp="">' + t('Add a supplement') + '</button>' : '') + '<a class="btn ghost" id="fsLink" href="' + esc(sp.fullscript || FULLSCRIPT) + '" target="_blank" rel="noopener noreferrer">' + t('Reorder on Fullscript') + '</a></div>' +
+        '<p class="note">' + t('An hour after each time, if nothing is logged, a reminder with “Taken”. su94r cannot sign in to Fullscript; reorder there.') + '</p>');
     }
     html += card('<h2>' + t('Export') + '</h2><p class="small">' + t('A spreadsheet (CSV) of the last 90 days: readings, insulin, carbs, notes, meter readings, ketones, weight, exercise and pills. For a PDF, print the report from the Report tab.') + '</p><button class="btn ghost" id="exportBtn">' + t('Download the spreadsheet') + '</button>');
     html += card('<h2>' + t('This phone') + '</h2><p>' + (role === 'family' ? (S.me && S.me.canLog ? t('A family member\'s phone: it reads and logs (the owner allowed it).') : t('A family member\'s phone: it reads; the owner can allow it to log.')) : t('Your own phone: it reads and logs.')) + (S.me && S.me.name ? esc(t(' Named “{name}” in su94r Mini.', { name: S.me.name })) : '') + '</p>' +
@@ -1659,6 +1826,11 @@
     else if (el.id === 'micBtn') listen(el);
     else if (el.id === 'labAdd') editLab();
     else if (el.id === 'linksEdit') editLinks();
+    else if (d.medal) medalSheet(d.medal);
+    else if (d.medalShare) shareMedal(d.medalShare);
+    else if (el.id === 'medalsSee') { markMedalsSeen(); show('history'); }
+    else if (el.id === 'medalsOk') { markMedalsSeen(); renderNow(); }
+    else if (d.supp !== undefined) suppSheet(d.supp);
     else if (d.labDel) removeLab(d.labDel);
     else if (d.undo) undo(d.undo);
     else if (d.supply !== undefined) editSupply(d.supply);

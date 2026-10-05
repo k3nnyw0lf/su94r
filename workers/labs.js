@@ -44,14 +44,15 @@ export function labRow(pid, body, now = Date.now()) {
   return { pid, kind, name, value: Math.round(value * 100) / 100, unit, taken_on: takenOn };
 }
 
-// Where results live online, for the buttons on the app's Lab results card. Quest, Labcorp and
-// LibreView are the same for everyone; the owner adds their doctor's MyChart and their pharmacy
+// Where results live online, for the buttons on the app's Lab results card. Quest, Labcorp,
+// LibreView and Fullscript (supplement refills) are the same for everyone; the owner adds their doctor's MyChart and their pharmacy
 // (su94r_night.portal_links, migration 20261005a_su94r_portal_links.sql). The buttons only open
 // the sites; nothing here signs in anywhere. Only https addresses are kept or shown.
 export const PORTALS = [
   { id: 'quest', name: 'Quest', url: 'https://myquest.questdiagnostics.com/dashboard' },
   { id: 'labcorp', name: 'Labcorp', url: 'https://patient.labcorp.com/' },
   { id: 'libreview', name: 'LibreView', url: 'https://www.libreview.com/' },
+  { id: 'fullscript', name: 'Fullscript', url: 'https://us.fullscript.com/login' },
 ];
 export const PHARMACIES = [
   { id: 'cvs', name: 'CVS', url: 'https://www.cvs.com/pharmacy' },

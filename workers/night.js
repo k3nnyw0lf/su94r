@@ -42,6 +42,7 @@ import { supplyStatus, supplyReminders } from './supplies.js';
 import { updateDaily, dayIn } from './daily.js';
 import { logEpisode, morningReport, runDrill, drillAnswer, coverageOf } from './coverage.js';
 import { pillTimes, sameMed, ketoneLevel } from './checks.js';
+import { asPills } from './supplements.js';
 
 const MIN = 60e3;
 const TICK_GAP_MS = 4 * MIN;
@@ -55,6 +56,7 @@ export const NIGHT_DEFAULTS = {
   echo_low_url: null, echo_soon_url: null, echo_always: false,
   treat_grams: 15, treat_minutes: 15, treat_plan: null, nudge_enabled: true, lang_self: 'en', lang_care: 'en',
   mode: null, mode_until: null, goal_tir: 70, rapid_insulin: null, call_enabled: false, call_numbers: [], meds: [], meds_pid: null,
+  supplements: [], medals: {},
 };
 
 export const EXERCISE_MARGIN = 10;                 // mg/dL above the low line that "Low soon" watches in exercise mode
@@ -644,10 +646,12 @@ export async function reminders(row, people, state, send, { doses = null, suppli
     }
     for (const k of Object.keys(state._supply)) if (!rows.some((r) => `${r.pid}:${r.item}` === k)) delete state._supply[k];
   }
-  // Pills (not insulin): an hour after each usual time (set in su94r Mini, or learned from 14 days
+  // Pills (not insulin) and supplements (the app's list, supplements.js): an hour after each usual
+  // time (set in su94r Mini or the app, or learned from 14 days
   // of logs), when none was logged since two hours before it, a reminder with "Taken" (that logs
   // it). Once per time and day, until 4 hours after; not in the night hours unless the time is.
-  if (checks?.ready && ackUrl && (cfg.meds || []).length) {
+  const pills = [...(cfg.meds || []), ...asPills(cfg.supplements)];
+  if (checks?.ready && ackUrl && pills.length) {
     const pid = cfg.meds_pid && people.some((x) => x.pid === cfg.meds_pid) ? cfg.meds_pid : people[0].pid;
     const p = people.find((x) => x.pid === pid);
     const logs = await checks.between(pid, now - 15 * 24 * 60 * MIN, now + MIN, ['med']);
@@ -655,7 +659,8 @@ export async function reminders(row, people, state, send, { doses = null, suppli
     const today = dayIn(now, cfg.time_zone);
     state._pill = Object.fromEntries(Object.entries(state._pill || {}).filter(([, v]) => now - v.at < 2 * 24 * 60 * MIN));
     const asleepNow = hourIn(localHour(now, cfg.time_zone), cfg.night_start, cfg.night_end);
-    for (const pt of pillTimes(cfg.meds, logs, { tz: cfg.time_zone, now })) {
+    for (const pt of pillTimes(pills, logs, { tz: cfg.time_zone, now })) {
+      const supp = pills.some((m) => m.supplement && m.name === pt.name);
       const key = `${today}|${pt.name}|${pt.minute}`;
       const late = minuteNow - pt.minute;
       if (state._pill[key] || late < 60 || late > 240) continue;
@@ -668,9 +673,9 @@ export async function reminders(row, people, state, send, { doses = null, suppli
       const pre = many && p ? `${p.firstName || p.name}: ` : '';
       try {
         await send(cfg.self_topic, {
-          title: `${pre}Pill: ${pt.name}`, message: `Your ${when} ${pt.name} is not logged yet. Tap "Taken" if you took it.`, priority: 3, tags: ['pill'],
+          title: `${pre}${supp ? 'Supplement' : 'Pill'}: ${pt.name}`, message: `Your ${when} ${pt.name} is not logged yet. Tap "Taken" if you took it.`, priority: 3, tags: ['pill'],
           actions: [{ action: 'http', label: 'Taken', url: ackUrl(token), method: 'POST', clear: true }],
-          es: { title: `${pre}Pastilla: ${pt.name}`, message: `Tu ${pt.name} de las ${when} todavía no está registrada. Toca "Tomada" si la tomaste.` },
+          es: { title: `${pre}${supp ? 'Suplemento' : 'Pastilla'}: ${pt.name}`, message: `Tu ${pt.name} de las ${when} todavía no está registrada. Toca "Tomada" si la tomaste.` },
         });
         sent.push({ label: 'pill', ok: true });
       } catch (e) { sent.push({ label: 'pill', ok: false, error: e.message }); }

@@ -151,6 +151,13 @@ a{color:var(--accent)}
 @keyframes bedpulse{50%{background:#8f1d13}}
 @media (prefers-reduced-motion:reduce){.bed.alarm{animation:none}}
 @media print{.top,nav.tabs,.chips,.noprint{display:none!important}body{padding:0;background:#fff;color:#000}.card{border:0}}
+.medals{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.medal{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 6px;color:var(--fg);font:inherit;cursor:pointer}
+.medal .mi{font-size:30px;line-height:1.15}.medal b{font-size:13px;line-height:1.25;font-weight:600}.medal .md{font-size:11px;color:var(--muted)}
+.mh{font-size:14px;margin:16px 0 2px;color:var(--muted);font-weight:600}
+.nextm .mi2{font-size:22px}.nextm .nm{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.prog{display:block;height:6px;border-radius:3px;background:var(--soft);overflow:hidden}.prog i{display:block;height:100%;background:var(--in);border-radius:3px}
+.card.medalc{border-color:var(--in);box-shadow:inset 4px 0 0 var(--in)}
 </style>
 </head>
 <body>
