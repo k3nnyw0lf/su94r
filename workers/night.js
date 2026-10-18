@@ -38,6 +38,7 @@ import { evaluateEscalation, alertPayload, RUNG } from '../src/lib/care/escalati
 import { localHour } from '../src/lib/util/localDay.js';
 import { rowsFromSnapshot } from './history.js';
 import { missedDoseNudges } from './nudges.js';
+import { widgetTick } from './widget.js';
 import { supplyStatus, supplyReminders } from './supplies.js';
 import { updateDaily, dayIn } from './daily.js';
 import { logEpisode, morningReport, runDrill, drillAnswer, coverageOf } from './coverage.js';
@@ -710,7 +711,7 @@ export async function reminders(row, people, state, send, { doses = null, suppli
   return sent;
 }
 
-export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, dial = null, counts = null, checks = null, now = () => Date.now() }) {
+export async function nightRoute(path, request, url, env, { store, json, keyOk, snapshot, push, telegram = null, webpush = null, doses = null, supplies = null, ring = defaultRing, history = null, daily = null, dial = null, counts = null, checks = null, tile = null, now = () => Date.now() }) {
   if (!['night/tick', 'night/setup', 'night/test', 'night/ack', 'night/notify', 'night/echo-test', 'night/drill', 'night/coverage'].includes(path)) return null;
   if (!store.ready) return json({ error: 'not configured' }, 503);
   const sendFor = (row) => {
@@ -762,6 +763,11 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
         result.state._meta = { ...meta, prunedAt: now() };
       }
     }
+    // The Echo Show home-screen tile (widget.js): each new reading.
+    let tileSent = null;
+    if (!error) {
+      try { tileSent = await widgetTick(env, row, people, result.state, { ...(tile ? { push: tile } : {}), now: now() }); } catch (e) { tileSent = { ok: false, error: String(e.message || e).slice(0, 120) }; }
+    }
     // Yesterday's summary (daily.js), once a day; the first time, every day the history still has.
     if (daily?.ready && history?.ready && people.length) {
       const today = dayIn(now(), row.time_zone || 'America/New_York');
@@ -784,7 +790,7 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
         }
       }
     } catch { /* the next check tries again */ }
-    const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null };
+    const summary = { at: new Date(now()).toISOString(), people: people.length, sent: result.sent, error: error?.code || null, night: result.night ?? null, ...(tileSent ? { tile: tileSent.ok ? 'sent' : tileSent.error } : {}) };
     await store.patch({ state: result.state, last_result: summary, ...(morning ? { morning } : {}) });
     return json({ ok: true, people: summary.people, sent: summary.sent.length, error: summary.error });
   }

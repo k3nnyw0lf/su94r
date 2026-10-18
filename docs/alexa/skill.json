@@ -75,6 +75,25 @@
                 "maxHeight": 1200
               }
             ]
+          },
+          {
+            "type": "ALEXA_DATASTORE_PACKAGEMANAGER",
+            "packages": [
+              {
+                "id": "su94r-glucose"
+              }
+            ]
+          },
+          {
+            "type": "ALEXA_DATA_STORE"
+          },
+          {
+            "type": "ALEXA_EXTENSION",
+            "requestedExtensions": [
+              {
+                "uri": "alexaext:datastore:10"
+              }
+            ]
           }
         ],
         "regions": {

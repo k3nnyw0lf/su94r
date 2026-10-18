@@ -12,6 +12,8 @@
 //   SU94R_HEALTH_INGEST_TOKEN             same value as HEALTH_INGEST_TOKEN on su94r-monitor
 //   SU94R_DISPLAY_KEY                     the secret in the display URL /d/<key>
 //   SU94R_ALEXA_SKILL_ID                  amzn1.ask.skill.… (docs/tv-and-alexa.md)
+//   SU94R_ALEXA_CLIENT_ID, SU94R_ALEXA_CLIENT_SECRET  optional: the Echo Show tile (widget.js), from the
+//                                       developer console → Build → Permissions → Alexa Skill Messaging
 //   SU94R_NTFY_BASE, SU94R_NTFY_TOKEN     optional: own ntfy server / account for night alerts (night.js)
 //   SU94R_TELNYX_API_KEY, SU94R_TELNYX_ACCOUNT_SID, SU94R_TELNYX_TEXML_APP_ID, SU94R_TELNYX_FROM
 //                                       optional, paid: phone calls for a low nobody answers (calls.js)
@@ -19,7 +21,7 @@
 import { handleCgm } from '../../../workers/cgm-core.js';
 
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided by Supabase itself (dose store).
-const NAMES = ['LLU_EMAIL', 'LLU_PASSWORD', 'HEALTH_INGEST_TOKEN', 'DISPLAY_KEY', 'ALEXA_SKILL_ID', 'CLAIM_OPEN_UNTIL', 'NTFY_BASE', 'NTFY_TOKEN', 'TELNYX_API_KEY', 'TELNYX_ACCOUNT_SID', 'TELNYX_TEXML_APP_ID', 'TELNYX_FROM', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
+const NAMES = ['LLU_EMAIL', 'LLU_PASSWORD', 'HEALTH_INGEST_TOKEN', 'DISPLAY_KEY', 'ALEXA_SKILL_ID', 'ALEXA_CLIENT_ID', 'ALEXA_CLIENT_SECRET', 'CLAIM_OPEN_UNTIL', 'NTFY_BASE', 'NTFY_TOKEN', 'TELNYX_API_KEY', 'TELNYX_ACCOUNT_SID', 'TELNYX_TEXML_APP_ID', 'TELNYX_FROM', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
 
 function env() {
   const all = Deno.env.toObject();

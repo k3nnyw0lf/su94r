@@ -18,6 +18,7 @@ import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 import { nightSummary, weekLine } from './history.js';
 import { findPatterns } from '../extension/patterns.js';
+import { widgetContent, pushWidget } from './widget.js';
 
 const MMOL = 18.0182;
 export const MAX_UNITS = 100;
@@ -148,7 +149,24 @@ function aplDirective(people, lang = 'en') {
   };
 }
 
-export async function handleAlexa(request, env, getSnapshot, { store = null, verify, forecasts = null, history = null } = {}) {
+/**
+ * The Echo Show tile (widget.js). When it is added, keep the Amazon user id so the
+ * night tick can send it new readings, and send the current one straight away.
+ * Removal and update notices need nothing: sending to a user without the tile is harmless.
+ */
+async function packageEvent(body, { env, night, getSnapshot, pushTile }) {
+  const userId = body.context?.System?.user?.userId || null;
+  if (/\.UsagesInstalled$/.test(body.request.type) && userId && night?.ready) {
+    await night.patch({ alexa_widget_user: userId }).catch(() => {});
+    try {
+      const p = (await getSnapshot()).people?.[0];
+      if (p) await pushTile(env, userId, widgetContent(p));
+    } catch { /* the night tick sends it within 5 minutes */ }
+  }
+  return reply({ version: '1.0', response: {} });
+}
+
+export async function handleAlexa(request, env, getSnapshot, { store = null, verify, forecasts = null, history = null, night = null, pushTile = pushWidget } = {}) {
   if (!env.ALEXA_SKILL_ID) return new Response('ALEXA_SKILL_ID is not set', { status: 503 });
   const raw = await request.text();
   try {
@@ -168,6 +186,7 @@ export async function handleAlexa(request, env, getSnapshot, { store = null, ver
   if (!Number.isFinite(sent) || Math.abs(Date.now() - sent) > 150e3) return new Response('stale request', { status: 400 });
 
   const type = body.request.type;
+  if (/^Alexa\.DataStore\.PackageManager\./.test(type || '')) return packageEvent(body, { env, night, getSnapshot, pushTile });
   const intent = body.request.intent?.name;
   const lang = /^es/i.test(body.request.locale || '') ? 'es' : 'en';
   const T = (en, es) => (lang === 'es' ? es : en);

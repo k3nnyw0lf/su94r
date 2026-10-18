@@ -140,6 +140,16 @@ Then say: "Alexa, open my sugar", "Alexa, ask my sugar how is Ana doing".
 
 Every request must carry Amazon's signature (checked in `workers/alexa-verify.js`), match the skill ID and be under 150 seconds old. Keep the skill in Development (private) anyway.
 
+### Echo Show home-screen tile
+
+A small tile on the Echo Show home screen (an Alexa widget): the number in its colour, the arrow, how old it is, and the last 3 hours. Tapping it opens My Sugar full screen.
+
+1. Developer console → My Sugar → **Build** → **Permissions** → turn on **Alexa Skill Messaging** if it is off, and copy its **Client Id** and **Client Secret** into the secrets `SU94R_ALEXA_CLIENT_ID` and `SU94R_ALEXA_CLIENT_SECRET` (Supabase → Edge Functions → Secrets).
+2. The skill package carries the tile: `docs/alexa/dataStorePackages/su94r-glucose/` (APL package, `WIDGET_M`) and the interfaces `ALEXA_DATASTORE_PACKAGEMANAGER`, `ALEXA_DATA_STORE` and the `alexaext:datastore:10` extension in `docs/alexa/skill.json`. Upload it with the skill package (export, add the folder, import).
+3. Developer console → **Build** → **Widgets** (the widget authoring tool) → **Install** → pick the Echo Show → **Send to Device**. On the Echo, swipe to the widgets and place it on the home screen.
+
+When the tile is added Alexa tells the skill (`Alexa.DataStore.PackageManager.UsagesInstalled`); su94r keeps that Amazon user id (`su94r_night.alexa_widget_user`) and sends the reading at once, then every new reading from the 5-minute night check, with Amazon's Data Store API (namespace `su94r`, key `glucose`). The tile works out "min ago" by itself, so it shows when readings stop. Code: `workers/widget.js`.
+
 ### Logging insulin by voice
 
 - "Alexa, tell my sugar 4 units of R insulin." Alexa repeats it back ("Log 4 units of regular insulin now?") and logs it only after you say **yes**.

@@ -500,7 +500,7 @@ export async function handleCgm(path, request, env, deps = {}) {
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
     if (path === 'glucose/latest') return await glucoseLatest(request, env);
     if (path === 'display/data') return await displayData(url, env, deps);
-    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env), history: deps.history || historyStore(env) });
+    if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env), history: deps.history || historyStore(env), night: deps.night || nightStore(env), ...(deps.pushTile ? { pushTile: deps.pushTile } : {}) });
     if (path === 'voice/sync' && request.method === 'POST') return await voiceSync(request, url, env, deps);
     if (path === 'doses/import' && request.method === 'POST') return await dosesImport(request, url, env, deps);
     if (SCREEN_ROUTES.has(path)) return await screensRoute(path, request, url, env, deps);
@@ -582,6 +582,7 @@ export async function handleCgm(path, request, env, deps = {}) {
       doses: deps.store || doseStore(env), supplies: deps.supplies || supplyStore(env),
       history: deps.history || historyStore(env), daily: deps.daily || dailyStore(env), ...(deps.ring ? { ring: deps.ring } : {}),
       counts: reachCounts(env, deps), dial: deps.dial || dialer(env, { base: fnBase(env) }), checks: deps.checks || checkStore(env),
+      ...(deps.pushTile ? { tile: deps.pushTile } : {}),
     });
     const hist = await historyRoute(path, request, url, env, { store: deps.history || historyStore(env), json, keyOk, snapshot: () => snapshot(env) });
     if (hist) return hist;
