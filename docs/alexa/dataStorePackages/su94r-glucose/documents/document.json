@@ -38,6 +38,11 @@
       { "name": "lowNow", "value": "${!stale && (g.status == 'low' || g.status == 'urgent')}" },
       { "name": "alert", "value": "${stale ? '' : g.status == 'urgent' ? (es ? 'MUY BAJA' : 'URGENT LOW') : g.status == 'low' ? (es ? 'BAJA' : 'LOW') : g.status == 'high' ? (es ? 'ALTA' : 'HIGH') : ''}" },
       { "name": "ago", "value": "${!has ? (es ? 'Esperando a su94r…' : 'Waiting for su94r…') : stale ? (es ? 'Sin lectura hace ' + mins + ' min' : 'No reading for ' + mins + ' min') : mins < 1 ? (es ? 'ahora' : 'just now') : (es ? 'hace ' + mins + ' min' : mins + ' min ago')}" },
+      { "name": "hour", "value": "${Time.hours(localTime)}" },
+      { "name": "ns", "value": "${has ? g.nightStart : 22}" },
+      { "name": "ne", "value": "${has ? g.nightEnd : 7}" },
+      { "name": "isNight", "value": "${ns > ne ? (hour >= ns || hour < ne) : (hour >= ns && hour < ne)}" },
+      { "name": "dim", "value": "${isNight && !lowNow}" },
       { "name": "change", "value": "${has && !stale && g.delta ? g.delta + (es ? ' en 15 min' : ' in 15 min') : ''}" }
     ],
     "items": [
@@ -53,6 +58,7 @@
           "width": "100%",
           "height": "100%",
           "backgroundColor": "${lowNow ? '#3a1210' : '#0d1117'}",
+          "opacity": "${dim ? 0.3 : 1}",
           "paddingLeft": "6vw",
           "paddingRight": "6vw",
           "paddingTop": "5vh",

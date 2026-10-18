@@ -1,7 +1,7 @@
 {
   "manifest": {
     "id": "su94r-glucose",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "installStateChanges": "INFORM",
     "updateStateChanges": "INFORM",
     "presentationDefinitions": [

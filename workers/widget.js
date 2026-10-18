@@ -21,9 +21,15 @@ export const widgetReady = (env) => Boolean(env.ALEXA_CLIENT_ID && env.ALEXA_CLI
 const shown = (mg, units) => (mg < 40 ? 'LO' : mg > 400 ? 'HI' : units === 'mmol/L' ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
 
 /** What the tile shows for one person: the number, arrow, colour, time and the last 3 hours as path data (300 × 100). */
-export function widgetContent(p, now = Date.now()) {
+/** The owner's night hours from the su94r_night row (the tile dims then, except during a low). */
+export const nightHours = (row) => ({
+  nightStart: Number.isFinite(row?.night_start) ? row.night_start : 22,
+  nightEnd: Number.isFinite(row?.night_end) ? row.night_end : 7,
+});
+
+export function widgetContent(p, now = Date.now(), { nightStart = 22, nightEnd = 7 } = {}) {
   const l = p?.latest;
-  if (!l) return { has: false, title: p?.firstName || 'Glucose' };
+  if (!l) return { has: false, title: p?.firstName || 'Glucose', nightStart, nightEnd };
   const status = l.mg < 55 ? 'urgent' : l.mg < p.low ? 'low' : l.mg > p.high ? 'high' : 'in';
   // The change over the last 15 minutes, from the reading closest to 15 minutes before this one (within 5).
   const ref = (p.history || []).filter((q) => Math.abs(q.t - (l.t - 15 * 60e3)) <= 5 * 60e3)
@@ -46,6 +52,8 @@ export function widgetContent(p, now = Date.now()) {
     color: { urgent: '#ff5d55', low: '#ff5d55', high: '#e3a33b', in: '#3fb950' }[status],
     t: l.t,
     delta,
+    nightStart,
+    nightEnd,
     line: thin.length > 1 ? thin.map((q, i) => `${i ? 'L' : 'M'}${x(q.t)},${y(q.mg)}`).join(' ') : '',
     band: `M0,${y(p.high)} L${W},${y(p.high)} L${W},${y(p.low)} L0,${y(p.low)} Z`,
   };
@@ -96,7 +104,7 @@ export async function widgetTick(env, row, people, state, { push = pushWidget, n
   if (!row?.alexa_widget_user || !widgetReady(env) || !p?.latest) return null;
   const meta = state._meta || {};
   if (meta.widgetT === p.latest.t && now - (meta.widgetAt || 0) < 30 * 60e3) return null;
-  const r = await push(env, row.alexa_widget_user, widgetContent(p, now), { now });
+  const r = await push(env, row.alexa_widget_user, widgetContent(p, now, nightHours(row)), { now });
   if (r.ok) state._meta = { ...(state._meta || {}), widgetT: p.latest.t, widgetAt: now };
   return { label: 'echo tile', ok: r.ok, ...(r.ok ? {} : { error: String(r.error || r.status) }) };
 }

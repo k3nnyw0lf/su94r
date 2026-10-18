@@ -45,6 +45,17 @@ describe('what the tile shows', () => {
     expect(JSON.stringify(c).length).toBeLessThan(16 * 1024);         // Data Store command limit
   });
 
+  it('carries the owner\'s night hours so the tile can dim (default 22–7)', async () => {
+    const { nightHours } = await import('../workers/widget.js');
+    expect(widgetContent(person(), NOW)).toMatchObject({ nightStart: 22, nightEnd: 7 });
+    expect(widgetContent(person(), NOW, nightHours({ night_start: 23, night_end: 6 }))).toMatchObject({ nightStart: 23, nightEnd: 6 });
+    expect(nightHours(null)).toEqual({ nightStart: 22, nightEnd: 7 });
+    expect(widgetContent(person({ latest: null }), NOW, nightHours({ night_start: 21, night_end: 8 }))).toEqual({ has: false, title: 'Ken', nightStart: 21, nightEnd: 8 });
+    const doc = JSON.parse(readFileSync('docs/alexa/dataStorePackages/su94r-glucose/documents/document.json', 'utf8'));
+    const binds = Object.fromEntries(doc.mainTemplate.bind.map((b) => [b.name, b.value]));
+    expect(binds.dim).toBe('${isNight && !lowNow}');                 // a low always shows at full brightness
+  });
+
   it('the change over 15 minutes, from the nearest reading about 15 minutes earlier', () => {
     expect(widgetContent(person(), NOW).delta).toBe('+6');                       // 142 now, 136 at 15 min before
     const falling = person({ latest: { t: NOW, mg: 80, trend: 1 }, history: [{ t: NOW - 16 * MIN, mg: 104 }, { t: NOW - 40 * MIN, mg: 150 }] });
@@ -59,7 +70,7 @@ describe('what the tile shows', () => {
     expect(widgetContent(person({ latest: { t: NOW, mg: 240, trend: 3 } }), NOW)).toMatchObject({ status: 'high', color: '#e3a33b' });
     expect(widgetContent(person({ units: 'mmol/L', latest: { t: NOW, mg: 126, trend: 3 } }), NOW).value).toBe('7.0');
     expect(widgetContent(person({ latest: { t: NOW, mg: 35, trend: 3 } }), NOW).value).toBe('LO');
-    expect(widgetContent(person({ latest: null }), NOW)).toEqual({ has: false, title: 'Ken' });
+    expect(widgetContent(person({ latest: null }), NOW)).toEqual({ has: false, title: 'Ken', nightStart: 22, nightEnd: 7 });
   });
 });
 

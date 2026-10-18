@@ -18,7 +18,7 @@ import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 import { nightSummary, weekLine } from './history.js';
 import { findPatterns } from '../extension/patterns.js';
-import { widgetContent, pushWidget } from './widget.js';
+import { widgetContent, pushWidget, nightHours } from './widget.js';
 
 const MMOL = 18.0182;
 export const MAX_UNITS = 100;
@@ -160,7 +160,8 @@ async function packageEvent(body, { env, night, getSnapshot, pushTile }) {
     await night.patch({ alexa_widget_user: userId }).catch(() => {});
     try {
       const p = (await getSnapshot()).people?.[0];
-      if (p) await pushTile(env, userId, widgetContent(p));
+      const row = night.get ? await night.get().catch(() => null) : null;
+      if (p) await pushTile(env, userId, widgetContent(p, Date.now(), nightHours(row)));
     } catch { /* the night tick sends it within 5 minutes */ }
   }
   return reply({ version: '1.0', response: {} });
