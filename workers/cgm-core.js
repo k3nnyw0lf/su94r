@@ -34,6 +34,7 @@
 
 import { login as lluLogin, getConnections, getGraph, toPoint, sensorOf, LibreError, DEFAULT_VERSION } from '../extension/libre.js';
 import { handleAlexa } from './alexa.js';
+import { sugarRoute } from './sugar.js';
 import { doseStore, asMarkers, WINDOW_MS } from './doses.js';
 import { screenStore, pairStart, pairPoll, pairClaim, screenFor, shareNew, shareClaim } from './screens.js';
 import { inboxStore, inboxRoute } from './inbox.js';
@@ -498,6 +499,8 @@ export async function handleCgm(path, request, env, deps = {}) {
   try {
     if (path === 'libre/login' && request.method === 'POST') return await libreLogin(request);
     if (path === 'libre/readings' && request.method === 'POST') return await libreReadings(request);
+    const sugar = await sugarRoute(path, request, env, deps);   // the public su94r skill (sugar.js)
+    if (sugar) return sugar;
     if (path === 'glucose/latest') return await glucoseLatest(request, env);
     if (path === 'display/data') return await displayData(url, env, deps);
     if (path === 'alexa' && request.method === 'POST') return await handleAlexa(request, env, () => snapshot(env), { store: deps.store || doseStore(env), verify: deps.verifyAlexa, forecasts: deps.forecasts || forecastStore(env), history: deps.history || historyStore(env), night: deps.night || nightStore(env), ...(deps.pushTile ? { pushTile: deps.pushTile } : {}) });

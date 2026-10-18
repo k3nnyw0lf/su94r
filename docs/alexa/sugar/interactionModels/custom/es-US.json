@@ -1,0 +1,54 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "sugar",
+      "intents": [
+        {
+          "name": "GetGlucoseIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "cómo estoy",
+            "cómo está mi azúcar",
+            "cuál es mi azúcar",
+            "cuánto tengo",
+            "cuál es mi glucosa",
+            "cómo está mi glucosa",
+            "qué tal estoy",
+            "cuál es mi nivel de azúcar",
+            "dime mi azúcar",
+            "dime mi glucosa",
+            "cómo está {name}",
+            "cuánto tiene {name}",
+            "cómo anda {name}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}

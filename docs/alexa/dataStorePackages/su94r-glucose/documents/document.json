@@ -2,12 +2,20 @@
   "type": "APL",
   "version": "2023.1",
   "extensions": [
-    { "name": "DataStore", "uri": "alexaext:datastore:10" }
+    {
+      "name": "DataStore",
+      "uri": "alexaext:datastore:10"
+    }
   ],
   "settings": {
     "DataStore": {
       "dataBindings": [
-        { "namespace": "su94r", "key": "glucose", "dataBindingName": "g", "dataType": "OBJECT" }
+        {
+          "namespace": "su94r",
+          "key": "glucose",
+          "dataBindingName": "g",
+          "dataType": "OBJECT"
+        }
       ]
     }
   },
@@ -18,32 +26,101 @@
       "width": 300,
       "height": 100,
       "parameters": [
-        { "name": "line", "type": "string", "default": "" },
-        { "name": "band", "type": "string", "default": "" },
-        { "name": "stroke", "type": "color", "default": "#f2f5f8" }
+        {
+          "name": "line",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "name": "band",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "name": "stroke",
+          "type": "color",
+          "default": "#f2f5f8"
+        }
       ],
       "items": [
-        { "type": "path", "pathData": "${band}", "fill": "#3fb95033" },
-        { "type": "path", "pathData": "${line}", "stroke": "${stroke}", "strokeWidth": 5, "fill": "transparent", "strokeLineCap": "round", "strokeLineJoin": "round" }
+        {
+          "type": "path",
+          "pathData": "${band}",
+          "fill": "#3fb95033"
+        },
+        {
+          "type": "path",
+          "pathData": "${line}",
+          "stroke": "${stroke}",
+          "strokeWidth": 5,
+          "fill": "transparent",
+          "strokeLineCap": "round",
+          "strokeLineJoin": "round"
+        }
       ]
     }
   },
   "mainTemplate": {
-    "parameters": ["tile"],
+    "parameters": [
+      "tile"
+    ],
     "bind": [
-      { "name": "es", "value": "${environment.lang == 'es-US' || environment.lang == 'es-MX' || environment.lang == 'es-ES'}" },
-      { "name": "has", "value": "${g.has == true}" },
-      { "name": "mins", "value": "${has ? Math.max(0, Math.floor((utcTime - g.t) / 60000)) : 0}" },
-      { "name": "stale", "value": "${!has || mins > 15}" },
-      { "name": "lowNow", "value": "${!stale && (g.status == 'low' || g.status == 'urgent')}" },
-      { "name": "alert", "value": "${stale ? '' : g.status == 'urgent' ? (es ? 'MUY BAJA' : 'URGENT LOW') : g.status == 'low' ? (es ? 'BAJA' : 'LOW') : g.status == 'high' ? (es ? 'ALTA' : 'HIGH') : ''}" },
-      { "name": "ago", "value": "${!has ? (es ? 'Esperando a su94r…' : 'Waiting for su94r…') : stale ? (es ? 'Sin lectura hace ' + mins + ' min' : 'No reading for ' + mins + ' min') : mins < 1 ? (es ? 'ahora' : 'just now') : (es ? 'hace ' + mins + ' min' : mins + ' min ago')}" },
-      { "name": "hour", "value": "${Time.hours(localTime)}" },
-      { "name": "ns", "value": "${has ? g.nightStart : 22}" },
-      { "name": "ne", "value": "${has ? g.nightEnd : 7}" },
-      { "name": "isNight", "value": "${ns > ne ? (hour >= ns || hour < ne) : (hour >= ns && hour < ne)}" },
-      { "name": "dim", "value": "${isNight && !lowNow}" },
-      { "name": "change", "value": "${has && !stale && g.delta ? g.delta + (es ? ' en 15 min' : ' in 15 min') : ''}" }
+      {
+        "name": "wide",
+        "value": "${viewport.width > viewport.height}"
+      },
+      {
+        "name": "es",
+        "value": "${environment.lang == 'es-US' || environment.lang == 'es-MX' || environment.lang == 'es-ES'}"
+      },
+      {
+        "name": "has",
+        "value": "${g.has == true}"
+      },
+      {
+        "name": "mins",
+        "value": "${has ? Math.max(0, Math.floor((utcTime - g.t) / 60000)) : 0}"
+      },
+      {
+        "name": "stale",
+        "value": "${!has || mins > 15}"
+      },
+      {
+        "name": "lowNow",
+        "value": "${!stale && (g.status == 'low' || g.status == 'urgent')}"
+      },
+      {
+        "name": "alert",
+        "value": "${stale ? '' : g.status == 'urgent' ? (es ? 'MUY BAJA' : 'URGENT LOW') : g.status == 'low' ? (es ? 'BAJA' : 'LOW') : g.status == 'high' ? (es ? 'ALTA' : 'HIGH') : ''}"
+      },
+      {
+        "name": "ago",
+        "value": "${!has ? (es ? 'Esperando a su94r…' : 'Waiting for su94r…') : stale ? (es ? 'Sin lectura hace ' + mins + ' min' : 'No reading for ' + mins + ' min') : mins < 1 ? (es ? 'ahora' : 'just now') : (es ? 'hace ' + mins + ' min' : mins + ' min ago')}"
+      },
+      {
+        "name": "hour",
+        "value": "${Time.hours(localTime)}"
+      },
+      {
+        "name": "ns",
+        "value": "${has ? g.nightStart : 22}"
+      },
+      {
+        "name": "ne",
+        "value": "${has ? g.nightEnd : 7}"
+      },
+      {
+        "name": "isNight",
+        "value": "${ns > ne ? (hour >= ns || hour < ne) : (hour >= ns && hour < ne)}"
+      },
+      {
+        "name": "dim",
+        "value": "${isNight && !lowNow}"
+      },
+      {
+        "name": "change",
+        "value": "${has && !stale && g.delta ? g.delta + (es ? ' en 15 min' : ' in 15 min') : ''}"
+      }
     ],
     "items": [
       {
@@ -51,7 +128,15 @@
         "width": "100%",
         "height": "100%",
         "onPress": [
-          { "type": "SendEvent", "arguments": ["openSkill"], "flags": { "interactionMode": "STANDARD" } }
+          {
+            "type": "SendEvent",
+            "arguments": [
+              "openSkill"
+            ],
+            "flags": {
+              "interactionMode": "STANDARD"
+            }
+          }
         ],
         "item": {
           "type": "Container",
@@ -73,7 +158,7 @@
                 {
                   "type": "Text",
                   "text": "${has ? g.title : (es ? 'Mi Azúcar' : 'My Sugar')}",
-                  "fontSize": "9vw",
+                  "fontSize": "${wide ? '7vh' : '9vw'}",
                   "color": "#8b949e",
                   "maxLines": 1,
                   "shrink": 1
@@ -81,7 +166,7 @@
                 {
                   "type": "Text",
                   "text": "${alert}",
-                  "fontSize": "8vw",
+                  "fontSize": "${wide ? '7vh' : '8vw'}",
                   "fontWeight": "700",
                   "color": "${g.color}",
                   "maxLines": 1
@@ -96,7 +181,7 @@
                 {
                   "type": "Text",
                   "text": "${has ? g.value : '—'}",
-                  "fontSize": "30vw",
+                  "fontSize": "${wide ? '30vh' : '30vw'}",
                   "fontWeight": "700",
                   "color": "${stale ? '#8b949e' : g.color}",
                   "maxLines": 1
@@ -104,7 +189,7 @@
                 {
                   "type": "Text",
                   "text": "${has ? g.arrow : ''}",
-                  "fontSize": "18vw",
+                  "fontSize": "${wide ? '19vh' : '18vw'}",
                   "color": "${stale ? '#8b949e' : g.color}",
                   "paddingLeft": "2vw",
                   "paddingBottom": "2vw"
@@ -115,7 +200,7 @@
               "type": "Text",
               "text": "${change}",
               "display": "${change ? 'normal' : 'none'}",
-              "fontSize": "8vw",
+              "fontSize": "${wide ? '7vh' : '8vw'}",
               "fontWeight": "700",
               "color": "#f2f5f8",
               "maxLines": 1
@@ -123,7 +208,7 @@
             {
               "type": "Text",
               "text": "${ago}",
-              "fontSize": "7vw",
+              "fontSize": "${wide ? '6vh' : '7vw'}",
               "color": "#8b949e",
               "maxLines": 2
             },

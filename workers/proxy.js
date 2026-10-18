@@ -30,6 +30,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { handleHealthIngest } from './health-ingest.js';
+import { servePage } from './sugar-page.js';
 import { handleStart, handleCallback, handleSync } from './google-health.js';
 import { displayPage } from './display.js';
 import { doctorPage, REPORT_SCRIPT } from './doctor.js';
@@ -158,7 +159,7 @@ async function forward(request, url, env) {
   if (Number(request.headers.get('content-length')) > MAX_BODY) return json({ error: 'too large' }, 413);
   const headers = new Headers();
   // Alexa's signature headers must arrive untouched, with the body byte for byte.
-  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256', 'x-api-key', 'x-collector-key', 'x-ns-token', 'api-secret', 'accept', 'mcp-protocol-version', 'mcp-session-id', 'x-su94r-lang']) {
+  for (const h of ['content-type', 'authorization', 'signaturecertchainurl', 'signature-256', 'x-api-key', 'x-collector-key', 'x-ns-token', 'api-secret', 'accept', 'accept-language', 'mcp-protocol-version', 'mcp-session-id', 'x-su94r-lang']) {
     const v = request.headers.get(h);
     if (v) headers.set(h, v);
   }
@@ -167,10 +168,17 @@ async function forward(request, url, env) {
     method: request.method,
     headers,
     body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer(),
+    redirect: 'manual',   // su94r account linking answers 302 to Amazon: hand it to the browser, never follow it here
   });
+  if (res.headers.get('x-su94r-page') === '1') return servePage(res);   // su94r sign-in pages (sugar-page.js)
   const out = new Headers(CORS);
   out.set('Content-Type', res.headers.get('content-type') || 'application/json');
   out.set('Cache-Control', 'no-store');
+  // Pages served by su94r-cgm (the su94r sign-in) carry their own security headers and redirects.
+  for (const h of ['location', 'content-security-policy', 'x-frame-options', 'referrer-policy', 'x-content-type-options', 'x-robots-tag']) {
+    const v = res.headers.get(h);
+    if (v) out.set(h, v);
+  }
   return new Response(res.body, { status: res.status, headers: out });
 }
 
@@ -249,7 +257,7 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
     try {
-      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg|history|owner|emergency)(\/|$)/.test(path)) return await forward(request, url, env);
+      if (FORWARDED.has(path) || /^\/(inbox|inboxes|mcp|ns|connect|night|tg|history|owner|emergency|sugar)(\/|$)/.test(path)) return await forward(request, url, env);
       if (path === '/app') return Response.redirect(`${url.origin}/app/${url.search}`, 301);
       if (path === '/app/meal' && request.method === 'POST') return await appMeal(request, env);
       if (path === '/app/qr' && request.method === 'POST') return await appQr(request, url);

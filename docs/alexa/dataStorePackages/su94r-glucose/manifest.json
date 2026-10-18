@@ -1,11 +1,13 @@
 {
   "manifest": {
     "id": "su94r-glucose",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "installStateChanges": "INFORM",
     "updateStateChanges": "INFORM",
     "presentationDefinitions": [
-      { "url": "presentations/default.tpl" }
+      {
+        "url": "presentations/default.tpl"
+      }
     ],
     "appliesTo": "${viewport.mode == 'HUB'}"
   },
@@ -20,9 +22,33 @@
           "metadata": {
             "name": "My Sugar",
             "description": "Your glucose now, its arrow and the last 3 hours.",
-            "keywords": ["glucose", "sugar", "diabetes", "libre"],
+            "keywords": [
+              "glucose",
+              "sugar",
+              "diabetes",
+              "libre"
+            ],
             "iconUri": "https://su94r.com/icons/icon-192.png",
-            "previews": ["https://su94r.com/icons/icon-512.png"]
+            "previews": [
+              "https://su94r.com/icons/icon-512.png"
+            ]
+          }
+        },
+        {
+          "targetViewport": "WIDGET_XL",
+          "metadata": {
+            "name": "My Sugar",
+            "description": "Your glucose now, its arrow and the last 3 hours.",
+            "keywords": [
+              "glucose",
+              "sugar",
+              "diabetes",
+              "libre"
+            ],
+            "iconUri": "https://su94r.com/icons/icon-192.png",
+            "previews": [
+              "https://su94r.com/icons/icon-512.png"
+            ]
           }
         }
       ],
@@ -32,9 +58,33 @@
           "metadata": {
             "name": "Mi Azúcar",
             "description": "Tu glucosa ahora, su flecha y las últimas 3 horas.",
-            "keywords": ["glucosa", "azúcar", "diabetes", "libre"],
+            "keywords": [
+              "glucosa",
+              "azúcar",
+              "diabetes",
+              "libre"
+            ],
             "iconUri": "https://su94r.com/icons/icon-192.png",
-            "previews": ["https://su94r.com/icons/icon-512.png"]
+            "previews": [
+              "https://su94r.com/icons/icon-512.png"
+            ]
+          }
+        },
+        {
+          "targetViewport": "WIDGET_XL",
+          "metadata": {
+            "name": "Mi Azúcar",
+            "description": "Tu glucosa ahora, su flecha y las últimas 3 horas.",
+            "keywords": [
+              "glucosa",
+              "azúcar",
+              "diabetes",
+              "libre"
+            ],
+            "iconUri": "https://su94r.com/icons/icon-192.png",
+            "previews": [
+              "https://su94r.com/icons/icon-512.png"
+            ]
           }
         }
       ]

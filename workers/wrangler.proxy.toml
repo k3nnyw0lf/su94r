@@ -16,6 +16,11 @@ name = "su94r-proxy"
 main = "proxy.js"
 compatibility_date = "2026-01-15"
 
+# su94r.com/sugar/* (the public su94r skill sign-in, Amazon wants it on the brand domain) runs here too;
+# workers.dev stays on for everything else.
+workers_dev = true
+routes = [{ pattern = "su94r.com/sugar/*", zone_name = "su94r.com" }]
+
 [observability]
 enabled = true
 

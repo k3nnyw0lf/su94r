@@ -1,0 +1,131 @@
+// The public su94r skill's legal pages: Terms of Use, Privacy Policy and the separate Consumer
+// Health Data Privacy Policy (Washington RCW 19.373, Nevada NRS 603A, Connecticut 42-526).
+// English controls; the Spanish text is a translation for convenience. {operator} and {contact}
+// come from SUGAR_OPERATOR / SUGAR_CONTACT; until SUGAR_LEGAL_REVIEWED is set the pages say
+// they await legal review. Written from research, not legal advice: a lawyer must review them.
+
+export const LEGAL_UPDATED = '2026-10-18';
+
+const EN = {
+  terms: {
+    title: 'su94r Terms of Use',
+    sections: [
+      ['Who we are and how you agree', `su94r is a free, open-source service operated by {operator} ("we", "us"). These Terms are a contract between you and us. You accept them by ticking the box and pressing "Agree and link" on the su94r sign-in page; we keep a record of when you did. If you do not agree, do not link or use su94r. You must be at least 18 years old.`],
+      ['What su94r does', `su94r signs in to Abbott's LibreLinkUp service with a follower account that you create and control, reads the glucose of the people who chose to share with that follower account, and says or shows it on your Amazon Alexa devices, including an Echo Show home-screen tile. The public su94r skill does not send alarms or alerts and does not give dosing advice.`],
+      ['Not a medical device. Not an alarm.', `su94r is not a medical device, is not cleared or approved by the U.S. Food and Drug Administration, and is not an alarm. Readings can be late, missing, wrong or stop without warning, for example when Libre, LibreLinkUp, the internet, Amazon or su94r is unavailable. Dosing decisions should not be made based on this device. The user should follow instructions on the continuous glucose monitoring system. This device is not intended to replace self-monitoring practices as advised by a physician. Keep the alarms of your Libre system on. In an emergency, call 911.`],
+      ['Not affiliated with Abbott or Amazon', `su94r is not made, endorsed, supported or approved by Abbott or Amazon. FreeStyle Libre and LibreLinkUp are trademarks of Abbott; Alexa and Echo are trademarks of Amazon. su94r reads LibreLinkUp the way other independent apps do, without Abbott's approval, and Abbott can change or block that access at any time, which would stop su94r. You are responsible for your own use of LibreLinkUp under Abbott's terms. Using a separate follower account protects your own Libre account and alarms if that happens.`],
+      ['Your responsibilities', `You will: link only a LibreLinkUp follower account that you own; make sure that every person who shares with it is you, your child or a person in your legal care, or has given you permission; keep the follower password private; and not use su94r to read anyone's data without their permission, to break the law, or to overload or attack the service. You will tell us at {contact} if you think your account was misused.`],
+      ['Privacy', `How we handle information is described in the su94r Privacy Policy and the Consumer Health Data Privacy Policy, which are part of these Terms.`],
+      ['Free service, no warranty', `su94r is provided free of charge, "as is" and "as available". To the fullest extent the law allows, we disclaim all warranties, express or implied, including merchantability, fitness for a particular purpose, accuracy, availability and non-infringement. We may change, pause or end su94r at any time.`],
+      ['Assumption of risk and release', `You understand that relying on su94r instead of your Libre system, its alarms or a clinician could lead to serious injury or death, and you accept that risk. To the fullest extent the law allows, you release us and our members, managers, contributors and service providers from claims arising out of your use of su94r, INCLUDING CLAIMS BASED ON OUR OWN NEGLIGENCE. This release does not cover gross negligence, intentional misconduct, or anything the law does not allow to be released.`],
+      ['Limitation of liability', `To the fullest extent the law allows, we will not be liable for indirect, incidental, special, consequential or punitive damages, or for lost data, and our total liability for all claims about su94r is limited to fifty U.S. dollars (US $50). Some places do not allow these limits, so they may not apply to you.`],
+      ['Indemnity', `You will defend and hold us harmless from claims by others arising from your breach of these Terms, including linking a person's data without their permission.`],
+      ['Disputes: arbitration and class-action waiver', `Please read this carefully. Except for small-claims cases, any dispute about su94r will be resolved by binding individual arbitration administered by the American Arbitration Association under its Consumer Arbitration Rules, not in court, and not as a class, collective or representative action. You may opt out of this section within 30 days after you first accept these Terms by writing to {contact} with your follower email and the words "arbitration opt-out".`],
+      ['Governing law', `These Terms are governed by the laws of the State of Florida and the Federal Arbitration Act, without regard to conflict-of-law rules. Where a court is allowed, the state and federal courts located in Florida have exclusive jurisdiction.`],
+      ['Ending', `You can stop at any time by turning off the su94r skill in the Alexa app or using "Delete my su94r data" on su94r.com; either deletes your su94r account. We may suspend or end your access if you break these Terms or to protect the service or others.`],
+      ['Changes', `We may update these Terms. We will post the new version with its date and, for important changes, ask you to agree again before you keep using su94r.`],
+      ['Contact', `{operator} · {contact}`],
+    ],
+  },
+  privacy: {
+    title: 'su94r Privacy Policy',
+    sections: [
+      ['Who we are', `This policy explains how {operator} ("we") handles information in the free su94r Alexa skill and its sign-in pages at su94r.com/sugar. Contact: {contact}. Health information is also covered by our separate Consumer Health Data Privacy Policy.`],
+      ['What we keep', `When you link: the follower email (we keep a one-way fingerprint of it to find your account) and the follower email and password sealed with AES-256-GCM encryption, whose key is stored separately in an encrypted vault; the LibreLinkUp session, also sealed; a record of the consents you gave and when; the Amazon user ID Alexa sends us; sign-in tokens, stored only as fingerprints; and whether you added the home-screen tile.`],
+      ['What we read but do not keep', `Each time you ask, and every few minutes while you have the tile, we read from LibreLinkUp the current glucose, trend, recent graph, target range and first names of the people who share with your follower account. We use them to answer and keep them in memory for about a minute. We do not store a history of anyone's readings for the public skill. We keep the time of the last reading sent to your tile.`],
+      ['How we use it', `Only to provide su94r to you: to sign in to LibreLinkUp for you, answer on Alexa, update your tile, keep the service secure, and meet legal duties. We do not sell personal information, do not use it for advertising, and do not build profiles.`],
+      ['Who receives it', `Amazon receives the readings su94r says or shows, to deliver them to your Alexa devices, with your separate consent; Amazon's own privacy notice covers what Alexa does with your requests. Our service providers host and run su94r under their terms and only for us: Supabase (database and server functions) and Cloudflare (network). Abbott's LibreLinkUp receives the follower sign-in, as it would from the LibreLinkUp app. We may disclose information if the law requires it.`],
+      ['Security', `Encryption in transit (HTTPS) and at rest; sealed credentials with a separately stored key; tokens kept only as fingerprints; logs that hold the route and error text but not your requests. No system is perfectly secure. If a breach affects you, we will notify you and the authorities as the law requires.`],
+      ['How long we keep it', `Until you delete your account. Turning off the su94r skill in the Alexa app, or using "Delete my su94r data", deletes it at once from the live database; copies in our provider's backups are removed within 30 days. Sign-in codes expire after 10 minutes and access tokens after an hour.`],
+      ['Your choices and rights', `You can see what we hold, delete it, or withdraw consent at any time: turn off the skill, use su94r.com/sugar/delete, or write to {contact}. We answer within 45 days. If we decline a request you may appeal by replying to our answer; if the appeal is denied you may contact your state attorney general.`],
+      ['Children', `Only adults can create a su94r account. A parent or legal guardian may link a follower account to which their child shares.`],
+      ['Do Not Track', `su94r does not track you across other websites and does not use advertising cookies, so it treats every browser the same way.`],
+      ['Changes', `We will post updates here with a new date and ask for new consent where the law requires.`],
+    ],
+  },
+  health: {
+    title: 'su94r Consumer Health Data Privacy Policy',
+    sections: [
+      ['Purpose of this policy', `This policy is for residents of Washington, Nevada, Connecticut and anyone else whose consumer health data su94r processes. It is operated by {operator}. Contact: {contact}.`],
+      ['Consumer health data we collect', `Glucose readings, their trend arrows and recent graph, the target range set in Libre, sensor status, and the first and last names linked to the people who share with your su94r follower account. These describe bodily functions and health conditions.`],
+      ['Sources', `Abbott's LibreLinkUp service, through the follower account you link; and you, through the consents you give.`],
+      ['Why we collect and use it', `Only to provide the service you asked for: to say and show these readings on your Alexa devices and your Echo Show tile. We read them when needed and do not keep a history of them.`],
+      ['Who we share it with', `Amazon (Alexa), to deliver the readings to your devices, only with your separate consent to share. Our processors, only to run su94r for us: Supabase and Cloudflare. We do not sell consumer health data and do not share it for advertising.`],
+      ['Your rights', `You can confirm whether we process your consumer health data and get a copy of it and a list of every third party and affiliate that received it; withdraw your consent; and have it deleted, including from backups within 30 days. Turn off the su94r skill, use su94r.com/sugar/delete, or write to {contact}. We answer within 45 days (once extendable by 45 days when reasonably necessary, with notice). You may appeal a decision by replying to it; we answer appeals within 45 days, and you may contact your state attorney general if you disagree.`],
+      ['Consent', `We ask for two separate opt-in consents before any collection or sharing: one to collect and process the readings, and one to share them with Amazon. Accepting the Terms of Use is not consent to either. You can withdraw both at any time, which ends the service.`],
+      ['No geofencing, no sale', `We do not use location, geofences or virtual boundaries around places that provide health care, and we never sell consumer health data.`],
+    ],
+  },
+};
+
+const ES = {
+  terms: {
+    title: 'Términos de uso de su94r',
+    sections: [
+      ['Quiénes somos y cómo aceptas', `su94r es un servicio gratuito y de código abierto operado por {operator} ("nosotros"). Estos Términos son un contrato entre tú y nosotros. Los aceptas al marcar la casilla y pulsar "Aceptar y vincular" en la página de inicio de sesión de su94r; guardamos un registro de cuándo lo hiciste. Si no estás de acuerdo, no vincules ni uses su94r. Debes tener al menos 18 años.`],
+      ['Qué hace su94r', `su94r inicia sesión en el servicio LibreLinkUp de Abbott con una cuenta seguidora que tú creas y controlas, lee la glucosa de las personas que eligieron compartir con esa cuenta y la dice o muestra en tus dispositivos Amazon Alexa, incluido un widget en la pantalla de inicio del Echo Show. La skill pública de su94r no envía alarmas ni alertas y no da consejos de dosis.`],
+      ['No es un dispositivo médico. No es una alarma.', `su94r no es un dispositivo médico, no está autorizado ni aprobado por la Administración de Alimentos y Medicamentos de EE. UU. (FDA) y no es una alarma. Las lecturas pueden llegar tarde, faltar, estar equivocadas o detenerse sin aviso, por ejemplo cuando Libre, LibreLinkUp, internet, Amazon o su94r no están disponibles. No se deben tomar decisiones de dosis basadas en este dispositivo. El usuario debe seguir las instrucciones del sistema de monitoreo continuo de glucosa. Este dispositivo no sustituye las prácticas de automonitoreo indicadas por un médico. Mantén encendidas las alarmas de tu sistema Libre. En una emergencia, llama al 911.`],
+      ['Sin relación con Abbott ni Amazon', `su94r no está hecho, respaldado, apoyado ni aprobado por Abbott ni por Amazon. FreeStyle Libre y LibreLinkUp son marcas de Abbott; Alexa y Echo son marcas de Amazon. su94r lee LibreLinkUp como lo hacen otras apps independientes, sin la aprobación de Abbott, y Abbott puede cambiar o bloquear ese acceso en cualquier momento, lo que detendría su94r. Eres responsable de tu propio uso de LibreLinkUp según los términos de Abbott. Usar una cuenta seguidora aparte protege tu propia cuenta de Libre y tus alarmas si eso ocurre.`],
+      ['Tus responsabilidades', `Vincularás solo una cuenta seguidora de LibreLinkUp que sea tuya; te asegurarás de que cada persona que comparte con ella seas tú, tu hijo o hija o una persona bajo tu tutela legal, o te haya dado permiso; mantendrás privada la contraseña de la seguidora; y no usarás su94r para leer datos de nadie sin su permiso, para violar la ley ni para sobrecargar o atacar el servicio. Nos avisarás a {contact} si crees que tu cuenta fue mal usada.`],
+      ['Privacidad', `Cómo manejamos la información se explica en la Política de privacidad y en la Política de privacidad de datos de salud de su94r, que forman parte de estos Términos.`],
+      ['Servicio gratuito, sin garantía', `su94r se ofrece gratis, "tal cual" y "según disponibilidad". En la máxima medida permitida por la ley, renunciamos a toda garantía, expresa o implícita, incluidas comerciabilidad, idoneidad para un fin particular, exactitud, disponibilidad y no infracción. Podemos cambiar, pausar o terminar su94r en cualquier momento.`],
+      ['Asunción de riesgo y liberación', `Entiendes que depender de su94r en lugar de tu sistema Libre, sus alarmas o un profesional de salud podría causar lesiones graves o la muerte, y aceptas ese riesgo. En la máxima medida permitida por la ley, nos liberas a nosotros y a nuestros miembros, administradores, colaboradores y proveedores de reclamos que surjan de tu uso de su94r, INCLUIDOS LOS RECLAMOS BASADOS EN NUESTRA PROPIA NEGLIGENCIA. Esta liberación no cubre negligencia grave, conducta intencional ni nada que la ley no permita liberar.`],
+      ['Límite de responsabilidad', `En la máxima medida permitida por la ley, no seremos responsables por daños indirectos, incidentales, especiales, consecuentes o punitivos, ni por pérdida de datos, y nuestra responsabilidad total por todos los reclamos sobre su94r se limita a cincuenta dólares estadounidenses (US $50). Algunos lugares no permiten estos límites, así que podrían no aplicarse a ti.`],
+      ['Indemnización', `Nos defenderás y mantendrás indemnes de reclamos de terceros que surjan de tu incumplimiento de estos Términos, incluido vincular los datos de una persona sin su permiso.`],
+      ['Disputas: arbitraje y renuncia a acciones colectivas', `Lee esto con atención. Salvo los casos de reclamos menores, cualquier disputa sobre su94r se resolverá mediante arbitraje individual y vinculante administrado por la American Arbitration Association según sus Reglas de Arbitraje para Consumidores, no en un tribunal y no como acción colectiva o representativa. Puedes excluirte de esta sección dentro de los 30 días después de aceptar estos Términos por primera vez escribiendo a {contact} con tu correo de seguidora y las palabras "arbitration opt-out".`],
+      ['Ley aplicable', `Estos Términos se rigen por las leyes del Estado de Florida y la Ley Federal de Arbitraje, sin considerar normas de conflicto de leyes. Cuando se permita un tribunal, los tribunales estatales y federales ubicados en Florida tienen jurisdicción exclusiva.`],
+      ['Terminación', `Puedes dejar de usar su94r en cualquier momento desactivando la skill en la app de Alexa o usando "Borrar mis datos de su94r" en su94r.com; cualquiera de las dos borra tu cuenta de su94r. Podemos suspender o terminar tu acceso si incumples estos Términos o para proteger el servicio o a otras personas.`],
+      ['Cambios', `Podemos actualizar estos Términos. Publicaremos la nueva versión con su fecha y, para cambios importantes, te pediremos aceptarla de nuevo antes de seguir usando su94r.`],
+      ['Contacto', `{operator} · {contact}`],
+    ],
+  },
+  privacy: {
+    title: 'Política de privacidad de su94r',
+    sections: [
+      ['Quiénes somos', `Esta política explica cómo {operator} ("nosotros") maneja la información en la skill gratuita de Alexa su94r y sus páginas en su94r.com/sugar. Contacto: {contact}. La información de salud también está cubierta por nuestra Política de privacidad de datos de salud, aparte.`],
+      ['Lo que guardamos', `Al vincular: el correo de la seguidora (guardamos una huella irreversible para encontrar tu cuenta) y el correo y la contraseña de la seguidora sellados con cifrado AES-256-GCM, cuya clave se guarda aparte en una bóveda cifrada; la sesión de LibreLinkUp, también sellada; un registro de los consentimientos que diste y cuándo; el identificador de usuario de Amazon que Alexa nos envía; los tokens de inicio de sesión, guardados solo como huellas; y si agregaste el widget.`],
+      ['Lo que leemos pero no guardamos', `Cada vez que preguntas, y cada pocos minutos mientras tengas el widget, leemos de LibreLinkUp la glucosa actual, la tendencia, la gráfica reciente, el rango objetivo y los nombres de quienes comparten con tu cuenta seguidora. Los usamos para responder y los mantenemos en memoria cerca de un minuto. No guardamos un historial de lecturas de nadie en la skill pública. Guardamos la hora de la última lectura enviada a tu widget.`],
+      ['Cómo la usamos', `Solo para darte su94r: iniciar sesión en LibreLinkUp por ti, responder en Alexa, actualizar tu widget, mantener el servicio seguro y cumplir obligaciones legales. No vendemos información personal, no la usamos para publicidad y no creamos perfiles.`],
+      ['Quién la recibe', `Amazon recibe las lecturas que su94r dice o muestra, para entregarlas en tus dispositivos Alexa, con tu consentimiento aparte; el aviso de privacidad de Amazon cubre lo que Alexa hace con tus solicitudes. Nuestros proveedores alojan y ejecutan su94r según sus términos y solo para nosotros: Supabase (base de datos y funciones) y Cloudflare (red). LibreLinkUp de Abbott recibe el inicio de sesión de la seguidora, como lo recibiría de la app LibreLinkUp. Podemos revelar información si la ley lo exige.`],
+      ['Seguridad', `Cifrado en tránsito (HTTPS) y en reposo; credenciales selladas con una clave guardada aparte; tokens guardados solo como huellas; registros que contienen la ruta y el texto del error, pero no tus solicitudes. Ningún sistema es perfectamente seguro. Si una brecha te afecta, te avisaremos a ti y a las autoridades como lo exige la ley.`],
+      ['Cuánto tiempo la guardamos', `Hasta que borres tu cuenta. Desactivar la skill su94r en la app de Alexa, o usar "Borrar mis datos de su94r", la borra al instante de la base de datos; las copias en las copias de seguridad de nuestro proveedor se eliminan en 30 días. Los códigos de inicio de sesión vencen a los 10 minutos y los tokens de acceso a la hora.`],
+      ['Tus opciones y derechos', `Puedes ver lo que guardamos, borrarlo o retirar tu consentimiento en cualquier momento: desactiva la skill, usa su94r.com/sugar/delete o escribe a {contact}. Respondemos en 45 días. Si rechazamos una solicitud puedes apelar respondiendo a nuestra respuesta; si se rechaza la apelación puedes contactar al fiscal general de tu estado.`],
+      ['Menores', `Solo los adultos pueden crear una cuenta de su94r. Una madre, padre o tutor legal puede vincular una cuenta seguidora con la que comparte su hijo o hija.`],
+      ['No rastrear', `su94r no te rastrea en otros sitios web y no usa cookies de publicidad, así que trata a todos los navegadores igual.`],
+      ['Cambios', `Publicaremos las actualizaciones aquí con una fecha nueva y pediremos un nuevo consentimiento cuando la ley lo exija.`],
+    ],
+  },
+  health: {
+    title: 'Política de privacidad de datos de salud de su94r',
+    sections: [
+      ['Propósito de esta política', `Esta política es para residentes de Washington, Nevada, Connecticut y cualquier otra persona cuyos datos de salud procese su94r. El operador es {operator}. Contacto: {contact}.`],
+      ['Datos de salud que recogemos', `Lecturas de glucosa, sus flechas de tendencia y gráfica reciente, el rango objetivo configurado en Libre, el estado del sensor y los nombres de las personas que comparten con tu cuenta seguidora de su94r. Describen funciones corporales y condiciones de salud.`],
+      ['Fuentes', `El servicio LibreLinkUp de Abbott, mediante la cuenta seguidora que vinculas; y tú, mediante los consentimientos que das.`],
+      ['Por qué los recogemos y usamos', `Solo para darte el servicio que pediste: decir y mostrar esas lecturas en tus dispositivos Alexa y en tu widget del Echo Show. Las leemos cuando hace falta y no guardamos un historial.`],
+      ['Con quién los compartimos', `Amazon (Alexa), para entregar las lecturas en tus dispositivos, solo con tu consentimiento aparte para compartir. Nuestros encargados de tratamiento, solo para operar su94r: Supabase y Cloudflare. No vendemos datos de salud ni los compartimos para publicidad.`],
+      ['Tus derechos', `Puedes confirmar si procesamos tus datos de salud y obtener una copia y una lista de cada tercero y afiliado que los recibió; retirar tu consentimiento; y pedir que se borren, incluso de las copias de seguridad en 30 días. Desactiva la skill su94r, usa su94r.com/sugar/delete o escribe a {contact}. Respondemos en 45 días (prorrogables una vez por 45 días cuando sea razonablemente necesario, con aviso). Puedes apelar una decisión respondiendo a ella; respondemos las apelaciones en 45 días y puedes contactar al fiscal general de tu estado si no estás de acuerdo.`],
+      ['Consentimiento', `Pedimos dos consentimientos separados y expresos antes de recoger o compartir: uno para recoger y procesar las lecturas y otro para compartirlas con Amazon. Aceptar los Términos de uso no es consentimiento para ninguno de los dos. Puedes retirar ambos en cualquier momento, lo que termina el servicio.`],
+      ['Sin geocercas, sin venta', `No usamos ubicación, geocercas ni límites virtuales alrededor de lugares que prestan atención médica, y nunca vendemos datos de salud.`],
+    ],
+  },
+};
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/** One legal page as HTML. kind: terms | privacy | health. */
+export function legalPage(kind, lang = 'en', { operator, contact, reviewed = false } = {}) {
+  const doc = (lang === 'es' ? ES : EN)[kind];
+  const fill = (s) => esc(s).replaceAll('{operator}', esc(operator || 'the su94r project')).replaceAll('{contact}', contact ? `<a href="mailto:${esc(contact)}">${esc(contact)}</a>` : 'the contact link on su94r.com');
+  const banner = reviewed ? '' : `<div class="card err">${lang === 'es' ? 'Borrador en revisión legal. Versión en inglés prevalece.' : 'Draft awaiting legal review.'}</div>`;
+  const note = lang === 'es' ? `<p class="muted">Traducción para tu comodidad; en caso de diferencia prevalece la versión en inglés. Actualizado: ${LEGAL_UPDATED}.</p>` : `<p class="muted">Last updated: ${LEGAL_UPDATED}.</p>`;
+  const nav = ['terms', 'privacy', 'health'].map((k) => `<a href="/sugar/${k === 'health' ? 'health-data' : k}${lang === 'es' ? '?lang=es' : ''}">${esc((lang === 'es' ? ES : EN)[k].title)}</a>`).join(' · ');
+  return {
+    title: doc.title,
+    body: `<span class="lang"><a href="?lang=${lang === 'es' ? 'en' : 'es'}">${lang === 'es' ? 'English' : 'Español'}</a></span>
+      <h1>${esc(doc.title)}</h1>${banner}${note}
+      ${doc.sections.map(([h, p]) => `<h2>${esc(h)}</h2><p>${fill(p)}</p>`).join('')}
+      <p class="muted">${nav}</p>`,
+  };
+}
+
+export const LEGAL_KINDS = { 'sugar/terms': 'terms', 'sugar/privacy': 'privacy', 'sugar/health-data': 'health' };

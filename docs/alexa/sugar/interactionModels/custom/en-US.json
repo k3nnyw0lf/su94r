@@ -1,0 +1,53 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "sugar",
+      "intents": [
+        {
+          "name": "GetGlucoseIntent",
+          "slots": [
+            {
+              "name": "name",
+              "type": "AMAZON.FirstName"
+            }
+          ],
+          "samples": [
+            "how is my sugar",
+            "what is my sugar",
+            "what is my glucose",
+            "what is my blood sugar",
+            "check my glucose",
+            "check my sugar",
+            "how am i doing",
+            "how is {name}",
+            "how is {name} doing",
+            "check {name}",
+            "what is the sugar for {name}",
+            "what is the glucose for {name}"
+          ]
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        }
+      ],
+      "types": []
+    }
+  }
+}

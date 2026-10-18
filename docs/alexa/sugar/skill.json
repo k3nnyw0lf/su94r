@@ -1,0 +1,76 @@
+{
+  "manifest": {
+    "publishingInformation": {
+      "locales": {
+        "en-US": {
+          "name": "su94r",
+          "summary": "Hear and see the Libre glucose of you and your family on Alexa and Echo Show.",
+          "description": "su94r reads the FreeStyle Libre glucose of the people who share with a LibreLinkUp follower account you create just for su94r, and tells you the number, the trend and how old it is. On an Echo Show it shows the last 3 hours, and the Echo Show home-screen widget keeps the number on screen.\n\nYou see only the people who chose to share with your su94r follower account. Link it at su94r.com/sugar after creating the follower in the LibreLinkUp app.\n\nsu94r is free, open source and read-only. It is not a medical device and not an alarm, and it is not a substitute for professional medical advice. Dosing decisions should not be made based on this device. The user should follow instructions on the continuous glucose monitoring system. This device is not intended to replace self-monitoring practices as advised by a physician. Keep your Libre alarms on. In an emergency, call 911.\n\nsu94r is not made, endorsed or supported by Abbott or Amazon. FreeStyle Libre and LibreLinkUp are trademarks of Abbott.",
+          "examplePhrases": [
+            "Alexa, open sugar",
+            "Alexa, ask sugar how is my glucose",
+            "Alexa, ask sugar how is Ana doing"
+          ],
+          "keywords": ["glucose", "libre", "diabetes", "sugar", "family"],
+          "smallIconUri": "https://su94r.com/icons/icon-108.png",
+          "largeIconUri": "https://su94r.com/icons/icon-512.png"
+        },
+        "es-US": {
+          "name": "su94r",
+          "summary": "Escucha y ve la glucosa de Libre tuya y de tu familia en Alexa y en el Echo Show.",
+          "description": "su94r lee la glucosa FreeStyle Libre de las personas que comparten con una cuenta seguidora de LibreLinkUp que creas solo para su94r, y te dice el número, la tendencia y cuánto tiempo tiene. En un Echo Show muestra las últimas 3 horas, y el widget de la pantalla de inicio del Echo Show mantiene el número a la vista.\n\nSolo ves a las personas que eligieron compartir con tu cuenta seguidora de su94r. Vincúlala en su94r.com/sugar después de crear la seguidora en la app LibreLinkUp.\n\nsu94r es gratis, de código abierto y solo de lectura. No es un dispositivo médico ni una alarma, y no sustituye el consejo médico profesional. No se deben tomar decisiones de dosis basadas en este dispositivo. El usuario debe seguir las instrucciones del sistema de monitoreo continuo de glucosa. Este dispositivo no sustituye las prácticas de automonitoreo indicadas por un médico. Mantén encendidas las alarmas de Libre. En una emergencia, llama al 911.\n\nsu94r no está hecho, respaldado ni apoyado por Abbott ni por Amazon. FreeStyle Libre y LibreLinkUp son marcas de Abbott.",
+          "examplePhrases": [
+            "Alexa, abre sugar",
+            "Alexa, pregúntale a sugar cómo está mi glucosa",
+            "Alexa, pregúntale a sugar cómo está Ana"
+          ],
+          "keywords": ["glucosa", "libre", "diabetes", "azúcar", "familia"],
+          "smallIconUri": "https://su94r.com/icons/icon-108.png",
+          "largeIconUri": "https://su94r.com/icons/icon-512.png"
+        }
+      },
+      "isAvailableWorldwide": false,
+      "distributionCountries": ["US"],
+      "testingInstructions": "Link with the su94r test follower account given in the certification notes (a LibreLinkUp follower that a demo Libre user shares with). Then say: open sugar; ask sugar how is my glucose. The skill is read-only: it reads and shows glucose, gives no dosing information and sends no alerts.",
+      "category": "HEALTH_TRACKERS_AND_REMINDERS"
+    },
+    "apis": {
+      "custom": {
+        "endpoint": { "uri": "https://su94r.com/sugar/alexa", "sslCertificateType": "Trusted" },
+        "interfaces": [
+          {
+            "type": "ALEXA_PRESENTATION_APL",
+            "supportedViewports": [
+              { "mode": "HUB", "shape": "ROUND", "minWidth": 480, "maxWidth": 480, "minHeight": 480, "maxHeight": 480 },
+              { "mode": "HUB", "shape": "RECTANGLE", "minWidth": 960, "maxWidth": 1279, "minHeight": 480, "maxHeight": 599 },
+              { "mode": "HUB", "shape": "RECTANGLE", "minWidth": 1280, "maxWidth": 1920, "minHeight": 600, "maxHeight": 1200 }
+            ]
+          },
+          { "type": "ALEXA_DATASTORE_PACKAGEMANAGER", "packages": [{ "id": "su94r-glucose" }] },
+          { "type": "ALEXA_DATA_STORE" },
+          { "type": "ALEXA_EXTENSION", "requestedExtensions": [{ "uri": "alexaext:datastore:10" }] }
+        ],
+        "regions": { "NA": { "endpoint": { "uri": "https://su94r.com/sugar/alexa", "sslCertificateType": "Trusted" } } }
+      }
+    },
+    "events": {
+      "endpoint": { "uri": "https://su94r.com/sugar/alexa", "sslCertificateType": "Trusted" },
+      "subscriptions": [
+        { "eventName": "SKILL_DISABLED" },
+        { "eventName": "SKILL_ACCOUNT_LINKED" }
+      ]
+    },
+    "manifestVersion": "1.0",
+    "privacyAndCompliance": {
+      "allowsPurchases": false,
+      "usesPersonalInfo": true,
+      "isChildDirected": false,
+      "isExportCompliant": true,
+      "containsAds": false,
+      "locales": {
+        "en-US": { "privacyPolicyUrl": "https://su94r.com/sugar/privacy", "termsOfUseUrl": "https://su94r.com/sugar/terms" },
+        "es-US": { "privacyPolicyUrl": "https://su94r.com/sugar/privacy?lang=es", "termsOfUseUrl": "https://su94r.com/sugar/terms?lang=es" }
+      }
+    }
+  }
+}

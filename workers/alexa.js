@@ -112,7 +112,7 @@ export function sparkGraphic(p, now = Date.now()) {
   };
 }
 
-function aplDirective(people, lang = 'en') {
+export function aplDirective(people, lang = 'en') {
   const es = lang === 'es';
   const p = people[0];
   const l = p.latest;

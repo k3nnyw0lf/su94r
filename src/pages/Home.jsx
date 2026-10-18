@@ -189,6 +189,8 @@ export default function Home({ user, onShowAuth, onEnter }) {
       <footer className="h-foot">
         <span>su94r · MIT licensed</span>
         <a href={`${GITHUB}/blob/main/PRIVACY.md`} target="_blank" rel="noopener noreferrer">Privacy</a>
+        {/* Washington RCW 19.373.020 wants this one as its own homepage link (the su94r Alexa skill). */}
+        <a href="/sugar/health-data">Consumer Health Data Privacy Policy</a>
         <a href={`${GITHUB}/issues`} target="_blank" rel="noopener noreferrer">Report a problem</a>
         <span>Not a medical device</span>
       </footer>
