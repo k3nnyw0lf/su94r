@@ -80,7 +80,8 @@ describe('linking with a LibreLinkUp follower account', () => {
     expect(ok.status).toBe(200);
     const page = await body(ok);
     for (const k of CONSENT_ITEMS) expect(page).toContain(`name="${k}"`);
-    expect(page).toMatch(/follower account made only for su94r/);
+    expect(page).toMatch(/Which sensor?/);
+    expect(page).toMatch(/With Dexcom/);
     expect(ok.headers.get('x-su94r-page')).toBe('1');
     const served = await servePage(await route('sugar/link', new Request(`https://cgm.test/sugar/link?client_id=su94r-alexa&redirect_uri=${encodeURIComponent(REDIRECT)}&state=s`), store));
     expect(served.headers.get('content-type')).toMatch(/^text\/html/);
@@ -88,7 +89,7 @@ describe('linking with a LibreLinkUp follower account', () => {
     const evil = await route('sugar/link', new Request(`https://cgm.test/sugar/link?client_id=su94r-alexa&redirect_uri=${encodeURIComponent('https://evil.test/cb')}&state=s`), store);
     expect(evil.status).toBe(400);
     const es = await body(await route('sugar/link', new Request(`https://cgm.test/sugar/link?client_id=su94r-alexa&redirect_uri=${encodeURIComponent(REDIRECT)}&state=s&lang=es`), store));
-    expect(es).toMatch(/cuenta seguidora creada solo para su94r/);
+    expect(es).toMatch(/¿Qué sensor?/);
   });
 
   it('needs every box ticked, a follower Libre accepts, and someone sharing with it', async () => {
@@ -114,7 +115,7 @@ describe('linking with a LibreLinkUp follower account', () => {
     expect(u.email_hash).toBe(await sha256('ken+su94r@example.test'));
     expect(JSON.stringify(u)).not.toContain('follower-pass');             // never stored in the clear
     expect(await unseal(store, u.libre_cred)).toEqual({ email: 'Ken+su94r@example.test', password: 'follower-pass' });
-    expect(u.consents).toMatchObject({ version: '2026-10-18', items: CONSENT_ITEMS });
+    expect(u.consents).toMatchObject({ version: '2026-10-19', items: CONSENT_ITEMS });
     const code = to.searchParams.get('code');
     expect(store.tokens.get(await sha256(code))).toMatchObject({ kind: 'code', redirect_uri: REDIRECT });
   });

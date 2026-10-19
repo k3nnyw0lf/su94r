@@ -35,6 +35,7 @@
 import { login as lluLogin, getConnections, getGraph, toPoint, sensorOf, LibreError, DEFAULT_VERSION } from '../extension/libre.js';
 import { handleAlexa } from './alexa.js';
 import { sugarRoute } from './sugar.js';
+import { familyScreenPayload } from './sugar-family.js';
 import { doseStore, asMarkers, WINDOW_MS } from './doses.js';
 import { screenStore, pairStart, pairPoll, pairClaim, screenFor, shareNew, shareClaim } from './screens.js';
 import { inboxStore, inboxRoute } from './inbox.js';
@@ -389,6 +390,8 @@ async function screensRoute(path, request, url, env, deps) {
     const screen = await screenFor(request, store, url.searchParams.get('token'));
     // An AI connector's token reads through MCP only, never the screen feeds (names, sensor dates).
     if (!screen || (screen.kind !== 'screen' && screen.kind !== 'widget')) return json({ error: 'unauthorized' }, 401);
+    // A su94r family's screen (sugar.js) shows that family only, never the owner's people.
+    if (screen.sugar_user) return familyScreenPayload(env, screen, path === 'screen/glance' ? 'glance' : 'data', deps);
     if (path === 'screen/glance') return glance(env, Number(url.searchParams.get('n')) || 0);
     return displayPayload(env, { screen: { name: screen.name, kind: screen.kind } }, deps);
   }
@@ -444,7 +447,7 @@ async function screensRoute(path, request, url, env, deps) {
   if (path === 'screens/remove') {
     const { id } = await request.json().catch(() => ({}));
     if (!id) return json({ error: 'id needed' }, 400);
-    await store.update(String(id), { revoked: true, token_once: null });
+    await (store.revokeOwner ? store.revokeOwner(String(id)) : store.update(String(id), { revoked: true, token_once: null }));
     return json({ ok: true });
   }
   return json({ error: 'not found' }, 404);

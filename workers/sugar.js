@@ -22,8 +22,10 @@ import { widgetContent, pushWidget } from './widget.js';
 import { sha256, randomToken } from './screens.js';
 import { linkPage, deletePage, donePage, docPage } from './sugar-page.js';
 import { legalPage, LEGAL_KINDS } from './sugar-legal.js';
+import { dexcomLogin as dxLogin, dexcomReadings as dxReadings } from './dexcom.js';
+import { familyRoute, familyTick, FAMILY_PATHS } from './sugar-family.js';
 
-export const CONSENT_VERSION = '2026-10-18';
+export const CONSENT_VERSION = '2026-10-19';
 export const CONSENT_ITEMS = ['adult_terms', 'health_collect', 'share_amazon', 'not_medical', 'unofficial'];
 const CODE_TTL = 10 * 60e3;
 const ACCESS_TTL = 3600e3;
@@ -80,6 +82,21 @@ export function sugarStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     async useCode(h) {
       return (await call(`/sugar_tokens?hash=eq.${q(h)}&kind=eq.code&used=is.false`, { method: 'PATCH', body: JSON.stringify({ used: true }) })).length === 1;
     },
+    // A family's own screens (su94r_screens.sugar_user): pair by the code the screen shows, list, remove.
+    screensFor: (userId) => call(`/su94r_screens?select=id,name,claimed_at,last_seen&sugar_user=eq.${q(userId)}&revoked=is.false&order=claimed_at.desc`),
+    async claimScreen(code, name, userId) {
+      const row = (await call(`/su94r_screens?select=id&code=eq.${q(code)}&claimed_at=is.null&revoked=is.false&expires_at=gt.${q(new Date().toISOString())}`))[0];
+      if (!row) return null;
+      const token = randomToken();
+      await call(`/su94r_screens?id=eq.${q(row.id)}&claimed_at=is.null`, { method: 'PATCH', body: JSON.stringify({ claimed_at: new Date().toISOString(), code: null, name, kind: 'screen', sugar_user: userId, token_hash: await sha256(token), token_once: token }), headers: { Prefer: 'return=minimal' } });
+      return { id: row.id, name };
+    },
+    removeScreen: (id, userId) => call(`/su94r_screens?id=eq.${q(id)}&sugar_user=eq.${q(userId)}`, { method: 'PATCH', body: JSON.stringify({ revoked: true, token_once: null }), headers: { Prefer: 'return=minimal' } }),
+    // A family's night safety net (sugar-family.js).
+    nightFor: async (userId) => (await call(`/sugar_night?select=*&user_id=eq.${q(userId)}`))[0] || null,
+    saveNight: (row) => call('/sugar_night?on_conflict=user_id', { method: 'POST', body: JSON.stringify({ ...row, updated_at: new Date().toISOString() }), headers: { Prefer: 'resolution=merge-duplicates,return=minimal' } }),
+    patchNight: (userId, fields) => call(`/sugar_night?user_id=eq.${q(userId)}`, { method: 'PATCH', body: JSON.stringify({ ...fields, updated_at: new Date().toISOString() }), headers: { Prefer: 'return=minimal' } }),
+    familyNights: (limit = 100) => call(`/sugar_night?select=*,user:sugar_users(*)&order=last_tick_at.asc.nullsfirst&limit=${Number(limit) || 100}`),
   };
 }
 
@@ -141,10 +158,64 @@ const personFrom = (c, history = []) => {
 const cache = new Map();   // user id → { at, people } for 55 s per function instance
 export const resetSugarCache = () => cache.clear();
 
-/** The people who share with this user's follower account; the first one gets its 12-hour graph. */
+// ─── a Dexcom account (family accounts; dexcom.js) ─────────────────────────────────────────
+
+const dexcomDeps = (deps = {}) => ({ login: deps.dexcomLogin || dxLogin, readings: deps.dexcomReadings || dxReadings });
+const DEXCOM_SESSION_MS = 6 * 3600e3;
+
+async function dexcomSession(store, user, deps, { fresh = false } = {}) {
+  if (!fresh && user.libre_session) {
+    const s = await unseal(store, user.libre_session).catch(() => null);
+    if (s?.sessionId && Date.now() - (s.at || 0) < DEXCOM_SESSION_MS) return s;
+  }
+  // Dexcom locks an account after a few failed sign-ins: never retry while it is locked.
+  if ((user.meta?.lockedUntil || 0) > Date.now()) throw Object.assign(new Error('Dexcom is locked for a few minutes.'), { code: 'locked' });
+  const cred = await unseal(store, user.libre_cred);
+  try {
+    const s = await dexcomDeps(deps).login(cred.email, cred.password, { region: user.region || 'us' });
+    await store.patchUser(user.id, { libre_session: await seal(store, s), status: 'active' });
+    return s;
+  } catch (e) {
+    if (e.code === 'credentials') await store.patchUser(user.id, { status: 'needs_login' }).catch(() => {});
+    if (e.code === 'locked') await store.patchUser(user.id, { meta: { ...(user.meta || {}), lockedUntil: Date.now() + 15 * 60e3 } }).catch(() => {});
+    throw e;
+  }
+}
+
+/** The one person a Dexcom account follows, with the family's own name and range. */
+export function dexcomPerson(user, points) {
+  const t = user.meta?.targets || {};
+  const name = user.person || 'Baby';
+  return {
+    pid: 'dexcom', name, firstName: name, units: user.units || 'mg/dL',
+    low: Number.isFinite(t.low) ? t.low : 70, high: Number.isFinite(t.high) ? t.high : 180,
+    latest: points.length ? points[points.length - 1] : null, history: points,
+  };
+}
+
+async function dexcomPeople(store, user, deps) {
+  const { readings } = dexcomDeps(deps);
+  let s = await dexcomSession(store, user, deps);
+  let points;
+  try {
+    points = await readings(s, { minutes: 720, maxCount: 144 });
+  } catch (e) {
+    if (e.code !== 'auth') throw e;
+    s = await dexcomSession(store, user, deps, { fresh: true });
+    points = await readings(s, { minutes: 720, maxCount: 144 });
+  }
+  return [dexcomPerson(user, points)];
+}
+
+/** The people this account sees: everyone sharing with its Libre follower, or its Dexcom person. */
 export async function peopleFor(store, user, deps = {}) {
   const hit = cache.get(user.id);
   if (hit && Date.now() - hit.at < 55e3) return hit.people;
+  if (user.source === 'dexcom') {
+    const people = await dexcomPeople(store, user, deps);
+    cache.set(user.id, { at: Date.now(), people });
+    return people;
+  }
   const { connections, graph } = libreDeps(deps);
   let session = await sessionFor(store, user, deps);
   let list;
@@ -187,31 +258,67 @@ async function linkRoute(request, url, env, store, deps) {
   const { p, ok } = linkParams(form, env);
   const lang = form.get('lang') === 'es' ? 'es' : 'en';
   if (!ok) return html(donePage(lang, 'bad'), 400);
-  const email = String(form.get('email') || '').trim();
-  const password = String(form.get('password') || '');
-  const again = (error) => html(linkPage({ lang, params: p, error, email }), 400);
-  if (CONSENT_ITEMS.some((k) => form.get(k) !== 'yes')) return again('consent');
-  if (!email || !password) return again('missing');
-  const { login, connections } = libreDeps(deps);
-  let session;
-  try { session = await login(email, password); } catch (e) { return again(e.code === 'credentials' ? 'credentials' : 'libre'); }
-  let list = [];
-  try { list = (await connections(session)).connections || []; } catch { return again('libre'); }
-  if (!list.length) return again('nobody');
-  const user = await store.saveUser({
-    email_hash: await sha256(email.toLowerCase()),
-    libre_cred: await seal(store, { email, password }),
-    libre_session: await seal(store, session),
-    consents: { version: CONSENT_VERSION, at: new Date().toISOString(), items: CONSENT_ITEMS, lang },
-    status: 'active',
-    updated_at: new Date().toISOString(),
-  });
+  const r = await signIn(form, store, deps, { lang, requireConsent: true });
+  if (r.error) return html(linkPage({ lang, params: p, error: r.error, email: r.email, source: r.source, person: r.person }), 400);
+  const { user } = r;
   const code = randomToken(24);
   await store.putToken({ hash: await sha256(code), user_id: user.id, kind: 'code', redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + CODE_TTL).toISOString() });
   const to = new URL(p.redirect_uri);
   to.searchParams.set('state', p.state);
   to.searchParams.set('code', code);
   return redirect(to.toString());
+}
+
+const clean = (s, n = 40) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n);
+
+/**
+ * Signs a family in with their CGM account and makes or updates their su94r account:
+ * source 'libre' (a LibreLinkUp follower made only for su94r) or 'dexcom' (the Dexcom account
+ * with Share on). The five consents are needed to create an account (and always on the Alexa
+ * link page). Returns { user, created } or { error, email, source, person }.
+ */
+export async function signIn(form, store, deps = {}, { lang = 'en', requireConsent = true } = {}) {
+  const source = form.get('source') === 'dexcom' ? 'dexcom' : 'libre';
+  const email = clean(form.get('email'), 200);
+  const password = String(form.get('password') || '');
+  const person = clean(form.get('person'));
+  const region = ['us', 'ous', 'jp'].includes(form.get('region')) ? form.get('region') : 'us';
+  const fail = (error) => ({ error, email, source, person });
+  if (!email || !password) return fail('missing');
+  const emailHash = await sha256(source === 'dexcom' ? `dexcom:${email.toLowerCase()}` : email.toLowerCase());
+  const existing = await store.userByEmailHash(emailHash);
+  const needConsent = requireConsent || !existing;
+  if (needConsent && CONSENT_ITEMS.some((k) => form.get(k) !== 'yes')) return fail('consent');
+  if (source === 'dexcom' && !person && !existing?.person) return fail('person');
+  let session;
+  if (source === 'dexcom') {
+    const { login, readings } = dexcomDeps(deps);
+    try { session = await login(email, password, { region }); } catch (e) { return fail(e.code === 'credentials' ? 'dexcom_credentials' : e.code === 'locked' ? 'dexcom_locked' : 'dexcom'); }
+    let points = [];
+    try { points = await readings(session, { minutes: 1440, maxCount: 288 }); } catch { return fail('dexcom'); }
+    if (!points.length) return fail('nodexcom');
+  } else {
+    const { login, connections } = libreDeps(deps);
+    try { session = await login(email, password); } catch (e) { return fail(e.code === 'credentials' ? 'credentials' : 'libre'); }
+    let list = [];
+    try { list = (await connections(session)).connections || []; } catch { return fail('libre'); }
+    if (!list.length) return fail('nobody');
+  }
+  const fields = {
+    libre_cred: await seal(store, { email, password }),
+    libre_session: await seal(store, session),
+    source, region,
+    person: source === 'dexcom' ? person || existing?.person || null : null,
+    status: 'active',
+    ...(needConsent ? { consents: { version: CONSENT_VERSION, at: new Date().toISOString(), items: CONSENT_ITEMS, lang } } : {}),
+  };
+  if (existing) {
+    await store.patchUser(existing.id, fields);
+    cache.delete(existing.id);
+    return { user: { ...existing, ...fields }, created: false };
+  }
+  const user = await store.saveUser({ email_hash: emailHash, ...fields, updated_at: new Date().toISOString() });
+  return { user, created: true };
 }
 
 function clientOk(request, form, env) {
@@ -381,7 +488,9 @@ export async function sugarTick(env, store, deps = {}, { limit = 50, now = Date.
       if (r.ok) { sent++; await store.patchUser(u.id, { meta: { ...meta, widgetT: p.latest.t, widgetAt: now } }); } else failed++;
     } catch { failed++; }
   }
-  return { users: users.length, sent, failed };
+  // Each family's night safety net (sugar-family.js): Dexcom Follow stays the official alarm.
+  const families = store.familyNights ? await familyTick(env, store, deps, { now }).catch((e) => ({ error: String(e.message || e).slice(0, 120) })) : null;
+  return { users: users.length, sent, failed, ...(families ? { families } : {}) };
 }
 
 async function deleteRoute(request, url, store, deps) {
@@ -391,19 +500,23 @@ async function deleteRoute(request, url, store, deps) {
   const lang = form.get('lang') === 'es' ? 'es' : 'en';
   const email = String(form.get('email') || '').trim();
   const password = String(form.get('password') || '');
-  const u = email && await store.userByEmailHash(await sha256(email.toLowerCase()));
+  // A Libre follower account, or a Dexcom account (its email is kept under "dexcom:").
+  const u = email && (await store.userByEmailHash(await sha256(email.toLowerCase())) || await store.userByEmailHash(await sha256(`dexcom:${email.toLowerCase()}`)));
   if (!u) return html(deletePage(lang, 'notfound'), 404);
   const cred = await unseal(store, u.libre_cred).catch(() => null);
   if (!cred || cred.password !== password) {
-    // The follower password may have changed since linking: Libre itself can confirm it.
-    try { await libreDeps(deps).login(email, password); } catch { return html(deletePage(lang, 'credentials'), 401); }
+    // The password may have changed since linking: Libre or Dexcom itself can confirm it.
+    try {
+      if (u.source === 'dexcom') await dexcomDeps(deps).login(email, password, { region: u.region || 'us' });
+      else await libreDeps(deps).login(email, password);
+    } catch { return html(deletePage(lang, 'credentials'), 401); }
   }
   await store.deleteUser(u.id);
   cache.delete(u.id);
   return html(donePage(lang, 'deleted'));
 }
 
-export const SUGAR_PATHS = new Set(['sugar/link', 'sugar/token', 'sugar/alexa', 'sugar/tick', 'sugar/delete', ...Object.keys(LEGAL_KINDS)]);
+export const SUGAR_PATHS = new Set(['sugar/link', 'sugar/token', 'sugar/alexa', 'sugar/tick', 'sugar/delete', ...Object.keys(LEGAL_KINDS), ...FAMILY_PATHS]);
 
 export async function sugarRoute(path, request, env, deps = {}) {
   if (!SUGAR_PATHS.has(path)) return null;
@@ -419,5 +532,6 @@ export async function sugarRoute(path, request, env, deps = {}) {
   if (path === 'sugar/token') return tokenRoute(request, env, store);
   if (path === 'sugar/alexa') return request.method === 'POST' ? handleSugarAlexa(request, env, store, deps) : json({ error: 'POST only' }, 405);
   if (path === 'sugar/tick') return request.method === 'POST' ? json(await sugarTick(env, store, deps)) : json({ error: 'POST only' }, 405);
+  if (FAMILY_PATHS.includes(path)) return familyRoute(path, request, url, env, store, deps, { html, json, langOf });
   return deleteRoute(request, url, store, deps);
 }

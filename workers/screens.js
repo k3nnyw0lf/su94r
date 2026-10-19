@@ -48,7 +48,9 @@ export function screenStore(env, { fetchImpl = (...a) => fetch(...a) } = {}) {
     claimIfOpen: async (id, patch) => (await call(`?id=eq.${q(id)}&claimed_at=is.null&revoked=is.false`, { method: 'PATCH', body: JSON.stringify(patch) })).length > 0,
     /** A family phone may log, or not (only phones linked as family; true when one changed). */
     allowLog: async (id, canLog) => (await call(`?id=eq.${q(id)}&kind=eq.screen&role=eq.family&revoked=is.false`, { method: 'PATCH', body: JSON.stringify({ can_log: canLog === true }) })).length > 0,
-    list: () => call('?select=id,name,kind,role,can_log,created_at,claimed_at,last_seen,expires_at&claimed_at=not.is.null&revoked=is.false&order=last_seen.desc.nullslast'),
+    // The owner's screens only: a su94r family's screens (sugar_user, sugar.js) are theirs alone.
+    list: () => call('?select=id,name,kind,role,can_log,created_at,claimed_at,last_seen,expires_at&claimed_at=not.is.null&revoked=is.false&sugar_user=is.null&order=last_seen.desc.nullslast'),
+    revokeOwner: (id) => call(`?id=eq.${q(id)}&sugar_user=is.null`, { method: 'PATCH', body: JSON.stringify({ revoked: true, token_once: null }) }),
     sweep: () => call(`?claimed_at=is.null&expires_at=lt.${q(new Date().toISOString())}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } }),
   };
 }

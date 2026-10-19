@@ -233,14 +233,16 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
     .map(([pid, ep]) => ({ pid, firstName: ep.name || '', name: ep.name || '', units: ep.units, latest: null }));
   const list = error ? openLows : people;
   const many = list.length > 1;
-  const who = (p) => (many ? `${p.firstName || p.name}: ` : '');
+  // A family account (sugar.js) names its person even when there is only one ("Sofia: Low 62").
+  const who = (p) => (many || cfg.name_people ? `${p.firstName || p.name}: ` : '');
+  const src = cfg.source_label || 'Libre';
 
   // The server cannot read LibreLinkUp: say so (every 12 hours), and treat every open low as gone silent.
   if (error) {
     if (error.code === 'auth' || error.code === 'config') {
       const meta = state._meta || {};
       if (!meta.authWarnAt || now - meta.authWarnAt > AUTH_WARN_EVERY_MS) {
-        await send(cfg.self_topic, {
+        await send(cfg.self_topic, cfg.signin_message || {
           title: 'su94r cannot read your glucose',
           message: 'The su94r server lost its LibreLinkUp sign-in, so night alerts are paused. Open su94r Mini on your computer; it reconnects by itself.',
           priority: 4, tags: ['warning'],
@@ -288,13 +290,13 @@ export async function nightCheck({ row, people, error = null, now = Date.now(), 
       w.gapFor = p.latest.t;
       await send(cfg.self_topic, {
         title: `${who(p)}No glucose for ${Math.round((now - p.latest.t) / MIN)} min`,
-        message: 'Libre has not sent a reading. Check the sensor and the phone\'s Libre app (open, Bluetooth on). Lows cannot be seen until readings come back.',
+        message: `${src} has not sent a reading. Check the sensor and the phone's ${src} app (open, Bluetooth on). Lows cannot be seen until readings come back.`,
         priority: night ? 4 : 3, tags: ['satellite'],
-        es: { title: `${who(p)}Sin glucosa desde hace ${Math.round((now - p.latest.t) / MIN)} min`, message: 'Libre no ha enviado lecturas. Revisa el sensor y la app de Libre del teléfono (abierta, Bluetooth encendido). No se pueden ver las bajas hasta que vuelvan las lecturas.' },
+        es: { title: `${who(p)}Sin glucosa desde hace ${Math.round((now - p.latest.t) / MIN)} min`, message: `${src} no ha enviado lecturas. Revisa el sensor y la app de ${src} del teléfono (abierta, Bluetooth encendido). No se pueden ver las bajas hasta que vuelvan las lecturas.` },
       }, 'signal');
     } else if (l && w.gapFor) {
       delete w.gapFor;
-      await send(cfg.self_topic, { title: `${who(p)}Readings are back: ${fmt(p, l.mg)}`, message: 'Libre is sending again.', priority: 2, tags: ['white_check_mark'], es: { title: `${who(p)}Volvieron las lecturas: ${fmt(p, l.mg)}`, message: 'Libre está enviando otra vez.' } }, 'signal-back');
+      await send(cfg.self_topic, { title: `${who(p)}Readings are back: ${fmt(p, l.mg)}`, message: `${src} is sending again.`, priority: 2, tags: ['white_check_mark'], es: { title: `${who(p)}Volvieron las lecturas: ${fmt(p, l.mg)}`, message: `${src} está enviando otra vez.` } }, 'signal-back');
     }
     const days = Number(cfg.sensor_days) || 14;
     const ends = p.sensorStart ? p.sensorStart + days * 24 * 60 * MIN : null;
@@ -873,7 +875,7 @@ export function nightBoundary(now, tz, endHour = 7) {
 }
 
 /** Fires a trigger link (GET); throws when it does not answer OK. */
-async function defaultRing(url) {
+export async function defaultRing(url) {
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new Error(`answered ${res.status}`);
   return true;
