@@ -18,8 +18,13 @@ cleanupOutdatedCaches();
 // point: this file also owns push and background glucose polling, which a
 // generated worker cannot express.
 
-// SPA fallback. Without it, a deep link offline returns nothing.
-registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html')));
+// SPA fallback. Without it, a deep link offline returns nothing. Pages the server owns on
+// su94r.com (the screen pairing page /tv, the su94r sign-in and legal pages /sugar/*, the
+// widget script, the emergency card, doctor links, the phone app, display and calendar links)
+// must reach the network: serving index.html there opened this app instead (seen on a Tesla).
+registerRoute(new NavigationRoute(createHandlerBoundToURL('index.html'), {
+  denylist: [/^\/tv\/?$/, /^\/sugar(\/|$)/, /^\/widgets\//, /^\/e\//, /^\/r\//, /^\/app(\/|$)/, /^\/d\//, /^\/cal\//],
+}));
 
 // Exercise catalog: deliberately not precached (~4MB across six chunks), so the
 // first visit to Fitness pays for it and every visit after is instant.

@@ -152,7 +152,7 @@ describe('the family safety net', () => {
     await route('sugar/family', post('sugar/family', signin()), store, dx);
     const u = [...store.users.values()][0];
     const n = store.nights.get(u.id);
-    n.cfg = { ...n.cfg, night_start: 0, night_end: 23, treat_plan: '5 g glucose gel', time_zone: 'UTC' };   // night all day for the test
+    n.cfg = { ...n.cfg, echo_always: true, treat_plan: '5 g glucose gel', time_zone: 'UTC' };   // the Echo speaks at any hour (the test must not depend on the clock)
     const link = 'https://www.virtualsmarthome.xyz/url_routine_trigger/activate.php?trigger=abc123def456&token=t0k3n';
     const { seal } = await import('../workers/sugar.js');
     n.cfg.echo_low_sealed = await seal(store, { url: link });

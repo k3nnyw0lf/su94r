@@ -77,6 +77,23 @@ text{fill:var(--muted);font-size:max(12px,1.8vh)}
 .carm{color:var(--muted);font-size:max(18px,4vh)}
 .tip{font-size:max(20px,5vh);font-weight:750;color:var(--c);padding:1vh 2vw;border:.4vh solid var(--c);border-radius:1.4vh}
 .alarming{animation:pulse 1.2s ease-in-out infinite}
+/* A thin strip (a Tesla browser window dragged small under the map, a narrow monitor band):
+   one row, the number as big as the strip allows, nothing else. */
+@media (max-height:380px) and (min-aspect-ratio:2/1){
+  #app{padding:1vh 2vw}
+  .top,.foot{display:none}
+  .graph{display:none}
+  .read{margin-top:0;flex:1}
+  .val{font-size:min(78vh,26vw)}
+  .arrow{width:min(42vh,13vw);height:min(42vh,13vw)}
+  .car{flex-direction:row;gap:3vw}
+  .carv{gap:2vw}
+  .car .val{font-size:min(78vh,26vw)}
+  .car .arrow{width:min(42vh,13vw);height:min(42vh,13vw)}
+  .carm{font-size:max(14px,10vh)}
+  .tip{font-size:max(14px,11vh);padding:.5vh 1.2vw}
+  .viewBtn{bottom:4px;padding:4px 10px;font-size:12px}
+}
 .viewBtn{position:fixed;left:50%;transform:translateX(-50%);bottom:10px;z-index:5;background:rgba(255,255,255,.08);color:var(--fg);border:1px solid rgba(255,255,255,.18);border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer}
 .viewMenu{position:fixed;left:50%;transform:translateX(-50%);bottom:54px;z-index:6;background:#0d1117;border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px}
 .viewMenu button{background:transparent;color:var(--fg);border:0;border-radius:8px;padding:10px 16px;font-size:16px;text-align:left;cursor:pointer}
