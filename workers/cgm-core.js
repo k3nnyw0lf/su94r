@@ -465,9 +465,11 @@ async function glance(env, n) {
     const stale = mins > 10;
     const mmol = p.units === 'mmol/L';
     const fmt = (mg) => (mg < 40 ? 'LO' : mg > 400 ? 'HI' : mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
-    const ref = p.history.find((q) => Math.abs(q.t - (l.t - 15 * 60e3)) <= 4 * 60e3);
-    const d = ref ? l.mg - ref.mg : null;
-    const delta = d == null ? '' : `${d < 0 ? '\u2212' : '+'}${mmol ? Math.abs(d / 18.0182).toFixed(1) : Math.abs(Math.round(d))}`;
+    // The reading nearest to 15 minutes back (8 to 22), scaled to 15 minutes.
+    const ref = p.history.filter((q) => l.t - q.t >= 8 * 60e3 && l.t - q.t <= 22 * 60e3).sort((a, b) => Math.abs(l.t - a.t - 15 * 60e3) - Math.abs(l.t - b.t - 15 * 60e3))[0];
+    const d = ref ? ((l.mg - ref.mg) * 15 * 60e3) / (l.t - ref.t) : null;
+    const dv = d == null ? '' : mmol ? Math.abs(d / 18.0182).toFixed(1) : String(Math.round(Math.abs(d)));
+    const delta = d == null ? '' : `${Number(dv) === 0 ? '' : d < 0 ? '\u2212' : '+'}${dv}`;
     const state = stale ? 'stale' : l.mg < 55 ? 'urgent' : l.mg < p.low ? 'low' : l.mg > p.high ? 'high' : 'in';
     const color = { stale: '#6e7681', urgent: '#ff5d55', low: '#ff5d55', high: '#e3a33b', in: '#3fb950' }[state];
     return json({

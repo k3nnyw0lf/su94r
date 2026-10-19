@@ -118,13 +118,13 @@ export async function familyScreenPayload(env, screen, kind = 'data', deps = {})
       const stale = mins > 10;
       const mmol = p.units === 'mmol/L';
       const fmt = (mg) => (mg < 40 ? 'LO' : mg > 400 ? 'HI' : mmol ? (mg / 18.0182).toFixed(1) : String(Math.round(mg)));
-      const ref = p.history.find((q) => Math.abs(q.t - (l.t - 15 * MIN)) <= 4 * MIN);
-      const d = ref ? l.mg - ref.mg : null;
+      const ref = p.history.filter((q) => l.t - q.t >= 8 * MIN && l.t - q.t <= 22 * MIN).sort((a, b) => Math.abs(l.t - a.t - 15 * MIN) - Math.abs(l.t - b.t - 15 * MIN))[0];
+      const d = ref ? ((l.mg - ref.mg) * 15 * MIN) / (l.t - ref.t) : null;
       const state = stale ? 'stale' : l.mg < 55 ? 'urgent' : l.mg < p.low ? 'low' : l.mg > p.high ? 'high' : 'in';
       return jsonRes({
         name: p.firstName || p.name, value: fmt(l.mg), units: p.units, mg: l.mg, trend: l.trend,
         arrow: ['', '↓', '↘', '→', '↗', '↑'][l.trend] || '',
-        delta: d == null ? '' : `${d < 0 ? '−' : '+'}${mmol ? Math.abs(d / 18.0182).toFixed(1) : Math.abs(Math.round(d))}`,
+        delta: d == null ? '' : ((dv) => `${Number(dv) === 0 ? '' : d < 0 ? '−' : '+'}${dv}`)(mmol ? Math.abs(d / 18.0182).toFixed(1) : String(Math.round(Math.abs(d)))),
         minutes: mins, ago: mins < 1 ? 'just now' : `${mins} min ago`, state,
         color: { stale: '#6e7681', urgent: '#ff5d55', low: '#ff5d55', high: '#e3a33b', in: '#3fb950' }[state], t: l.t,
       });

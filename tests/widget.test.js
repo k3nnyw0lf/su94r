@@ -57,11 +57,36 @@ describe('what the tile shows', () => {
   });
 
   it('the change over 15 minutes, from the nearest reading about 15 minutes earlier', () => {
-    expect(widgetContent(person(), NOW).delta).toBe('+6');                       // 142 now, 136 at 15 min before
+    expect(widgetContent(person(), NOW).delta).toBe('+7');                       // 142 now, 136 thirteen minutes before: +6 scaled to 15 min
     const falling = person({ latest: { t: NOW, mg: 80, trend: 1 }, history: [{ t: NOW - 16 * MIN, mg: 104 }, { t: NOW - 40 * MIN, mg: 150 }] });
-    expect(widgetContent(falling, NOW).delta).toBe('−24');
-    expect(widgetContent({ ...falling, units: 'mmol/L' }, NOW).delta).toBe('−1.3');
+    expect(widgetContent(falling, NOW).delta).toBe('−23');            // −24 over 16 min, scaled to 15
+    expect(widgetContent({ ...falling, units: 'mmol/L' }, NOW).delta).toBe('−1.2');
     expect(widgetContent(person({ history: [{ t: NOW - 60 * MIN, mg: 90 }] }), NOW).delta).toBe('');   // nothing near 15 min ago
+    const steady = person({ latest: { t: NOW, mg: 120, trend: 3 }, history: [{ t: NOW - 15 * MIN, mg: 120.4 }] });
+    expect(widgetContent(steady, NOW).delta).toBe('0');                // no "−0"
+  });
+
+  it('the wide tile\'s extras: 12-hour time in range and low–high, sensor time left, active insulin, last carbs', () => {
+    const DAY = 24 * 3600e3;
+    const p = person({ sensorStart: NOW - 9 * DAY, history: Array.from({ length: 144 }, (_, i) => ({ t: NOW - (143 - i) * 5 * MIN, mg: i < 36 ? 60 : 150 })) });
+    const c = widgetContent(p, NOW, { extra: { iob: 1.234, meal: { t: NOW - 70 * MIN, g: 45 } } });
+    expect(c).toMatchObject({ tir: 75, lo12: '60', hi12: '150', sensorH: 120, iob: 1.2, mealG: 45, mealT: NOW - 70 * MIN, range: '70–180' });
+    expect(widgetContent(p, NOW, { sensorDays: 10 }).sensorH).toBe(24);
+    expect(widgetContent(p, NOW, { extra: { iob: 0.01, meal: { t: NOW - 7 * 3600e3, g: 30 } } })).toMatchObject({ iob: null, mealG: null, mealT: null });
+    expect(widgetContent(person({ history: [] }), NOW).tir).toBe(null);   // too few readings to say
+  });
+
+  it('the wide graph is drawn in 300 × 200 and the scale follows the readings', () => {
+    const flat = person({ history: Array.from({ length: 36 }, (_, i) => ({ t: NOW - (35 - i) * 5 * MIN, mg: 150 + (i % 2) * 10 })) });
+    const c = widgetContent(flat, NOW);
+    const ys = (s) => s.match(/,(-?\d+)/g).map((m) => Number(m.slice(1)));
+    expect(Math.max(...ys(c.lineW))).toBeLessThanOrEqual(200);
+    expect(Math.max(...ys(c.lineW)) - Math.min(...ys(c.lineW))).toBeGreaterThan(Math.max(...ys(c.line)) - Math.min(...ys(c.line)));
+    expect(Math.max(...ys(c.line)) - Math.min(...ys(c.line))).toBeGreaterThanOrEqual(5);   // a 10-point swing is visible, not flat
+    expect(c.bandW).toMatch(/^M0,\d+ L300,\d+ L300,\d+ L0,\d+ Z$/);
+    const doc = JSON.parse(readFileSync('docs/alexa/dataStorePackages/su94r-glucose/documents/document.json', 'utf8'));
+    expect(doc.graphics.sparkWide).toMatchObject({ width: 300, height: 200 });
+    expect(JSON.stringify(doc)).toContain('g.lineW');
   });
 
   it('lows are red, highs amber, mmol/L shows one decimal, LO/HI past the sensor range, no reading says so', () => {

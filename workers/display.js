@@ -122,7 +122,7 @@ const $=(id)=>document.getElementById(id);
 const fmt=(mg,u)=>u==='mmol/L'?(mg/MMOL).toFixed(1):String(Math.round(mg));
 const cat=(p)=>{const l=p.latest;if(!l)return'none';if(Date.now()-l.t>STALE)return'stale';if(l.mg<55)return'urgent';if(l.mg<p.low)return'low';if(l.mg>p.high)return'high';return'in'};
 const ago=(t)=>{const m=Math.round((Date.now()-t)/60e3);return m<=0?'just now':m<60?m+' min ago':Math.floor(m/60)+' h '+(m%60)+' min ago'};
-function delta(p){const l=p.latest;if(!l)return'';const ref=p.history.find(([t])=>Math.abs(t-(l.t-15*60e3))<=4*60e3);if(!ref)return'';const d=l.mg-ref[1];const v=p.units==='mmol/L'?Math.abs(d/MMOL).toFixed(1):Math.abs(Math.round(d));return(d<0?'\\u2212':'+')+v+' in 15 min'}
+function delta(p){const l=p.latest;if(!l)return'';let ref=null,best=1e9;for(const q of p.history){const back=l.t-q[0];if(back<8*60e3||back>22*60e3)continue;const off=Math.abs(back-15*60e3);if(off<best){best=off;ref=q}}if(!ref)return'';const d=(l.mg-ref[1])*15*60e3/(l.t-ref[0]);const v=p.units==='mmol/L'?Math.abs(d/MMOL).toFixed(1):String(Math.round(Math.abs(d)));return(Number(v)===0?'':d<0?'\\u2212':'+')+v+' in 15 min'}
 function arrow(t){if(ROT[t]==null)return'';return '<svg class="arrow" viewBox="0 0 24 24" style="transform:rotate('+ROT[t]+'deg)"><path d="M4 12h14M12.5 6l6 6-6 6"/></svg>'}
 function esc(s){return String(s).replace(/[&<>"]/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 function graph(p,hours){

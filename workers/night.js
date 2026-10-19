@@ -39,6 +39,8 @@ import { localHour } from '../src/lib/util/localDay.js';
 import { rowsFromSnapshot } from './history.js';
 import { missedDoseNudges } from './nudges.js';
 import { widgetTick } from './widget.js';
+import { asMarkers } from './doses.js';
+import { insulinOnBoard } from '../extension/insulin.js';
 import { supplyStatus, supplyReminders } from './supplies.js';
 import { updateDaily, dayIn } from './daily.js';
 import { logEpisode, morningReport, runDrill, drillAnswer, coverageOf } from './coverage.js';
@@ -768,7 +770,17 @@ export async function nightRoute(path, request, url, env, { store, json, keyOk, 
     // The Echo Show home-screen tile (widget.js): each new reading.
     let tileSent = null;
     if (!error) {
-      try { tileSent = await widgetTick(env, row, people, result.state, { ...(tile ? { push: tile } : {}), now: now() }); } catch (e) { tileSent = { ok: false, error: String(e.message || e).slice(0, 120) }; }
+      // The bigger tile also shows active insulin and the last carbs; without the dose log it shows the rest.
+      let extra = null;
+      try {
+        const p0 = people[0];
+        if (p0 && doses?.ready) {
+          const mine = asMarkers(await doses.recent(p0.pid, now())).filter((e) => e.p === p0.pid);
+          const meal = mine.filter((e) => e.type === 'meal').sort((a, b) => b.t - a.t)[0];
+          extra = { iob: insulinOnBoard(mine, p0.pid, { rapidInsulin: row?.rapid_insulin || undefined }, now()), meal: meal ? { t: meal.t, g: meal.amount ?? null } : null };
+        }
+      } catch { extra = null; }
+      try { tileSent = await widgetTick(env, row, people, result.state, { ...(tile ? { push: tile } : {}), extra, now: now() }); } catch (e) { tileSent = { ok: false, error: String(e.message || e).slice(0, 120) }; }
     }
     // Yesterday's summary (daily.js), once a day; the first time, every day the history still has.
     if (daily?.ready && history?.ready && people.length) {

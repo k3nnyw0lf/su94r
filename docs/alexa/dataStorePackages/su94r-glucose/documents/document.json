@@ -52,6 +52,45 @@
           "type": "path",
           "pathData": "${line}",
           "stroke": "${stroke}",
+          "strokeWidth": 4,
+          "fill": "transparent",
+          "strokeLineCap": "round",
+          "strokeLineJoin": "round"
+        }
+      ]
+    },
+    "sparkWide": {
+      "type": "AVG",
+      "version": "1.2",
+      "width": 300,
+      "height": 200,
+      "parameters": [
+        {
+          "name": "line",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "name": "band",
+          "type": "string",
+          "default": ""
+        },
+        {
+          "name": "stroke",
+          "type": "color",
+          "default": "#f2f5f8"
+        }
+      ],
+      "items": [
+        {
+          "type": "path",
+          "pathData": "${band}",
+          "fill": "#3fb95033"
+        },
+        {
+          "type": "path",
+          "pathData": "${line}",
+          "stroke": "${stroke}",
           "strokeWidth": 5,
           "fill": "transparent",
           "strokeLineCap": "round",
@@ -67,7 +106,7 @@
     "bind": [
       {
         "name": "wide",
-        "value": "${viewport.width > viewport.height}"
+        "value": "${viewport.width > viewport.height * 1.4}"
       },
       {
         "name": "es",
@@ -120,6 +159,38 @@
       {
         "name": "change",
         "value": "${has && !stale && g.delta ? g.delta + (es ? ' en 15 min' : ' in 15 min') : ''}"
+      },
+      {
+        "name": "tirTxt",
+        "value": "${has && g.tir != null ? (es ? 'En rango (12 h): ' : 'In range (12 h): ') + g.tir + '%' : ''}"
+      },
+      {
+        "name": "spanTxt",
+        "value": "${has && g.lo12 ? (es ? 'Mín–máx (12 h): ' : 'Low–high (12 h): ') + g.lo12 + '–' + g.hi12 : ''}"
+      },
+      {
+        "name": "iobTxt",
+        "value": "${has && g.iob ? (es ? 'Insulina activa: ' : 'Insulin on board: ') + g.iob + ' u' : ''}"
+      },
+      {
+        "name": "mealMins",
+        "value": "${has && g.mealT ? Math.max(0, Math.floor((utcTime - g.mealT) / 60000)) : 0}"
+      },
+      {
+        "name": "mealAgo",
+        "value": "${mealMins < 60 ? mealMins + ' min' : Math.floor(mealMins / 60) + ' h ' + (mealMins % 60) + ' min'}"
+      },
+      {
+        "name": "mealTxt",
+        "value": "${has && g.mealT ? (es ? 'Carbohidratos: ' : 'Carbs: ') + (g.mealG != null ? g.mealG + ' g, ' : '') + (es ? 'hace ' + mealAgo : mealAgo + ' ago') : ''}"
+      },
+      {
+        "name": "sensorTxt",
+        "value": "${has && g.sensorH != null ? 'Sensor: ' + (g.sensorH >= 48 ? Math.floor(g.sensorH / 24) + (es ? ' días' : ' days') : g.sensorH + ' h') + (es ? ' restantes' : ' left') : ''}"
+      },
+      {
+        "name": "graphTxt",
+        "value": "${has && g.range ? (es ? 'Últimas 3 h · meta ' : 'Last 3 h · target ') + g.range : ''}"
       }
     ],
     "items": [
@@ -140,81 +211,132 @@
         ],
         "item": {
           "type": "Container",
+          "direction": "${wide ? 'row' : 'column'}",
           "width": "100%",
           "height": "100%",
           "backgroundColor": "${lowNow ? '#3a1210' : '#0d1117'}",
           "opacity": "${dim ? 0.3 : 1}",
-          "paddingLeft": "6vw",
-          "paddingRight": "6vw",
+          "paddingLeft": "${wide ? '4vw' : '6vw'}",
+          "paddingRight": "${wide ? '4vw' : '6vw'}",
           "paddingTop": "5vh",
           "paddingBottom": "5vh",
           "items": [
             {
               "type": "Container",
-              "direction": "row",
-              "justifyContent": "spaceBetween",
-              "alignItems": "center",
+              "width": "${wide ? '42%' : '100%'}",
+              "shrink": 0,
+              "justifyContent": "${wide ? 'center' : 'start'}",
               "items": [
                 {
-                  "type": "Text",
-                  "text": "${has ? g.title : (es ? 'Mi Azúcar' : 'My Sugar')}",
-                  "fontSize": "${wide ? '7vh' : '9vw'}",
-                  "color": "#8b949e",
-                  "maxLines": 1,
-                  "shrink": 1
+                  "type": "Container",
+                  "direction": "row",
+                  "justifyContent": "spaceBetween",
+                  "alignItems": "center",
+                  "items": [
+                    {
+                      "type": "Text",
+                      "text": "${has ? g.title : (es ? 'Mi Azúcar' : 'My Sugar')}",
+                      "fontSize": "${wide ? '6vh' : '9vw'}",
+                      "color": "#8b949e",
+                      "maxLines": 1,
+                      "shrink": 1
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${alert}",
+                      "fontSize": "${wide ? '6vh' : '8vw'}",
+                      "fontWeight": "700",
+                      "color": "${g.color}",
+                      "maxLines": 1
+                    }
+                  ]
+                },
+                {
+                  "type": "Container",
+                  "direction": "row",
+                  "alignItems": "end",
+                  "items": [
+                    {
+                      "type": "Text",
+                      "text": "${has ? g.value : '—'}",
+                      "fontSize": "${wide ? '26vh' : '30vw'}",
+                      "fontWeight": "700",
+                      "color": "${stale ? '#8b949e' : g.color}",
+                      "maxLines": 1
+                    },
+                    {
+                      "type": "Text",
+                      "text": "${has ? g.arrow : ''}",
+                      "fontSize": "${wide ? '16vh' : '18vw'}",
+                      "color": "${stale ? '#8b949e' : g.color}",
+                      "paddingLeft": "1vw",
+                      "paddingBottom": "${wide ? '2vh' : '2vw'}"
+                    }
+                  ]
                 },
                 {
                   "type": "Text",
-                  "text": "${alert}",
+                  "text": "${change}",
+                  "display": "${change ? 'normal' : 'none'}",
                   "fontSize": "${wide ? '7vh' : '8vw'}",
                   "fontWeight": "700",
-                  "color": "${g.color}",
-                  "maxLines": 1
-                }
-              ]
-            },
-            {
-              "type": "Container",
-              "direction": "row",
-              "alignItems": "end",
-              "items": [
-                {
-                  "type": "Text",
-                  "text": "${has ? g.value : '—'}",
-                  "fontSize": "${wide ? '30vh' : '30vw'}",
-                  "fontWeight": "700",
-                  "color": "${stale ? '#8b949e' : g.color}",
+                  "color": "#f2f5f8",
                   "maxLines": 1
                 },
                 {
                   "type": "Text",
-                  "text": "${has ? g.arrow : ''}",
-                  "fontSize": "${wide ? '19vh' : '18vw'}",
-                  "color": "${stale ? '#8b949e' : g.color}",
-                  "paddingLeft": "2vw",
-                  "paddingBottom": "2vw"
+                  "text": "${ago}",
+                  "fontSize": "${wide ? '5.5vh' : '7vw'}",
+                  "color": "#8b949e",
+                  "maxLines": 2,
+                  "paddingBottom": "${wide ? '2vh' : '0'}"
+                },
+                {
+                  "type": "Text",
+                  "text": "${tirTxt}",
+                  "display": "${wide && tirTxt ? 'normal' : 'none'}",
+                  "fontSize": "5vh",
+                  "color": "#c9d1d9",
+                  "maxLines": 1
+                },
+                {
+                  "type": "Text",
+                  "text": "${spanTxt}",
+                  "display": "${wide && spanTxt ? 'normal' : 'none'}",
+                  "fontSize": "5vh",
+                  "color": "#c9d1d9",
+                  "maxLines": 1
+                },
+                {
+                  "type": "Text",
+                  "text": "${iobTxt}",
+                  "display": "${wide && iobTxt ? 'normal' : 'none'}",
+                  "fontSize": "5vh",
+                  "color": "#c9d1d9",
+                  "maxLines": 1
+                },
+                {
+                  "type": "Text",
+                  "text": "${mealTxt}",
+                  "display": "${wide && mealTxt ? 'normal' : 'none'}",
+                  "fontSize": "5vh",
+                  "color": "#c9d1d9",
+                  "maxLines": 1
+                },
+                {
+                  "type": "Text",
+                  "text": "${sensorTxt}",
+                  "display": "${wide && sensorTxt ? 'normal' : 'none'}",
+                  "fontSize": "5vh",
+                  "color": "#c9d1d9",
+                  "maxLines": 1
                 }
               ]
-            },
-            {
-              "type": "Text",
-              "text": "${change}",
-              "display": "${change ? 'normal' : 'none'}",
-              "fontSize": "${wide ? '7vh' : '8vw'}",
-              "fontWeight": "700",
-              "color": "#f2f5f8",
-              "maxLines": 1
-            },
-            {
-              "type": "Text",
-              "text": "${ago}",
-              "fontSize": "${wide ? '6vh' : '7vw'}",
-              "color": "#8b949e",
-              "maxLines": 2
             },
             {
               "type": "VectorGraphic",
               "source": "spark",
+              "display": "${wide ? 'none' : 'normal'}",
               "width": "100%",
               "grow": 1,
               "scale": "fill",
@@ -222,6 +344,36 @@
               "line": "${has ? g.line : ''}",
               "band": "${has ? g.band : ''}",
               "stroke": "${stale ? '#6e7681' : '#f2f5f8'}"
+            },
+            {
+              "type": "Container",
+              "display": "${wide ? 'normal' : 'none'}",
+              "grow": 1,
+              "shrink": 1,
+              "height": "100%",
+              "paddingLeft": "3vw",
+              "items": [
+                {
+                  "type": "VectorGraphic",
+                  "source": "sparkWide",
+                  "width": "100%",
+                  "grow": 1,
+                  "scale": "fill",
+                  "line": "${has ? (g.lineW || g.line) : ''}",
+                  "band": "${has ? (g.bandW || g.band) : ''}",
+                  "stroke": "${stale ? '#6e7681' : '#f2f5f8'}"
+                },
+                {
+                  "type": "Text",
+                  "text": "${graphTxt}",
+                  "display": "${graphTxt ? 'normal' : 'none'}",
+                  "fontSize": "4.5vh",
+                  "color": "#8b949e",
+                  "textAlign": "right",
+                  "maxLines": 1,
+                  "paddingTop": "1vh"
+                }
+              ]
             }
           ]
         }
