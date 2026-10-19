@@ -40,40 +40,15 @@ watch face. xDrip+ ("Nightscout follower") and Juggluco accept the same address 
 4. For the colour, set the text **Paint → Color** to the formula `$wg("<widget link>", json, .color)$`.
 5. KWGT refreshes web data about every 15 minutes (Settings → Advanced → Update interval).
 
-## iPhone home screen (Scriptable)
+## iPhone home screen and lock screen (Scriptable)
 
-Install **Scriptable** (free), make a new script, paste this, put your widget link on the first
-line, then add a Scriptable widget to the home screen and pick the script.
+The script lives at **su94r.com/widgets/su94r-scriptable.js** (source: `public/widgets/su94r-scriptable.js`).
 
-```js
-// su94r glucose widget for Scriptable (iPhone / iPad).
-const LINK = 'https://YOUR-SERVER/screen/glance?token=YOUR-TOKEN';
+1. In su94r Mini: **Settings → Health vault → Watch faces and phone widgets → Make a link**, and send the widget link to the iPhone.
+2. On the iPhone open **su94r.com/widgets/su94r-scriptable.js** in Safari, select all and copy. In **Scriptable** (free) tap **+**, paste, name it `su94r`.
+3. Add a Scriptable widget to the home screen, or to the lock screen (press and hold the lock screen → **Customize** → **Lock Screen** → add Scriptable). Press and hold the widget → **Edit Widget** → Script **su94r**, Parameter: the widget link.
 
-const w = new ListWidget();
-w.backgroundColor = new Color('#0d1117');
-try {
-  const g = await new Request(LINK).loadJSON();
-  if (g.error) throw new Error(g.error);
-  const name = w.addText(g.name || 'Glucose');
-  name.font = Font.mediumSystemFont(12);
-  name.textColor = new Color('#8b949e');
-  const value = w.addText(`${g.value} ${g.arrow || ''}`);
-  value.font = Font.boldRoundedSystemFont(40);
-  value.textColor = new Color(g.color || '#3fb950');
-  const sub = w.addText(`${g.delta ? `${g.delta} · ` : ''}${g.ago}`);
-  sub.font = Font.systemFont(12);
-  sub.textColor = new Color('#c9d1d9');
-} catch (e) {
-  const t = w.addText(`su94r: ${e.message}`);
-  t.textColor = new Color('#ff5d55');
-  t.font = Font.systemFont(12);
-}
-w.refreshAfterDate = new Date(Date.now() + 5 * 60e3);
-if (config.runsInWidget) Script.setWidget(w); else await w.presentSmall();
-Script.complete();
-```
-
-iOS decides how often widgets refresh (often every 5–15 minutes).
+Home screen: name, number and arrow in colour, the change over 15 minutes, how old it is, a red background during a low. Lock screen (inline, round or rectangular): the number, arrow and a LOW / HIGH / OLD word, since iOS tints lock-screen widgets. The link stays in the widget's Parameter, never in the script. iOS decides how often widgets refresh (often every 5–15 minutes); it is not an alarm.
 
 ## Echo Show
 
