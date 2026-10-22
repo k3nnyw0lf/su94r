@@ -11,6 +11,7 @@ import { addEvents, removeEvents } from './events.js';
 import { isLegacy, NEW_ID } from './handover.js';
 import { parseScreenLink, claimScreen, listScreens, removeScreen, DEFAULT_SERVER, serverStatus, connectServer } from './voice.js';
 import { insulinTiming } from './insights.js';
+import { pairStart, pairPoll } from './screen.js';
 import { searchMedication, defaultUnit, MED_UNITS } from './meds.js';
 import { listDevices, forgetDevice, deviceId, heartbeat } from './sync.js';
 import { PROVIDERS, DEFAULT_MODELS, CLAUDE_MODELS, ollamaModels, pickOllamaModel, connectOpenRouter, describeProvider } from './ai.js';
@@ -447,12 +448,13 @@ function renderAccounts() {
     const li = document.createElement('li');
     const text = document.createElement('div');
     const label = document.createElement('strong');
-    label.textContent = a.label || 'LibreLinkUp account';
+    const screen = a.kind === 'screen';
+    label.textContent = screen ? `su94r family · ${a.label}` : a.label || 'LibreLinkUp account';
     const info = document.createElement('div');
     const n = (a.patientIds || []).length;
     if (!a.session) { info.className = 'bad'; info.textContent = a.state?.message || 'Signed out. Remove it and add it again.'; }
     else if (a.state?.status === 'error') { info.className = 'bad'; info.textContent = a.state.message; }
-    else info.textContent = `Following ${n} ${n === 1 ? 'person' : 'people'}`;
+    else info.textContent = screen ? `Showing ${n} ${n === 1 ? 'person' : 'people'} from su94r` : `Following ${n} ${n === 1 ? 'person' : 'people'}`;
     text.append(label, info);
     const rm = document.createElement('button');
     rm.type = 'button';
@@ -540,6 +542,38 @@ $('login').addEventListener('submit', async (e) => {
   if (res?.ok) say(`Signed in. Following ${res.patients} ${res.patients === 1 ? 'person' : 'people'}.`, 'ok');
   else say(res?.error || 'Sign-in failed.', 'error');
   refresh();
+});
+
+// ---- a su94r family by code (screen.js): this browser becomes one of the family's screens ----
+
+let pairTimer = null;
+$('screen-code-btn').addEventListener('click', async () => {
+  const server = DEFAULT_SERVER;
+  const granted = await chrome.permissions.request({ origins: [`${server}/*`] }).catch(() => false);
+  if (!granted) return say('su94r Mini needs permission to reach su94r to show the family.', 'error');
+  clearTimeout(pairTimer);
+  const status = (text) => { $('screen-status').textContent = text; };
+  let pair;
+  try { pair = await pairStart(server); } catch (err) { return say(err.message, 'error'); }
+  $('screen-code').textContent = pair.code;
+  $('screen-pair').hidden = false;
+  status('Waiting for the code on the family\'s settings page…');
+  const until = Date.now() + pair.expiresIn * 1000;
+  const expired = () => status('The code expired. Press Get a code for a new one.');
+  const check = async () => {
+    if (Date.now() > until) return expired();
+    let r;
+    try { r = await pairPoll(server, pair.secret); } catch (err) { status(err.message); pairTimer = setTimeout(check, 5000); return; }
+    if (r.status === 'expired') return expired();
+    if (r.status !== 'paired') { pairTimer = setTimeout(check, 3000); return; }
+    status('Paired. Loading the family…');
+    const added = await chrome.runtime.sendMessage({ type: 'addScreen', server, token: r.token, name: r.name });
+    $('screen-pair').hidden = true;
+    if (!added?.ok) return say(added?.error || 'Could not add the family.', 'error');
+    say(`Showing ${added.patients} ${added.patients === 1 ? 'person' : 'people'} from su94r. Click a name above to open the graph.`, 'ok');
+    refresh();
+  };
+  pairTimer = setTimeout(check, 3000);
 });
 
 $('open-board').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'openBoard' }));

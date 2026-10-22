@@ -18,6 +18,7 @@ import { parseBody } from './vault-import.js';
 import { pullGoogleHealth } from './ghealth.js';
 import { careTick, careRefresh, careClicked } from './care-bg.js';
 import { tempSamples } from './weather.js';
+import { screenData, screenPeople, screenAccountId } from './screen.js';
 
 const NAME = 'su94r Mini';
 const KEEP_MS = 24 * 3600e3;
@@ -312,6 +313,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     openBoard: () => openWindow('board'),
     openAi: () => openWindow(`ai:${msg.pid || ''}`),
     login: () => addAccount(msg.email, msg.password),
+    addScreen: () => addScreen(msg.server, msg.token, msg.name),
     removeAccount: () => removeAccount(msg.id),
     signOut: () => removeAccount(null),
     testAlert: () => testAlert(),
@@ -515,6 +517,29 @@ async function addAccount(email, password) {
       'Signed in, but nobody is sharing with this LibreLinkUp account yet. Send an invite from the Libre 3 app and accept it in LibreLinkUp.');
   }
   return { patients: connections.length };
+}
+
+/**
+ * A su94r family (Dexcom, or Libre through su94r) shown here as one of the family's screens: the
+ * settings page paired it with a code (screen.js) and hands over the screen token. No password here.
+ */
+async function addScreen(server, token, name) {
+  if (!server || !token) throw new Error('Pair with a code first.');
+  const { accounts = [] } = await local.get('accounts');
+  const account = {
+    id: await screenAccountId(token),
+    kind: 'screen',
+    label: String(name || '').trim().slice(0, 40) || 'su94r family',
+    server: String(server).replace(/\/+$/, ''),
+    session: { token },
+    state: { status: 'ok', message: '', at: Date.now() },
+    patientIds: [],
+  };
+  const settings = await getSettings();
+  await local.set({ accounts: [...accounts.filter((a) => a.id !== account.id), account], settings: { ...settings, demo: false } });
+  await poll();
+  const { accounts: now = [] } = await local.get('accounts');
+  return { patients: (now.find((a) => a.id === account.id)?.patientIds || []).length };
 }
 
 // Removing an account forgets its login and live view; saved history stays until deleted in Settings.
@@ -753,7 +778,7 @@ async function refreshServer() {
   const { serverRefreshAt = 0, accounts = [] } = await local.get(['serverRefreshAt', 'accounts']);
   if (Date.now() - serverRefreshAt < 6 * 3600e3) return;
   await local.set({ serverRefreshAt: Date.now() });
-  for (const a of accounts.filter((x) => x.session?.token)) {
+  for (const a of accounts.filter((x) => x.session?.token && x.kind !== 'screen')) {
     try { await refreshServerSession(settings.screenLink, a.session); return; } catch (e) { if (e.status !== 403) return; }   // 403: another account; try the next
   }
 }
@@ -1254,6 +1279,7 @@ function merge(stored, pts, gap, now) {
 
 async function pollAccount(acc, settings) {
   if (!acc.session) return;
+  if (acc.kind === 'screen') return pollScreen(acc);
   try {
     const r = await getConnections(acc.session);
     acc.session = r.session;
@@ -1308,18 +1334,62 @@ async function pollAccount(acc, settings) {
     acc.state = { status: 'ok', message: '', at: now };
     chrome.notifications.clear(`glucose|signedOut-${acc.id}`);
   } catch (e) {
-    const at = Date.now();
-    if (e.code === 'auth') {
-      acc.session = null;
-      acc.state = { status: 'signed-out', message: e.message, at };
-    } else {
-      acc.state = { status: 'error', message: e.message, at };
+    await accountFailed(acc, e);
+  }
+}
+
+// A su94r family screen: the family's su94r server sends its people with up to a day of readings.
+async function pollScreen(acc) {
+  try {
+    const now = Date.now();
+    const before = new Set(acc.patientIds || []);
+    const people = screenPeople(acc, await screenData(acc.server, acc.session.token));
+    acc.patientIds = people.map((x) => x.pid);
+    for (const x of people) {
+      const key = ptKey(x.pid);
+      const { [key]: prev = {} } = await local.get(key);
+      if (x.latest) await saveReadings(x.pid, [x.latest], 'live');
+      if (x.history.length) await saveReadings(x.pid, x.history, 'hist');
+      await local.set({
+        [key]: {
+          ...prev,
+          pid: x.pid,
+          accountId: acc.id,
+          name: x.name,
+          units: x.units,
+          low: x.low,
+          high: x.high,
+          sensor: prev.sensor || null,
+          latest: x.latest || prev.latest || null,
+          live: x.latest ? merge(prev.live, [x.latest], 30e3, now) : prev.live || [],
+          hist: merge(prev.hist, x.history, 60e3, now),
+          graphAt: now,
+          state: { status: 'ok', message: '', at: now },
+        },
+      });
     }
-    for (const pid of acc.patientIds || []) {
-      const key = ptKey(pid);
-      const { [key]: p } = await local.get(key);
-      if (p) await local.set({ [key]: { ...p, state: acc.state } });
-    }
+    const removed = [...before].filter((pid) => !acc.patientIds.includes(pid));
+    if (removed.length) await local.remove(removed.map(ptKey));
+    acc.state = { status: 'ok', message: '', at: now };
+    chrome.notifications.clear(`glucose|signedOut-${acc.id}`);
+  } catch (e) {
+    await accountFailed(acc, e);
+  }
+}
+
+// An account that cannot read: signed out ('auth', alerts say so until fixed) or a passing error.
+async function accountFailed(acc, e) {
+  const at = Date.now();
+  if (e.code === 'auth') {
+    acc.session = null;
+    acc.state = { status: 'signed-out', message: e.message, at };
+  } else {
+    acc.state = { status: 'error', message: e.message, at };
+  }
+  for (const pid of acc.patientIds || []) {
+    const key = ptKey(pid);
+    const { [key]: p } = await local.get(key);
+    if (p) await local.set({ [key]: { ...p, state: acc.state } });
   }
 }
 
@@ -1412,9 +1482,10 @@ async function checkAlerts() {
     }
     if (now - (accountAlerts[acc.id] || 0) < SIGNED_OUT_REPEAT_MS) continue;
     const names = patients.filter((p) => p.accountId === acc.id).map((p) => firstName(p.name)).filter(Boolean);
+    const screen = acc.kind === 'screen';
     await notify(`signedOut-${acc.id}`, {
-      title: 'LibreLinkUp signed out — glucose alerts are OFF',
-      message: `${acc.label || 'An account'}${names.length ? ` (${names.join(', ')})` : ''}: no new readings or alerts until you sign in again. Click to sign in.`,
+      title: screen ? 'su94r family screen removed — glucose alerts are OFF' : 'LibreLinkUp signed out — glucose alerts are OFF',
+      message: `${acc.label || 'An account'}${names.length ? ` (${names.join(', ')})` : ''}: no new readings or alerts until you ${screen ? 'pair this computer again' : 'sign in again'}. Click to ${screen ? 'pair it' : 'sign in'}.`,
     }, { urgent: a.enabled, snooze: false, sticky: true });
     accountAlerts[acc.id] = now;
     accountsChanged = true;

@@ -67,6 +67,7 @@ h2 { font-size: 15px; margin: 0 0 10px; }
 .label { color: var(--muted); font-size: 12px; }
 .big { font-size: 16px; font-weight: 600; }
 .hint { margin: 0; color: var(--muted); }
+.pair-code { margin: 12px 0 4px; font: 700 40px/1.1 ui-monospace, Consolas, monospace; letter-spacing: .12em; }
 
 form { display: flex; flex-direction: column; gap: 12px; }
 

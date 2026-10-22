@@ -36,8 +36,22 @@
     </section>
 
     <section class="panel">
-      <h2>LibreLinkUp accounts</h2>
+      <h2>Accounts</h2>
       <ul id="accounts" class="accounts"></ul>
+      <details id="add-screen">
+        <summary>Show a su94r family (Dexcom or Libre) with a code</summary>
+        <p class="hint">For a family that signed up at <strong>su94r.com/sugar/family</strong> (Dexcom G7, G6 or ONE+, or Libre through su94r). This computer becomes one of the family's screens. No Dexcom or Libre password goes in this browser.</p>
+        <button id="screen-code-btn" type="button" class="primary">Get a code</button>
+        <div id="screen-pair" hidden>
+          <p id="screen-code" class="pair-code"></p>
+          <ol>
+            <li>On a phone or computer open <strong>su94r.com/sugar/family</strong> and sign in with the family's Dexcom login (or their Libre follower).</li>
+            <li>Under <strong>Screens</strong>, type this code, give it a name (like "Computer") and press <strong>Add screen</strong>.</li>
+            <li>This page notices within a few seconds. The code works for 15 minutes.</li>
+          </ol>
+          <p id="screen-status" class="hint" role="status" aria-live="polite"></p>
+        </div>
+      </details>
       <details id="add-account">
         <summary id="add-summary">Add a LibreLinkUp account</summary>
         <p class="hint">Use a <strong>LibreLinkUp</strong> login (the follower app). One account can follow many people; care teams can add several accounts.</p>

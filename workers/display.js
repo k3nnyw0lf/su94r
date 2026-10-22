@@ -230,7 +230,7 @@ let pairing=false;
 function showCode(code){
   $('title').textContent='Show your glucose here';$('status').textContent='';
   const main=$('main');main.className='pair';delete main.dataset.c;
-  main.innerHTML='<div class="code">'+esc(code||'\u2026')+'</div><div class="how">On your computer open <b>su94r Mini \u2192 Settings \u2192 Alexa and screens \u2192 Screens and widgets</b>, type this code and give this screen a name. The code changes every 15 minutes.</div>';
+  main.innerHTML='<div class="code">'+esc(code||'\u2026')+'</div><div class="how">Type this code with a name for this screen on your <b>su94r settings page</b> (su94r.com/sugar/family \u2192 Screens), or in <b>su94r Mini \u2192 Settings \u2192 Alexa and screens \u2192 Screens and widgets</b>. The code changes every 15 minutes.</div>';
 }
 async function pairStep(){
   pairing=true;

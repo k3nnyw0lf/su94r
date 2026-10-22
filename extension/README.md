@@ -1,8 +1,8 @@
-# su94r Mini, works with FreeStyle Libre (browser extension)
+# su94r Mini, works with FreeStyle Libre and Dexcom (browser extension)
 
-Live FreeStyle Libre glucose on a laptop or a ward screen, as a Chrome / Edge extension. Part of [su94r](https://su94r.com). Formerly "Libre Mini Graph".
+Live FreeStyle Libre glucose (or Dexcom, through a su94r family account) on a laptop or a ward screen, as a Chrome / Edge extension. Part of [su94r](https://su94r.com). Formerly "Libre Mini Graph".
 
-> **Not a medical device.** Readings come through LibreLinkUp and can be late or missing. Use your Libre app or reader, and its alarms, for treatment decisions. su94r Mini never suggests an insulin dose. Not made by or affiliated with Abbott.
+> **Not a medical device.** Readings come through LibreLinkUp and can be late or missing. Use your Libre app or reader, and its alarms, for treatment decisions. su94r Mini never suggests an insulin dose. Not made by or affiliated with Abbott or Dexcom.
 
 ## What it does
 
@@ -53,6 +53,16 @@ Load the `su94r-mini` folder (Load unpacked). su94r Mini finds the old copy, bri
 2. Windows: right-click `setup-this-pc.ps1` → **Run with PowerShell**. It copies the folder path, opens the extensions page and installs the pin helper. (Or open `chrome://extensions` yourself.)
 3. Turn on **Developer mode**, click **Load unpacked**, paste the path and choose **Select Folder**.
 4. Pin the extension's icon (puzzle piece → pin). The settings page opens by itself.
+
+## Show a su94r family (Dexcom, or Libre through su94r)
+
+For a family that signed up at **su94r.com/sugar/family** (Dexcom G7, G6 or ONE+, or a Libre follower). This computer becomes one of the family's screens, like their Tesla: no Dexcom or Libre password goes in the browser.
+
+1. Settings → **Accounts** → **Show a su94r family (Dexcom or Libre) with a code** → **Get a code**.
+2. On a phone or computer open **su94r.com/sugar/family**, sign in with the family's login, and under **Screens** type the code with a name (like "Computer") → **Add screen**.
+3. Within a few seconds the family appears here: mini window, board, badge and alerts. Set the alert numbers in Settings → Alerts to the doctor's numbers. Dexcom Follow stays the official alarm.
+
+Removing the screen on the family's settings page stops it here, and su94r Mini says so until it is paired again.
 
 ## Turn on sharing (once per person)
 
