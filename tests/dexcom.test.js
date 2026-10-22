@@ -1,7 +1,7 @@
 // Dexcom Share (workers/dexcom.js): sign-in in two steps, readings, trends, and the errors that
 // must stop retries (bad password, a locked account).
 import { describe, it, expect } from 'vitest';
-import { dexcomLogin, dexcomReadings, dexcomTrend, dexcomTime, DEXCOM_APP_ID, DexcomError } from '../workers/dexcom.js';
+import { dexcomLogin, dexcomReadings, dexcomTrend, dexcomTime, dexcomUsername, DEXCOM_APP_ID, DexcomError } from '../workers/dexcom.js';
 
 const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
@@ -51,6 +51,18 @@ describe('Dexcom Share', () => {
     expect(s.calls[2].search).toMatch(/minutes=720&maxCount=144/);
     const ous = await dexcomLogin('p', 'right', { region: 'ous', fetchImpl: share().fetchImpl });
     expect(ous.host).toBe('shareous1.dexcom.com');
+  });
+
+  it('a mobile-number login goes to Share as + country code and number; emails and usernames stay as typed', async () => {
+    expect(['(239) 555-0123', '239-555-0123', '239.555.0123', '2395550123', '1 239 555 0123', '+1 239 555 0123'].map((s) => dexcomUsername(s))).toEqual(Array(6).fill('+12395550123'));
+    expect(dexcomUsername('+44 7700 900123', 'ous')).toBe('+447700900123');
+    expect(dexcomUsername('07700 900123', 'ous')).toBe('07700 900123');   // no country code to guess outside the US
+    expect(dexcomUsername(' Parent@Example.test ')).toBe('Parent@Example.test');
+    expect(dexcomUsername('sofia2024')).toBe('sofia2024');
+    expect(dexcomUsername('12345')).toBe('12345');
+    const s = share();
+    await dexcomLogin('(239) 555-0123', 'right', { fetchImpl: s.fetchImpl });
+    expect(s.calls[0].body.accountName).toBe('+12395550123');
   });
 
   it('a wrong password is "credentials", too many tries is "locked", an ended session is "auth"', async () => {

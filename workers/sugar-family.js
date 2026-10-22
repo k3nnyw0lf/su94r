@@ -266,7 +266,11 @@ export async function familyRoute(path, request, url, env, store, deps, { html, 
     const form = await request.formData();
     const lang = form.get('lang') === 'es' ? 'es' : 'en';
     const r = await signIn(form, store, deps, { lang, requireConsent: false });
-    if (r.error) return html(familySignInPage({ lang, error: r.error, email: r.email, source: r.source, person: r.person }), 400);
+    if (r.error) {
+      // Only the reason, never the username: it tells which step a family is stuck on.
+      console.warn(`sugar/family sign-in refused: ${r.source} ${r.error}`);
+      return html(familySignInPage({ lang, error: r.error, email: r.email, source: r.source, person: r.person }), 400);
+    }
     await ensureNight(store, r.user);
     const token = randomToken(24);
     await store.putToken({ hash: await sha256(token), user_id: r.user.id, kind: 'manage', expires_at: new Date(Date.now() + MANAGE_TTL).toISOString() });

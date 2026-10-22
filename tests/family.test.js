@@ -1,7 +1,7 @@
 // su94r family accounts (workers/sugar-family.js): a Dexcom family signs in once, sets the
 // doctor's numbers, pairs its own screens, and gets the backup safety net naming the baby. Each
 // family sees only itself; the owner's screens never list it.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { sugarRoute, CONSENT_ITEMS, resetSugarCache, unseal, sugarTick } from '../workers/sugar.js';
 import { familyScreenPayload } from '../workers/sugar-family.js';
 import { screenStore } from '../workers/screens.js';
@@ -64,7 +64,7 @@ describe('a Dexcom family signs in', () => {
     expect(await body(await route('sugar/family', post('sugar/family', signin({ adult_terms: '' })), store, dx))).toMatch(/tick every box/);
     expect(await body(await route('sugar/family', post('sugar/family', signin({ person: '' })), store, dx))).toMatch(/name Alexa should say/);
     expect(await body(await route('sugar/family', post('sugar/family', signin({ password: 'nope' })), store, dx))).toMatch(/Dexcom did not accept/);
-    expect(await body(await route('sugar/family', post('sugar/family', signin()), store, dexcom({ points: [] })))).toMatch(/no readings to share yet/);
+    expect(await body(await route('sugar/family', post('sugar/family', signin()), store, dexcom({ points: [] })))).toMatch(/no readings from the last day[^<]*dependent/);
     expect(store.users.size).toBe(0);
 
     const page = await body(await route('sugar/family', post('sugar/family', signin()), store, dx));
@@ -86,6 +86,27 @@ describe('a Dexcom family signs in', () => {
     const again = await body(await route('sugar/family', post('sugar/family', form({ source: 'dexcom', email: 'parent@example.test', password: 'baby-pass' })), store, dx));
     expect(again).toMatch(/su94r · Sofia/);
     expect(store.users.size).toBe(1);
+  });
+
+  it('a mobile-number login is kept as +1 and the number, however it was typed; a refusal logs only the reason', async () => {
+    const store = memStore(); const dx = dexcom();
+    const names = [];
+    dx.dexcomLogin = async (user, pw) => { names.push(user); return { host: 'share2.dexcom.com', sessionId: 'sess', at: Date.now() }; };
+    expect(await body(await route('sugar/family', post('sugar/family', signin({ email: '(239) 555-0123' })), store, dx))).toMatch(/Your family account is ready/);
+    const u = [...store.users.values()][0];
+    expect(u.email_hash).toBe(await sha256('dexcom:+12395550123'));
+    expect(await unseal(store, u.libre_cred)).toEqual({ email: '+12395550123', password: 'baby-pass' });
+    expect(await body(await route('sugar/family', post('sugar/family', form({ source: 'dexcom', email: '239-555-0123', password: 'baby-pass' })), store, dx))).toMatch(/su94r · Sofia/);
+    expect(store.users.size).toBe(1);
+    expect(names).toEqual(['+12395550123', '+12395550123']);
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const page = await body(await route('sugar/family', post('sugar/family', signin({ email: 'other@example.test', password: 'nope' })), store, dexcom()));
+      expect(page).toMatch(/child&#39;s own Dexcom login \(a dependent account\)/);
+      expect(warn).toHaveBeenCalledWith('sugar/family sign-in refused: dexcom dexcom_credentials');
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('example.test');
+    } finally { warn.mockRestore(); }
   });
 });
 

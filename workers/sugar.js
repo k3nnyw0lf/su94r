@@ -22,7 +22,7 @@ import { widgetContent, pushWidget } from './widget.js';
 import { sha256, randomToken } from './screens.js';
 import { linkPage, deletePage, donePage, docPage } from './sugar-page.js';
 import { legalPage, LEGAL_KINDS } from './sugar-legal.js';
-import { dexcomLogin as dxLogin, dexcomReadings as dxReadings } from './dexcom.js';
+import { dexcomLogin as dxLogin, dexcomReadings as dxReadings, dexcomUsername } from './dexcom.js';
 import { familyRoute, familyTick, FAMILY_PATHS } from './sugar-family.js';
 
 export const CONSENT_VERSION = '2026-10-19';
@@ -259,7 +259,10 @@ async function linkRoute(request, url, env, store, deps) {
   const lang = form.get('lang') === 'es' ? 'es' : 'en';
   if (!ok) return html(donePage(lang, 'bad'), 400);
   const r = await signIn(form, store, deps, { lang, requireConsent: true });
-  if (r.error) return html(linkPage({ lang, params: p, error: r.error, email: r.email, source: r.source, person: r.person }), 400);
+  if (r.error) {
+    console.warn(`sugar/link sign-in refused: ${r.source} ${r.error}`);
+    return html(linkPage({ lang, params: p, error: r.error, email: r.email, source: r.source, person: r.person }), 400);
+  }
   const { user } = r;
   const code = randomToken(24);
   await store.putToken({ hash: await sha256(code), user_id: user.id, kind: 'code', redirect_uri: p.redirect_uri, expires_at: new Date(Date.now() + CODE_TTL).toISOString() });
@@ -279,10 +282,11 @@ const clean = (s, n = 40) => String(s ?? '').replace(/[\u0000-\u001f<>]/g, '').t
  */
 export async function signIn(form, store, deps = {}, { lang = 'en', requireConsent = true } = {}) {
   const source = form.get('source') === 'dexcom' ? 'dexcom' : 'libre';
-  const email = clean(form.get('email'), 200);
+  const region = ['us', 'ous', 'jp'].includes(form.get('region')) ? form.get('region') : 'us';
+  // A Dexcom mobile-number login is kept as +country code and number, so it always finds the same account.
+  const email = source === 'dexcom' ? dexcomUsername(clean(form.get('email'), 200), region) : clean(form.get('email'), 200);
   const password = String(form.get('password') || '');
   const person = clean(form.get('person'));
-  const region = ['us', 'ous', 'jp'].includes(form.get('region')) ? form.get('region') : 'us';
   const fail = (error) => ({ error, email, source, person });
   if (!email || !password) return fail('missing');
   const emailHash = await sha256(source === 'dexcom' ? `dexcom:${email.toLowerCase()}` : email.toLowerCase());
@@ -501,7 +505,7 @@ async function deleteRoute(request, url, store, deps) {
   const email = String(form.get('email') || '').trim();
   const password = String(form.get('password') || '');
   // A Libre follower account, or a Dexcom account (its email is kept under "dexcom:").
-  const u = email && (await store.userByEmailHash(await sha256(email.toLowerCase())) || await store.userByEmailHash(await sha256(`dexcom:${email.toLowerCase()}`)));
+  const u = email && (await store.userByEmailHash(await sha256(email.toLowerCase())) || await store.userByEmailHash(await sha256(`dexcom:${dexcomUsername(email).toLowerCase()}`)));
   if (!u) return html(deletePage(lang, 'notfound'), 404);
   const cred = await unseal(store, u.libre_cred).catch(() => null);
   if (!cred || cred.password !== password) {

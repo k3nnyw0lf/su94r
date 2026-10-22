@@ -26,6 +26,22 @@ export function dexcomTime(s) {
   return m ? Number(m[1]) : NaN;
 }
 
+/**
+ * The username as Share expects it. Newer Dexcom accounts sign in with a mobile number, which
+ * Share takes as + country code and number: a US number typed as (239) 555-0123 or 2395550123
+ * becomes +12395550123, a number typed with + keeps its own country code. Emails and plain
+ * usernames are only trimmed.
+ */
+export function dexcomUsername(raw, region = 'us') {
+  const s = String(raw ?? '').trim();
+  if (!s || s.includes('@') || /[a-z]/i.test(s)) return s;
+  const digits = s.replace(/[\s().-]/g, '');
+  if (/^\+\d{8,15}$/.test(digits)) return digits;
+  if (region === 'us' && /^\d{10}$/.test(digits)) return `+1${digits}`;
+  if (region === 'us' && /^1\d{10}$/.test(digits)) return `+${digits}`;
+  return s;
+}
+
 function classify(status, body) {
   const code = String(body?.Code || '');
   const text = `${code} ${body?.Message || ''}`;
@@ -57,8 +73,9 @@ async function call(host, path, body, fetchImpl) {
 /** Signs in to Dexcom Share. region: us (default), ous (outside the US) or jp. */
 export async function dexcomLogin(username, password, { region = 'us', fetchImpl = (...a) => fetch(...a) } = {}) {
   const host = DEXCOM_HOSTS[region] || DEXCOM_HOSTS.us;
-  if (!username || !password) throw new DexcomError('Enter the Dexcom username and password.', 'credentials');
-  const accountId = await call(host, 'General/AuthenticatePublisherAccount', { accountName: username, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
+  const accountName = dexcomUsername(username, region);
+  if (!accountName || !password) throw new DexcomError('Enter the Dexcom username and password.', 'credentials');
+  const accountId = await call(host, 'General/AuthenticatePublisherAccount', { accountName, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
   if (typeof accountId !== 'string' || !accountId || accountId === ZERO_ID) throw new DexcomError('Dexcom did not accept that username and password.', 'credentials');
   const sessionId = await call(host, 'General/LoginPublisherAccountById', { accountId, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
   if (typeof sessionId !== 'string' || !sessionId || sessionId === ZERO_ID) throw new DexcomError('Dexcom did not accept that username and password.', 'credentials');
