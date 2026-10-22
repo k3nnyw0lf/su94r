@@ -98,6 +98,7 @@ text{fill:var(--muted);font-size:max(12px,1.8vh)}
 .viewMenu{position:fixed;left:50%;transform:translateX(-50%);bottom:54px;z-index:6;background:#0d1117;border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px}
 .viewMenu button{background:transparent;color:var(--fg);border:0;border-radius:8px;padding:10px 16px;font-size:16px;text-align:left;cursor:pointer}
 .viewMenu button[aria-pressed=true]{background:rgba(255,255,255,.12);font-weight:650}
+.viewSep{padding:8px 16px 2px;font-size:12px;color:var(--mut,#8b949e);text-transform:uppercase;letter-spacing:.06em;border-top:1px solid rgba(255,255,255,.12)}
 .sndBtn{position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:6;background:#b42318;color:#fff;border:0;border-radius:20px;padding:10px 18px;font-size:16px;font-weight:650;cursor:pointer}
 /* A phone shared from su94r Mini (QR code): its options. */
 .optsBtn{position:fixed;right:12px;bottom:12px;z-index:5;background:rgba(255,255,255,.1);color:var(--fg);border:1px solid rgba(255,255,255,.2);border-radius:20px;padding:8px 14px;font-size:14px;cursor:pointer}
@@ -132,7 +133,8 @@ function graph(p,hours){
   const x=(t)=>40+(t-from)/(to-from)*(W-90),y=(v)=>10+(1-(v-lo)/(hi-lo))*(H-40);
   let s='<svg viewBox="0 0 '+W+' '+H+'"><rect x="40" y="'+y(p.high)+'" width="'+(W-90)+'" height="'+(y(p.low)-y(p.high))+'" fill="var(--band)"/>';
   for(const v of [p.low,p.high])s+='<text x="'+(W-44)+'" y="'+(y(v)+5)+'">'+fmt(v,p.units)+'</text>';
-  for(let t=Math.ceil(from/3600e3)*3600e3;t<to;t+=3600e3){const d=new Date(t);s+='<line x1="'+x(t)+'" x2="'+x(t)+'" y1="10" y2="'+(H-30)+'" stroke="var(--grid)"/><text x="'+x(t)+'" y="'+(H-6)+'" text-anchor="middle">'+((d.getHours()%12)||12)+(d.getHours()<12?'a':'p')+'</text>'}
+  const st=hours>6?2*3600e3:3600e3;
+  for(let t=Math.ceil(from/st)*st;t<to;t+=st){const d=new Date(t);s+='<line x1="'+x(t)+'" x2="'+x(t)+'" y1="10" y2="'+(H-30)+'" stroke="var(--grid)"/><text x="'+x(t)+'" y="'+(H-6)+'" text-anchor="middle">'+((d.getHours()%12)||12)+(d.getHours()<12?'a':'p')+'</text>'}
   let d='',prev=null;for(const [t,v] of pts){d+=(!prev||t-prev>20*60e3?'M':'L')+x(t).toFixed(1)+','+y(v).toFixed(1);prev=t}
   const c=getComputedStyle(document.querySelector('[data-c]')||document.body).getPropertyValue('--c')||'#3fb950';
   s+='<path d="'+d+'" fill="none" stroke="'+c+'" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>';
@@ -141,6 +143,9 @@ function graph(p,hours){
 }
 // ---- layouts: standard, family dashboard, car (chosen on this screen; ?view= also sets it) ----
 function view(){const q=new URLSearchParams(location.search).get('view');if(q==='car'||q==='family'||q==='standard'){try{localStorage.setItem('su94rView',q)}catch(e){}return q}try{return localStorage.getItem('su94rView')||'standard'}catch(e){return 'standard'}}
+// How many hours the graph shows: 3, 6 or 12 (the server sends 12; ?hours= also sets it).
+const SPANS=[3,6,12];
+function hours(){const q=Number(new URLSearchParams(location.search).get('hours'));if(SPANS.includes(q)){try{localStorage.setItem('su94rHours',String(q))}catch(e){}return q}let h=3;try{h=Number(localStorage.getItem('su94rHours'))||3}catch(e){}return SPANS.includes(h)?h:3}
 const hm=(t)=>new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 function lines(p){const x=p.extra||{};const out=[];
   if(x.iob>0)out.push('Active insulin <b>about '+x.iob+' u</b>');
@@ -185,8 +190,9 @@ function viewButton(){
   if($('viewBtn'))return;
   const b=document.createElement('button');b.id='viewBtn';b.className='viewBtn';b.textContent='◧ View';
   b.onclick=()=>{const old=$('viewMenu');if(old){old.remove();return}const m=document.createElement('div');m.id='viewMenu';m.className='viewMenu';
-    m.innerHTML=[['standard','Standard'],['family','Family dashboard'],['car','Car']].map((v)=>'<button data-v="'+v[0]+'" aria-pressed="'+(view()===v[0])+'">'+v[1]+'</button>').join('');
-    m.onclick=(e)=>{const v=e.target.getAttribute('data-v');if(!v)return;try{localStorage.setItem('su94rView',v)}catch(err){}if(location.search)history.replaceState(null,'',location.pathname+location.hash);m.remove();soundButton();render()};
+    m.innerHTML=[['standard','Standard'],['family','Family dashboard'],['car','Car']].map((v)=>'<button data-v="'+v[0]+'" aria-pressed="'+(view()===v[0])+'">'+v[1]+'</button>').join('')+
+      '<span class="viewSep">Graph</span>'+SPANS.map((h)=>'<button data-h="'+h+'" aria-pressed="'+(hours()===h)+'">Last '+h+' hours</button>').join('');
+    m.onclick=(e)=>{const v=e.target.getAttribute('data-v'),h=e.target.getAttribute('data-h');if(!v&&!h)return;try{if(v)localStorage.setItem('su94rView',v);if(h)localStorage.setItem('su94rHours',h)}catch(err){}if(location.search)history.replaceState(null,'',location.pathname+location.hash);m.remove();soundButton();render()};
     document.body.appendChild(m)};
   document.body.appendChild(b);
 }
@@ -206,7 +212,7 @@ function render(){
     main.className='one';main.dataset.c=c;
     main.innerHTML='<div class="read"><span class="val">'+(l?(l.mg<40?'LO':l.mg>400?'HI':fmt(l.mg,p.units)):'\\u2014')+'</span>'+(l&&c!=='stale'?arrow(l.trend):'')+
       '<div class="side"><span>'+esc(p.units)+'</span><span class="d">'+(c==='stale'?'':delta(p))+'</span><span class="'+(c==='stale'?'warn':'')+'">'+(l?(c==='stale'?'No reading for '+ago(l.t).replace(' ago',''):ago(l.t)):'')+'</span></div></div><div class="graph" id="graph"></div>';
-    graph(p,3);document.title=(l?fmt(l.mg,p.units)+' \\u00b7 ':'')+p.name;
+    graph(p,hours());document.title=(l?fmt(l.mg,p.units)+' \\u00b7 ':'')+p.name;
   }else{
     $('title').textContent=people.length+' people';main.className='tiles';delete main.dataset.c;
     main.innerHTML=people.map((p)=>{const c=cat(p),l=p.latest;return '<div class="tile" data-c="'+c+'"><span class="n">'+esc(p.name)+'</span><div class="r"><span class="val">'+(l?(l.mg<40?'LO':l.mg>400?'HI':fmt(l.mg,p.units)):'\\u2014')+'</span>'+(l&&c!=='stale'?arrow(l.trend):'')+'</div><span class="m">'+(l?(c==='stale'?'<span class="warn">no reading for '+ago(l.t).replace(' ago','')+'</span>':delta(p)+' \\u00b7 '+ago(l.t)):'waiting')+'</span></div>'}).join('');
