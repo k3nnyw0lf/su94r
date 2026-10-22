@@ -26,10 +26,18 @@ belong to.
 - Readings, doses, meals and notes are kept in the extension's storage in your browser.
 - If Chrome sync is on, your markers (doses, meals, notes), shared settings and the list of
   your computers sync through your Google account to your other computers.
+- A su94r family (Dexcom, or Libre through su94r) is shown by pairing the extension as one of
+  the family's su94r screens with a code. The extension keeps only that screen's token; the su94r
+  server sends the family's readings. No Dexcom or Libre password is kept in the browser.
 - Medicine search sends the words you type to the US National Library of Medicine (RxNav).
+- Weather (optional) sends the city you type to Open-Meteo.
 - AI analysis is off until you pick a service and agree. Then a summary of your readings and
   markers (no last name, no account details) goes to that service.
+- Optional, only when you turn them on: a copy in your own Google Drive, Google Health data,
+  and your own su94r server (for Alexa, screens and phone alerts).
 - The optional Windows "keep on top" helper only listens on your own computer (127.0.0.1).
+- No analytics, no ads, no selling or sharing of data; nothing is used for anything but showing
+  and alerting on your glucose.
 
 ## Big screen, Alexa and night monitor (optional, self-hosted)
 

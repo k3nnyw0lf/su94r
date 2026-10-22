@@ -16,7 +16,12 @@ import { putRecords, archivedPatients, loadReadings, firstReading } from './arch
 export const NEW_ID = 'gcdoahfflgpabebcbhohaklfmpnnggpi';
 /** The old copy on the computer this was built on. Old copies elsewhere offer themselves. */
 export const KNOWN_OLD_IDS = ['dhjdngipdopgfdijkdpfoggdjdgfaeif'];
-export const isLegacy = () => !chrome.runtime.getManifest().key;
+/**
+ * The old copy: no fixed key, and its manifest is the old one (only su94r Mini may talk to it, or
+ * the old name). A store install also has no key (the store gives its own ID), and is not the old copy.
+ */
+export const isLegacy = (m = chrome.runtime.getManifest()) => !m.key && !m.update_url
+  && (Boolean(m.externally_connectable?.ids?.includes(NEW_ID)) || /^Libre Mini Graph/.test(m.name || ''));
 
 const CHUNK_MS = 7 * 864e5;
 const NOT_COPIED = ['retired', 'handedOver', 'reopenAfterUpdate', 'justUpdated', 'syncError', 'syncQueue', 'migratedFrom',

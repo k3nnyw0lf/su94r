@@ -2,6 +2,7 @@
 // people (Dexcom or Libre through su94r) as su94r Mini's own people, with no password here.
 import { describe, it, expect } from 'vitest';
 import { pairStart, pairPoll, screenData, screenPeople, screenAccountId, ScreenError } from '../extension/screen.js';
+import { isLegacy, NEW_ID } from '../extension/handover.js';
 
 const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 const SERVER = 'https://su94r.test/';
@@ -25,6 +26,16 @@ function server({ claimAfter = 1, expired = false, gone = false, people = [] } =
   };
   return { calls, fetchImpl };
 }
+
+describe('a store copy (no fixed key) is su94r Mini, not the old copy', () => {
+  it('only the old Libre Mini Graph copy counts as the old copy', () => {
+    expect(isLegacy({ name: 'su94r Mini', key: 'MIIB...' })).toBe(false);                                     // the folder copy
+    expect(isLegacy({ name: 'su94r Mini, works with FreeStyle Libre and Dexcom' })).toBe(false);               // store package
+    expect(isLegacy({ name: 'su94r Mini', update_url: 'https://clients2.google.com/service/update2/crx' })).toBe(false);
+    expect(isLegacy({ name: 'Libre Mini Graph (now su94r Mini)', externally_connectable: { ids: [NEW_ID] } })).toBe(true);
+    expect(isLegacy({ name: 'Libre Mini Graph' })).toBe(true);
+  });
+});
 
 describe('su94r Mini pairs as a family screen', () => {
   it('asks for a code as a screen, waits, then gets the token once', async () => {
