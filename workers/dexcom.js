@@ -7,6 +7,7 @@
 export const DEXCOM_APP_ID = 'd89443d2-327c-4a6f-89e5-496bbb0317db';
 export const DEXCOM_HOSTS = { us: 'share2.dexcom.com', ous: 'shareous1.dexcom.com', jp: 'share.dexcom.jp' };
 const ZERO_ID = '00000000-0000-0000-0000-000000000000';
+const ACCOUNT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class DexcomError extends Error {
   constructor(message, code) { super(message); this.code = code; }
@@ -75,7 +76,9 @@ export async function dexcomLogin(username, password, { region = 'us', fetchImpl
   const host = DEXCOM_HOSTS[region] || DEXCOM_HOSTS.us;
   const accountName = dexcomUsername(username, region);
   if (!accountName || !password) throw new DexcomError('Enter the Dexcom username and password.', 'credentials');
-  const accountId = await call(host, 'General/AuthenticatePublisherAccount', { accountName, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
+  // The account id (the UUID in the address of the Dexcom account site after signing in) skips the username step.
+  const accountId = ACCOUNT_ID.test(accountName) ? accountName.toLowerCase()
+    : await call(host, 'General/AuthenticatePublisherAccount', { accountName, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
   if (typeof accountId !== 'string' || !accountId || accountId === ZERO_ID) throw new DexcomError('Dexcom did not accept that username and password.', 'credentials');
   const sessionId = await call(host, 'General/LoginPublisherAccountById', { accountId, password, applicationId: DEXCOM_APP_ID }, fetchImpl);
   if (typeof sessionId !== 'string' || !sessionId || sessionId === ZERO_ID) throw new DexcomError('Dexcom did not accept that username and password.', 'credentials');

@@ -107,7 +107,7 @@ const FAM = {
     dexcomSteps: [
       'In the <b>Dexcom</b> app open <b>Connections</b> → <b>Share</b> and turn Share on.',
       'Invite at least one follower, for example the other parent, and accept the invitation in the <b>Dexcom Follow</b> app. Dexcom Follow is the official alarm: keep its alerts on.',
-      'Sign in below with the <b>Dexcom account that wears the sensor</b>. <b>For a child</b>, that is the child\'s own login (Dexcom calls it a <b>dependent</b> account), made when the parent added the child: not the parent\'s own login, which has no readings. A mobile-number login works too: type the number.',
+      'Sign in below with the login the <b>Dexcom app on the sensor phone</b> signs in with. If a parent added the child as a <b>dependent</b>, use the child\'s own dependent login, not the parent\'s. A mobile-number login works too: type the number.',
     ],
     login: 'Email, username or mobile number', password: 'Password',
     person: 'Name to say (Dexcom only, for example Sofia)', region: 'Dexcom region (Dexcom only)',
@@ -117,10 +117,10 @@ const FAM = {
     famConsents: 'First time only: tick every box.', famSubmit: 'Sign in',
     errors: {
       person: 'Type the name Alexa should say.',
-      dexcom_credentials: 'Dexcom did not accept that username and password. For a child, use the child\'s own Dexcom login (a dependent account), not the parent\'s. Dexcom locks the account after a few wrong tries: check the login in the Dexcom app before trying again.',
+      dexcom_credentials: 'Dexcom did not accept that login. Dexcom gives this same answer when Share is off or no follower has accepted yet, so first check the Dexcom app: Connections → Share on, and one follower accepted in Dexcom Follow. Use the login the Dexcom app on the sensor phone signs in with (for a dependent child, the child\'s own login). Dexcom locks the account after a few wrong tries: check before trying again.',
       dexcom_locked: 'Dexcom locked the account for a few minutes after failed tries. Wait 10 minutes, then try once.',
       dexcom: 'Dexcom did not answer just now. Try again in a minute.',
-      nodexcom: 'Dexcom signed in, but this account has no readings from the last day. It is often a parent\'s or a follower\'s login instead of the child\'s own (dependent) login, or Share is off. In the Dexcom app turn on Share and invite a follower, then sign in here with the login of the account that wears the sensor.',
+      nodexcom: 'Dexcom signed in, but this account has no readings from the last day. Use the login the Dexcom app on the sensor phone signs in with (for a dependent child, the child\'s own login, not the parent\'s), and check that Share is on with a follower.',
       expired: 'The settings page closed after 30 minutes. Sign in again.',
     },
     now: 'Now', noReading: 'No reading yet', minAgo: 'min ago', justNow: 'just now',
@@ -156,7 +156,7 @@ const FAM = {
     dexcomSteps: [
       'En la app <b>Dexcom</b> abre <b>Conexiones</b> → <b>Compartir</b> y activa Compartir.',
       'Invita al menos a un seguidor, por ejemplo el otro padre o madre, y acepta la invitación en la app <b>Dexcom Follow</b>. Dexcom Follow es la alarma oficial: mantén sus alertas encendidas.',
-      'Inicia sesión abajo con la <b>cuenta Dexcom de quien lleva el sensor</b>. <b>Para un niño o niña</b>, es su propio usuario (Dexcom lo llama cuenta <b>dependiente</b>), creado cuando el padre o la madre agregó al niño: no el usuario propio del padre o la madre, que no tiene lecturas. También sirve un usuario con número de móvil: escribe el número.',
+      'Inicia sesión abajo con el usuario con que inicia sesión la <b>app Dexcom del teléfono del sensor</b>. Si el padre o la madre agregó al niño como <b>dependiente</b>, usa el usuario propio del niño, no el del padre o la madre. También sirve un usuario con número de móvil: escribe el número.',
     ],
     login: 'Correo, usuario o número de móvil', password: 'Contraseña',
     person: 'Nombre que se dirá (solo Dexcom, por ejemplo Sofía)', region: 'Región de Dexcom (solo Dexcom)',
@@ -166,10 +166,10 @@ const FAM = {
     famConsents: 'Solo la primera vez: marca todas las casillas.', famSubmit: 'Iniciar sesión',
     errors: {
       person: 'Escribe el nombre que debe decir Alexa.',
-      dexcom_credentials: 'Dexcom no aceptó ese usuario y contraseña. Para un niño o niña, usa su propio usuario de Dexcom (cuenta dependiente), no el del padre o la madre. Dexcom bloquea la cuenta tras algunos intentos fallidos: revisa el usuario en la app Dexcom antes de volver a intentarlo.',
+      dexcom_credentials: 'Dexcom no aceptó ese usuario. Dexcom da esta misma respuesta cuando Compartir está apagado o ningún seguidor ha aceptado aún, así que primero revisa la app Dexcom: Conexiones → Compartir encendido, y un seguidor aceptado en Dexcom Follow. Usa el usuario con que inicia sesión la app Dexcom del teléfono del sensor (para un niño dependiente, su propio usuario). Dexcom bloquea la cuenta tras algunos intentos fallidos: revisa antes de volver a intentarlo.',
       dexcom_locked: 'Dexcom bloqueó la cuenta unos minutos tras intentos fallidos. Espera 10 minutos y prueba una vez.',
       dexcom: 'Dexcom no respondió ahora. Inténtalo en un minuto.',
-      nodexcom: 'Dexcom inició sesión, pero esta cuenta no tiene lecturas del último día. Suele ser el usuario del padre, la madre o un seguidor en lugar del usuario propio del niño (cuenta dependiente), o Compartir está apagado. En la app Dexcom activa Compartir e invita a un seguidor, y luego inicia sesión aquí con el usuario de quien lleva el sensor.',
+      nodexcom: 'Dexcom inició sesión, pero esta cuenta no tiene lecturas del último día. Usa el usuario con que inicia sesión la app Dexcom del teléfono del sensor (para un niño dependiente, su propio usuario, no el del padre o la madre), y revisa que Compartir esté encendido con un seguidor.',
       expired: 'La página de ajustes se cerró a los 30 minutos. Inicia sesión otra vez.',
     },
     now: 'Ahora', noReading: 'Aún sin lectura', minAgo: 'min', justNow: 'ahora',

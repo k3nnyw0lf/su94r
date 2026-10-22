@@ -103,7 +103,7 @@ describe('a Dexcom family signs in', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const page = await body(await route('sugar/family', post('sugar/family', signin({ email: 'other@example.test', password: 'nope' })), store, dexcom()));
-      expect(page).toMatch(/child&#39;s own Dexcom login \(a dependent account\)/);
+      expect(page).toMatch(/Share is off or no follower has accepted yet/);
       expect(warn).toHaveBeenCalledWith('sugar/family sign-in refused: dexcom dexcom_credentials');
       expect(JSON.stringify(warn.mock.calls)).not.toContain('example.test');
     } finally { warn.mockRestore(); }

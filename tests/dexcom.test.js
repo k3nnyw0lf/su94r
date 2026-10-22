@@ -65,6 +65,14 @@ describe('Dexcom Share', () => {
     expect(s.calls[0].body.accountName).toBe('+12395550123');
   });
 
+  it('an account id (a UUID) signs in by id directly, without the username step', async () => {
+    const calls = [];
+    const fetchImpl = async (url, init) => { calls.push({ path: new URL(url).pathname, body: JSON.parse(init.body) }); return json('sess-5678'); };
+    const session = await dexcomLogin(' 0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9 ', 'right', { fetchImpl });
+    expect(session.sessionId).toBe('sess-5678');
+    expect(calls).toEqual([{ path: '/ShareWebServices/Services/General/LoginPublisherAccountById', body: { accountId: '0a1b2c3d-4e5f-6071-8293-a4b5c6d7e8f9', password: 'right', applicationId: DEXCOM_APP_ID } }]);
+  });
+
   it('a wrong password is "credentials", too many tries is "locked", an ended session is "auth"', async () => {
     const s = share({ lockAfter: 2 });
     await expect(dexcomLogin('p', 'wrong', { fetchImpl: s.fetchImpl })).rejects.toMatchObject({ code: 'credentials' });
