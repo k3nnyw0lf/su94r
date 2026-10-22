@@ -45,7 +45,7 @@ function dexcom({ password = 'baby-pass', points = null } = {}) {
   return {
     state,
     dexcomLogin: async (user, pw) => { state.logins++; if (pw !== password) throw Object.assign(new Error('bad'), { code: 'credentials' }); return { host: 'share2.dexcom.com', sessionId: 'sess', at: Date.now() }; },
-    dexcomReadings: async () => state.points.slice(),
+    dexcomReadings: async (s, opts) => { state.asked = opts; return state.points.slice(); },
   };
 }
 
@@ -235,7 +235,12 @@ describe('each family sees only itself', () => {
     const store = memStore(); const dx = dexcom();
     await route('sugar/family', post('sugar/family', signin()), store, dx);
     const u = [...store.users.values()][0];
+    // A whole day from Dexcom Share reaches the screen (its menu then offers 24 hours).
+    dx.state.points = [{ t: Date.now() - 30 * 3600e3, mg: 99, trend: 3 }, { t: Date.now() - 20 * 3600e3, mg: 140, trend: 3 }, ...dx.state.points];
+    resetSugarCache();
     const data = await (await familyScreenPayload(ENV, { sugar_user: u.id, name: 'Tesla', kind: 'screen' }, 'data', { sugarStore: store, ...dx })).json();
+    expect(dx.state.asked).toEqual({ minutes: 1440, maxCount: 288 });
+    expect(data.people[0].history.map((q) => q[1])).toEqual([140, 112]);
     expect(data.people.map((p) => p.name)).toEqual(['Sofia']);
     expect(data.screen).toEqual({ name: 'Tesla', kind: 'screen' });
     const glance = await (await familyScreenPayload(ENV, { sugar_user: u.id, name: 'Phone', kind: 'widget' }, 'glance', { sugarStore: store, ...dx })).json();

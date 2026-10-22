@@ -193,16 +193,19 @@ export function dexcomPerson(user, points) {
   };
 }
 
+// Share keeps 24 hours: the family's screens can show a whole day.
+const DEXCOM_DAY = { minutes: 1440, maxCount: 288 };
+
 async function dexcomPeople(store, user, deps) {
   const { readings } = dexcomDeps(deps);
   let s = await dexcomSession(store, user, deps);
   let points;
   try {
-    points = await readings(s, { minutes: 720, maxCount: 144 });
+    points = await readings(s, DEXCOM_DAY);
   } catch (e) {
     if (e.code !== 'auth') throw e;
     s = await dexcomSession(store, user, deps, { fresh: true });
-    points = await readings(s, { minutes: 720, maxCount: 144 });
+    points = await readings(s, DEXCOM_DAY);
   }
   return [dexcomPerson(user, points)];
 }

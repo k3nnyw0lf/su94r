@@ -133,7 +133,7 @@ function graph(p,hours){
   const x=(t)=>40+(t-from)/(to-from)*(W-90),y=(v)=>10+(1-(v-lo)/(hi-lo))*(H-40);
   let s='<svg viewBox="0 0 '+W+' '+H+'"><rect x="40" y="'+y(p.high)+'" width="'+(W-90)+'" height="'+(y(p.low)-y(p.high))+'" fill="var(--band)"/>';
   for(const v of [p.low,p.high])s+='<text x="'+(W-44)+'" y="'+(y(v)+5)+'">'+fmt(v,p.units)+'</text>';
-  const st=hours>6?2*3600e3:3600e3;
+  const st=hours>12?4*3600e3:hours>6?2*3600e3:3600e3;
   for(let t=Math.ceil(from/st)*st;t<to;t+=st){const d=new Date(t);s+='<line x1="'+x(t)+'" x2="'+x(t)+'" y1="10" y2="'+(H-30)+'" stroke="var(--grid)"/><text x="'+x(t)+'" y="'+(H-6)+'" text-anchor="middle">'+((d.getHours()%12)||12)+(d.getHours()<12?'a':'p')+'</text>'}
   let d='',prev=null;for(const [t,v] of pts){d+=(!prev||t-prev>20*60e3?'M':'L')+x(t).toFixed(1)+','+y(v).toFixed(1);prev=t}
   const c=getComputedStyle(document.querySelector('[data-c]')||document.body).getPropertyValue('--c')||'#3fb950';
@@ -143,9 +143,11 @@ function graph(p,hours){
 }
 // ---- layouts: standard, family dashboard, car (chosen on this screen; ?view= also sets it) ----
 function view(){const q=new URLSearchParams(location.search).get('view');if(q==='car'||q==='family'||q==='standard'){try{localStorage.setItem('su94rView',q)}catch(e){}return q}try{return localStorage.getItem('su94rView')||'standard'}catch(e){return 'standard'}}
-// How many hours the graph shows: 3, 6 or 12 (the server sends 12; ?hours= also sets it).
-const SPANS=[3,6,12];
-function hours(){const q=Number(new URLSearchParams(location.search).get('hours'));if(SPANS.includes(q)){try{localStorage.setItem('su94rHours',String(q))}catch(e){}return q}let h=3;try{h=Number(localStorage.getItem('su94rHours'))||3}catch(e){}return SPANS.includes(h)?h:3}
+// How many hours the graph shows: 3, 6, 12 or 24 (?hours= also sets it). 24 is offered only
+// when the server sent more than 12 hours (Dexcom families get a day, Libre about 12 hours).
+const SPANS=[3,6,12,24];
+function spans(){let old=Date.now();for(const p of (data&&data.people)||[])for(const q of p.history||[])if(q[0]<old)old=q[0];return SPANS.filter((h)=>h<24||Date.now()-old>13*3600e3)}
+function hours(){const q=Number(new URLSearchParams(location.search).get('hours'));let h=3;if(SPANS.includes(q)){try{localStorage.setItem('su94rHours',String(q))}catch(e){}h=q}else{try{h=Number(localStorage.getItem('su94rHours'))||3}catch(e){}}const ok=spans();return ok.includes(h)?h:ok.includes(12)&&h>12?12:3}
 const hm=(t)=>new Date(t).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 function lines(p){const x=p.extra||{};const out=[];
   if(x.iob>0)out.push('Active insulin <b>about '+x.iob+' u</b>');
@@ -191,7 +193,7 @@ function viewButton(){
   const b=document.createElement('button');b.id='viewBtn';b.className='viewBtn';b.textContent='◧ View';
   b.onclick=()=>{const old=$('viewMenu');if(old){old.remove();return}const m=document.createElement('div');m.id='viewMenu';m.className='viewMenu';
     m.innerHTML=[['standard','Standard'],['family','Family dashboard'],['car','Car']].map((v)=>'<button data-v="'+v[0]+'" aria-pressed="'+(view()===v[0])+'">'+v[1]+'</button>').join('')+
-      '<span class="viewSep">Graph</span>'+SPANS.map((h)=>'<button data-h="'+h+'" aria-pressed="'+(hours()===h)+'">Last '+h+' hours</button>').join('');
+      '<span class="viewSep">Graph</span>'+spans().map((h)=>'<button data-h="'+h+'" aria-pressed="'+(hours()===h)+'">Last '+h+' hours</button>').join('');
     m.onclick=(e)=>{const v=e.target.getAttribute('data-v'),h=e.target.getAttribute('data-h');if(!v&&!h)return;try{if(v)localStorage.setItem('su94rView',v);if(h)localStorage.setItem('su94rHours',h)}catch(err){}if(location.search)history.replaceState(null,'',location.pathname+location.hash);m.remove();soundButton();render()};
     document.body.appendChild(m)};
   document.body.appendChild(b);

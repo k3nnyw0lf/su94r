@@ -129,7 +129,7 @@ export async function familyScreenPayload(env, screen, kind = 'data', deps = {})
         color: { stale: '#6e7681', urgent: '#ff5d55', low: '#ff5d55', high: '#e3a33b', in: '#3fb950' }[state], t: l.t,
       });
     }
-    const since = now - 12 * 3600e3;
+    const since = now - 24 * 3600e3;
     return jsonRes({
       at: now,
       people: people.map((p) => ({ name: p.name, units: p.units, low: p.low, high: p.high, sensorStart: null, latest: p.latest, history: p.history.filter((q) => q.t >= since).map((q) => [q.t, q.mg]), extra: {} })),
