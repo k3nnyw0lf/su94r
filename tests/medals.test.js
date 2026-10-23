@@ -147,7 +147,10 @@ describe('through the server', () => {
   });
 
   it('only the owner\'s phone changes supplements; they reach the pill list and the refills on Now', async () => {
-    const soon = new Date(Date.now() + 3 * DAY).toISOString().slice(0, 10);
+    // Refill days count in the owner's time zone (New York): build the date there too, or the
+    // test fails between 8 PM and midnight, when the UTC date is already tomorrow.
+    const todayNY = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+    const soon = new Date(Date.parse(`${todayNY}T12:00:00Z`) + 3 * DAY).toISOString().slice(0, 10);
     expect((await call('app/supplements/save', { token: tok('b'), method: 'POST', body: { name: 'Zinc' } })).status).toBe(403);
     expect((await call('app/supplements/save', { token: tok('a'), method: 'POST', body: { name: 'Zinc', times: 'noon' } })).status).toBe(400);
     const saved = await (await call('app/supplements/save', { token: tok('a'), method: 'POST', body: { name: 'Fish oil', dose: '2 softgels', times: '8:00', runsOut: soon } })).json();
