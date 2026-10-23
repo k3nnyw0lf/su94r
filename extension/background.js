@@ -135,9 +135,17 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   await bringInSynced();
-  await poll();
-  if ((await getSettings()).openOnStartup && !(await retired())) openDefault();
+  await poll().catch(() => {});
+  await reopenAtStartup();
 });
+
+// The windows that were open when Chrome closed come back; with none, the startup setting decides.
+async function reopenAtStartup() {
+  if (await retired()) return;
+  const { reopenAtStart = [] } = await local.get('reopenAtStart');
+  if (reopenAtStart.length) for (const key of reopenAtStart) await openWindow(key).catch(() => {});
+  else if ((await getSettings()).openOnStartup) openDefault();
+}
 
 chrome.alarms.onAlarm.addListener(async (a) => {
   if (a.name === 'poll') poll();
@@ -304,6 +312,12 @@ chrome.windows.onRemoved.addListener(async (id) => {
   if (!key) return;
   delete windows[key];
   chrome.storage.session.set({ windows });
+  // Closed by hand, or by Chrome closing everything? Only a Chrome that still has a window a
+  // moment later was not shutting down: then forget it. A shutdown ends this worker first, or
+  // leaves no window, so the window comes back at the next start.
+  setTimeout(async () => {
+    if ((await chrome.windows.getAll().catch(() => [])).length) rememberOpen(key, false);
+  }, 2000);
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
@@ -478,11 +492,20 @@ async function openWindow(key) {
       return;
     } catch { /* closed */ }
   }
-  const { bounds = {} } = await local.get('bounds');
-  const b = bounds[key];
   const board = key === 'board';
   const ai = key.startsWith('ai:');
   const url = board ? 'board.html' : ai ? `ai.html?p=${encodeURIComponent(key.slice(3))}` : `mini.html?p=${encodeURIComponent(key)}`;
+  // Chrome may have brought the window back itself (it restores sessions when set to): use that one.
+  const [shown] = await chrome.runtime.getContexts({ contextTypes: ['TAB'], documentUrls: [chrome.runtime.getURL(url)] });
+  if (shown) {
+    windows[key] = shown.windowId;
+    await chrome.storage.session.set({ windows });
+    await rememberOpen(key, true);
+    chrome.windows.update(shown.windowId, { focused: true, state: 'normal' }).catch(() => {});
+    return;
+  }
+  const { bounds = {} } = await local.get('bounds');
+  const b = bounds[key];
   const w = await chrome.windows.create({
     url: chrome.runtime.getURL(url),
     type: 'popup',
@@ -493,6 +516,19 @@ async function openWindow(key) {
   });
   windows[key] = w.id;
   await chrome.storage.session.set({ windows });
+  await rememberOpen(key, true);
+}
+
+// The open windows, kept where a Chrome restart doesn't clear them (session storage it does).
+let reopenWrites = Promise.resolve();
+function rememberOpen(key, open) {
+  reopenWrites = reopenWrites.then(async () => {
+    const { reopenAtStart = [] } = await local.get('reopenAtStart');
+    const keys = reopenAtStart.filter((k) => k !== key);
+    if (open) keys.push(key);
+    if (keys.length !== reopenAtStart.length || open !== reopenAtStart.includes(key)) await local.set({ reopenAtStart: keys });
+  }).catch(() => {});
+  return reopenWrites;
 }
 
 // ---- accounts ----

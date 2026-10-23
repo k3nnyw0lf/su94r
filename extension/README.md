@@ -9,6 +9,7 @@ Live FreeStyle Libre glucose (or Dexcom, through a su94r family account) on a la
 **See it**
 - **Mini window per person:** reading, trend arrow, change over 15 minutes, a 3-hour to 7-day graph with the target range, and a dotted line showing where the reading is heading over the next 20 minutes.
 - **Always on top:** the pin button floats the window above every app. On Windows, the optional pin helper keeps it there for good, even after a restart.
+- **Comes back:** the windows open when Chrome closes (an update, a crash, a restart) open again when it starts. A window you close yourself stays closed.
 - **Number only:** shrink the window to just the reading; double-click to get the graph back.
 - **Board:** everyone you follow as tiles on one screen, most urgent first. Made for families, care homes and clinics.
 - **Toolbar badge:** the reading (or, for several people, how many need attention), coloured by range.
