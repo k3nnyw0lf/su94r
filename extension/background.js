@@ -19,6 +19,7 @@ import { pullGoogleHealth } from './ghealth.js';
 import { careTick, careRefresh, careClicked } from './care-bg.js';
 import { tempSamples } from './weather.js';
 import { screenData, screenPeople, screenAccountId } from './screen.js';
+import { createWindowAt } from './place.js';
 
 const NAME = 'su94r Mini';
 const KEEP_MS = 24 * 3600e3;
@@ -505,14 +506,18 @@ async function openWindow(key) {
     return;
   }
   const { bounds = {} } = await local.get('bounds');
-  const b = bounds[key];
-  const w = await chrome.windows.create({
+  // A place left on a screen that is gone opens at Chrome's spot; the mini then parks itself
+  // in the bottom-right corner (mini.js) because its old place is forgotten first.
+  const w = await createWindowAt((o) => chrome.windows.create(o), {
     url: chrome.runtime.getURL(url),
     type: 'popup',
     focused: true,
-    width: b?.width || (board ? 900 : ai ? 760 : 360),
-    height: b?.height || (board ? 620 : ai ? 820 : 270),
-    ...(b ? { left: b.left, top: b.top } : {}),
+    width: board ? 900 : ai ? 760 : 360,
+    height: board ? 620 : ai ? 820 : 270,
+  }, bounds[key], async () => {
+    const { bounds: now = {} } = await local.get('bounds');
+    delete now[key];
+    await local.set({ bounds: now });
   });
   windows[key] = w.id;
   await chrome.storage.session.set({ windows });

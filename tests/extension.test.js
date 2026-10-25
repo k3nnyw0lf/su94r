@@ -12,6 +12,7 @@ import {
 import { parseLibreViewCsv } from '../extension/libreview-csv.js';
 import { wholeSeries, findGaps, coverage } from '../extension/archive.js';
 import { parseLibreTime, toPoint } from '../extension/libre.js';
+import { createWindowAt } from '../extension/place.js';
 
 const T0 = Date.UTC(2026, 9, 1, 12);
 const minutes = (n, f) => Array.from({ length: n + 1 }, (_, i) => ({ t: T0 + i * 60e3, mg: f(i) }));
@@ -132,5 +133,46 @@ describe('CSV export', () => {
     expect(csv[0]).toBe('Date,Time,Glucose (mg/dL),Glucose (mmol/L),Marker,Amount,Amount unit,Detail');
     expect(csv[1]).toMatch(/,108,6\.0,,,,$/);
     expect(csv[2]).toMatch(/,,,Meal,45,g carbs,$/);
+  });
+});
+
+describe('opening a window where it was last left', () => {
+  // Chrome refuses a position that is no longer on any screen (a monitor unplugged, a laptop
+  // undocked): "Bounds must be at least 50% within visible screen space". The click then did nothing.
+  const chromeLike = (screens) => {
+    const made = [];
+    const create = async (o) => {
+      if (o.left != null && !screens.some((s) => o.left + o.width / 2 >= s.x && o.left + o.width / 2 <= s.x + s.w && o.top + o.height / 2 >= s.y && o.top + o.height / 2 <= s.y + s.h)) {
+        throw new Error('Invalid value for bounds. Bounds must be at least 50% within visible screen space.');
+      }
+      made.push(o);
+      return { id: made.length, ...o };
+    };
+    return { made, create };
+  };
+  const laptopAndOneWide = [{ x: 0, y: 0, w: 1920, h: 1200 }, { x: 1920, y: 0, w: 3440, h: 1440 }];
+  const opts = { url: 'mini.html?p=x', type: 'popup', focused: true, width: 360, height: 270 };
+
+  it('uses the saved place when it is still on a screen', async () => {
+    const { made, create } = chromeLike(laptopAndOneWide);
+    const w = await createWindowAt(create, opts, { left: 5000, top: 1100, width: 325, height: 268 });
+    expect(w.left).toBe(5000);
+    expect(made).toHaveLength(1);
+  });
+
+  it('a place off every screen opens at Chrome\'s own spot and forgets the old place first', async () => {
+    const { made, create } = chromeLike(laptopAndOneWide);
+    const order = [];
+    const w = await createWindowAt(async (o) => { order.push(o.left == null ? 'plain' : 'saved'); return create(o); }, opts,
+      { left: 5651, top: 1103, width: 325, height: 268 }, async () => { order.push('forget'); });
+    expect(w).toMatchObject({ width: 360, height: 270 });
+    expect(w.left).toBeUndefined();
+    expect(order).toEqual(['saved', 'forget', 'plain']);
+    expect(made).toHaveLength(1);
+  });
+
+  it('with nothing saved, opens plainly', async () => {
+    const { create } = chromeLike(laptopAndOneWide);
+    expect(await createWindowAt(create, opts, undefined)).toMatchObject({ width: 360, height: 270 });
   });
 });
