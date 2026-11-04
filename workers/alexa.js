@@ -18,7 +18,7 @@ import { asMarkers } from './doses.js';
 import { speakForecast } from './forecast.js';
 import { nightSummary, weekLine } from './history.js';
 import { findPatterns } from '../extension/patterns.js';
-import { widgetContent, pushWidget, nightHours } from './widget.js';
+import { widgetContent, pushWidget, nightHours, logTileEvent } from './widget.js';
 
 const MMOL = 18.0182;
 export const MAX_UNITS = 100;
@@ -155,6 +155,7 @@ export function aplDirective(people, lang = 'en') {
  * Removal and update notices need nothing: sending to a user without the tile is harmless.
  */
 async function packageEvent(body, { env, night, getSnapshot, pushTile }) {
+  logTileEvent('my-sugar', body.request);
   const userId = body.context?.System?.user?.userId || null;
   if (/\.UsagesInstalled$/.test(body.request.type) && userId && night?.ready) {
     await night.patch({ alexa_widget_user: userId }).catch(() => {});

@@ -83,6 +83,14 @@ export function widgetContent(p, now = Date.now(), { nightStart = 22, nightEnd =
   };
 }
 
+/**
+ * Tile lifecycle events (installed, removed, updated, InstallationError) go to the function log, so a
+ * device that refuses the tile says why. The request carries no Amazon user id (that is in context).
+ */
+export function logTileEvent(skill, request) {
+  try { console.log(`su94r tile event (${skill}): ${JSON.stringify(request).slice(0, 900)}`); } catch { /* never block the reply */ }
+}
+
 let cached = null;   // { token, until } for the life of the function instance
 export const resetWidgetToken = () => { cached = null; };
 

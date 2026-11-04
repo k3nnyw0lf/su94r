@@ -46,7 +46,7 @@
               { "mode": "HUB", "shape": "RECTANGLE", "minWidth": 1280, "maxWidth": 1920, "minHeight": 600, "maxHeight": 1200 }
             ]
           },
-          { "type": "ALEXA_DATASTORE_PACKAGEMANAGER", "packages": [{ "id": "su94r-glucose" }] },
+          { "type": "ALEXA_DATASTORE_PACKAGEMANAGER", "packages": [{ "id": "su94r-tile" }] },
           { "type": "ALEXA_DATA_STORE" },
           { "type": "ALEXA_EXTENSION", "requestedExtensions": [{ "uri": "alexaext:datastore:10" }] }
         ],

@@ -18,7 +18,7 @@
 import { login as lluLogin, getConnections as lluConnections, getGraph as lluGraph, toPoint } from '../extension/libre.js';
 import { verifyAlexaSignature, AlexaVerifyError } from './alexa-verify.js';
 import { describePerson, aplDirective } from './alexa.js';
-import { widgetContent, pushWidget } from './widget.js';
+import { widgetContent, pushWidget, logTileEvent } from './widget.js';
 import { sha256, randomToken } from './screens.js';
 import { linkPage, deletePage, donePage, docPage } from './sugar-page.js';
 import { legalPage, LEGAL_KINDS } from './sugar-legal.js';
@@ -416,6 +416,7 @@ export async function handleSugarAlexa(request, env, store, deps = {}) {
     return empty;
   }
   if (/^Alexa\.DataStore\.PackageManager\./.test(type)) {
+    logTileEvent('su94r', body.request);
     const u = user || (amazonUser && await store.userByAlexa(amazonUser));
     if (u && /\.UsagesInstalled$/.test(type)) {
       await store.patchUser(u.id, { widget_on: true, alexa_user: amazonUser || u.alexa_user });
